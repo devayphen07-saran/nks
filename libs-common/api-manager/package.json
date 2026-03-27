@@ -1,0 +1,21 @@
+{
+  "name": "@nks/api-manager",
+  "private": true,
+  "version": "1.0.0",
+  "description": "API layer — endpoint definitions and async thunks for NKS",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "sideEffects": false,
+  "scripts": {
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nks/shared-types": "workspace:*",
+    "@reduxjs/toolkit": "^2.5.0",
+    "@tanstack/react-query": "^5.0.0",
+    "axios": "^1.7.9"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2"
+  }
+}

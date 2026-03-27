@@ -1,0 +1,37 @@
+{
+  "name": "@nks/mobile-utils",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Shared utility functions for NKS mobile apps",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "sideEffects": false,
+  "scripts": {
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/netinfo": "^11.4.1",
+    "axios": "^1.7.9",
+    "expo-camera": "~16.0.17",
+    "expo-clipboard": "^55.0.9",
+    "expo-contacts": "^55.0.9",
+    "expo-haptics": "~14.0.1",
+    "expo-image-manipulator": "^55.0.11",
+    "expo-location": "~18.0.7",
+    "expo-notifications": "~0.29.13",
+    "expo-secure-store": "~15.0.8",
+    "expo-sharing": "^55.0.12"
+  },
+  "peerDependencies": {
+    "@react-native-async-storage/async-storage": ">=1.17.0",
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.17",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "typescript": "~5.9.2"
+  }
+}

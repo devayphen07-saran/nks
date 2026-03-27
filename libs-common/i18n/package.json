@@ -1,0 +1,15 @@
+{
+  "name": "@nks/common-i18n",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Shared translation dictionaries and types for NKS",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "sideEffects": false,
+  "scripts": {
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2"
+  }
+}

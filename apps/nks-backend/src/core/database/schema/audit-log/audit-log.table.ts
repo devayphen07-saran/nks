@@ -1,0 +1,60 @@
+import {
+  pgTable,
+  varchar,
+  boolean,
+  text,
+  jsonb,
+  inet,
+  bigint,
+  index,
+} from 'drizzle-orm/pg-core';
+import { auditActionTypeEnum, sessionDeviceTypeEnum } from '../enums/enums';
+import { users } from '../users';
+import { store } from '../store';
+import { userSession } from '../user-session';
+import { appendOnlyEntity } from '../base.entity';
+
+export const auditLogs = pgTable(
+  'audit_logs',
+  {
+    // appendOnlyEntity — rows are immutable; no soft-delete, no update timestamps, no UI flags.
+    ...appendOnlyEntity(),
+
+    userFk: bigint('user_fk', { mode: 'number' }).references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    // storeFk — filter audit history by store; NULL for user-level or system actions.
+    storeFk: bigint('store_fk', { mode: 'number' }).references(() => store.id, {
+      onDelete: 'set null',
+    }),
+    // sessionFk — link action back to the session that caused it; NULL for background jobs.
+    sessionFk: bigint('session_fk', { mode: 'number' }).references(
+      () => userSession.id,
+      {
+        onDelete: 'set null',
+      },
+    ),
+
+    phoneNumber: varchar('phone_number', { length: 20 }),
+    action: auditActionTypeEnum('action').notNull(),
+    entityType: varchar('entity_type', { length: 50 }),
+    entityId: bigint('entity_id', { mode: 'number' }),
+    oldValues: jsonb('old_values'),
+    newValues: jsonb('new_values'),
+    meta: jsonb('meta'),
+    ipAddress: inet('ip_address'),
+    userAgent: text('user_agent'),
+    deviceId: varchar('device_id', { length: 100 }),
+    deviceType: sessionDeviceTypeEnum('device_type'),
+    isSuccess: boolean('is_success').notNull().default(true),
+    failureReason: text('failure_reason'),
+  },
+  (table) => [
+    index('audit_logs_user_idx').on(table.userFk),
+    index('audit_logs_store_idx').on(table.storeFk),
+    index('audit_logs_action_idx').on(table.action),
+  ],
+);
+
+export type AuditLog = typeof auditLogs.$inferSelect;
+export type NewAuditLog = typeof auditLogs.$inferInsert;

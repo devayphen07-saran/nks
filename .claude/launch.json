@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nks-backend",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "nks-backend", "run", "dev"],
+      "port": 4000
+    },
+    {
+      "name": "nks-mobile",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "nks-mobile", "run", "dev"],
+      "port": 8081
+    },
+    {
+      "name": "nks-web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "nks-web", "run", "dev"],
+      "port": 3000
+    }
+  ]
+}

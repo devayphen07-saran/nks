@@ -1,0 +1,18 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "confirm": "Confirm",
+    "loading": "Loading..."
+  },
+  "dashboard": {
+    "title": "Vendor Dashboard",
+    "revenue": "Total Revenue",
+    "recent_orders": "Recent Orders"
+  },
+  "checkout": {
+    "pay": "Pay Now",
+    "total": "Total Amount"
+  }
+}

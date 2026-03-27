@@ -1,0 +1,23 @@
+{
+  "name": "@nks/web-utils",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@nks/api-manager": "workspace:*",
+    "@nks/state-manager": "workspace:*",
+    "@nks/shared-types": "workspace:*",
+    "axios": "^1.7.9",
+    "jwt-decode": "^4.0.0",
+    "lucide-react": "^0.477.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@nks/state-manager",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Redux state management for NKS",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "sideEffects": false,
+  "scripts": {
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@reduxjs/toolkit": "^2.5.0",
+    "react-redux": "^9.2.0",
+    "@nks/api-manager": "workspace:*",
+    "@nks/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2"
+  }
+}

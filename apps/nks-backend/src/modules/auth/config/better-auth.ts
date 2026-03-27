@@ -1,0 +1,130 @@
+import { betterAuth } from 'better-auth';
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { bearer } from 'better-auth/plugins';
+import * as schema from '../../../core/database/schema';
+import { eq } from 'drizzle-orm';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { Logger } from '@nestjs/common';
+
+export const getAuth = (db: NodePgDatabase<typeof schema>) => {
+  return betterAuth({
+    useNumberId: true,
+    baseURL: process.env.BETTER_AUTH_BASE_URL,
+    secret: process.env.BETTER_AUTH_SECRET,
+    advanced: {
+      database: { generateId: false },
+    },
+
+    plugins: [bearer()],
+
+    database: drizzleAdapter(db, {
+      provider: 'pg',
+      schema: {
+        user: schema.users,
+        session: schema.userSession,
+        account: schema.userAuthProvider,
+        verification: schema.otpVerification,
+      },
+    }),
+
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 8,
+    },
+
+    socialProviders: {
+      google: {
+        clientId: process.env.GOOGLE_CLIENT_ID!,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      },
+    },
+
+    user: {
+      additionalFields: {
+        guuid: { type: 'string', required: false },
+        phoneNumber: { type: 'string', required: false },
+        phoneNumberVerified: { type: 'boolean', defaultValue: false },
+        kycLevel: { type: 'number', defaultValue: 0 },
+        languagePreference: { type: 'string', defaultValue: 'en' },
+        whatsappOptedIn: { type: 'boolean', defaultValue: true },
+        isBlocked: { type: 'boolean', defaultValue: false },
+        blockedReason: { type: 'string', required: false },
+        loginCount: { type: 'number', defaultValue: 0 },
+      },
+    },
+
+    session: {
+      hashSessionToken: true,
+      additionalFields: {
+        deviceId: { type: 'string', required: false },
+        deviceName: { type: 'string', required: false },
+        deviceType: { type: 'string', required: false },
+        appVersion: { type: 'string', required: false },
+        activeStoreFk: { type: 'number', required: false },
+      },
+      expiresIn: 60 * 60 * 24 * 30, // 30 days
+      updateAge: 60 * 60 * 24, // refresh if older than 1 day
+    },
+
+    rateLimit: {
+      enabled: true,
+      window: 60,
+      max: 100,
+      customRules: {
+        '/sign-in/email': { window: 60 * 15, max: 5 }, // 5 attempts per 15 min
+        '/sign-up/email': { window: 60 * 10, max: 10 }, // 10 signups per 10 min
+      },
+    },
+
+    databaseHooks: {
+      user: {
+        create: {
+          after: async (user) => {
+            try {
+              const userId = Number(user.id);
+              if (isNaN(userId)) return;
+
+              const [existingSuperAdmin] = await db
+                .select({ id: schema.userRoleMapping.id })
+                .from(schema.userRoleMapping)
+                .innerJoin(
+                  schema.roles,
+                  eq(schema.roles.id, schema.userRoleMapping.roleFk),
+                )
+                .where(eq(schema.roles.code, 'SUPER_ADMIN'))
+                .limit(1);
+
+              if (!existingSuperAdmin) {
+                const [superAdminRole] = await db
+                  .select({ id: schema.roles.id })
+                  .from(schema.roles)
+                  .where(eq(schema.roles.code, 'SUPER_ADMIN'))
+                  .limit(1);
+
+                if (superAdminRole) {
+                  await db.insert(schema.userRoleMapping).values({
+                    userFk: userId,
+                    roleFk: superAdminRole.id,
+                    assignedBy: userId,
+                  });
+                  Logger.log(
+                    `First user (ID: ${userId}) assigned SUPER_ADMIN`,
+                    'Auth',
+                  );
+                }
+              }
+            } catch (err) {
+              Logger.error(
+                'Failed to auto-assign SUPER_ADMIN role',
+                err,
+                'Auth',
+              );
+            }
+          },
+        },
+      },
+    },
+  });
+};
+
+export type Auth = ReturnType<typeof getAuth>;

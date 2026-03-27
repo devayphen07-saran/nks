@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "jsx": "react-native",
+    "baseUrl": ".",
+    "moduleResolution": "node",
+    "paths": {
+      "@nks/mobile-theme": ["../mobile-theme/src"],
+      "@nks/mobile-theme/*": ["../mobile-theme/src/*"],
+      "@nks/mobile-utils": ["../mobile-utils/src"],
+      "@nks/mobile-utils/*": ["../mobile-utils/src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

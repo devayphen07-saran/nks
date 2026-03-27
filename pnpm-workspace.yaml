@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+  - libs-common/*
+  - libs-desktop/*
+  - libs-mobile/*
+  - libs-web/*
+
+nodeLinker: hoisted

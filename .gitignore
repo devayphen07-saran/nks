@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+yarn.lock
+
+# Build outputs
+dist/
+build/
+out/
+.turbo/
+.cache/
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-*
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Environment variables
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+
+# NX cache
+.nx/cache
+.nx/workspace-data
+
+# Build cache
+.turbo/
+
+# Local/Temporary
+*.local
+.cache/
+.tmp/
+temp/
+tmp/

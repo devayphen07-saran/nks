@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-native",
+    "lib": ["esnext"],
+    "module": "esnext",
+    "moduleResolution": "node",
+    "target": "esnext",
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@nks/common-i18n": ["../../libs-common/i18n/src"],
+      "@nks/common-i18n/*": ["../../libs-common/i18n/src/*"]
+    }
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,37 @@
+{
+  "name": "nks",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nx run-many -t dev --parallel",
+    "build": "nx run-many -t build",
+    "lint": "nx run-many -t lint",
+    "test": "nx run-many -t test",
+    "clean": "nx run-many -t clean",
+    "affected:build": "nx affected -t build",
+    "affected:lint": "nx affected -t lint",
+    "affected:test": "nx affected -t test",
+    "graph": "nx graph"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=10"
+  },
+  "devDependencies": {
+    "nx": "22.5.4"
+  },
+  "pnpm": {
+    "overrides": {
+      "react": "19.1.0",
+      "react-native": "0.81.5",
+      "styled-components": "^6.3.11",
+      "@react-native-async-storage/async-storage": "2.2.0"
+    }
+  },
+  "dependencies": {
+    "@react-navigation/drawer": "^7.9.7",
+    "react-native-gesture-handler": "^2.30.0",
+    "react-native-reanimated": "^4.3.0",
+    "uuid": "^13.0.0"
+  }
+}
