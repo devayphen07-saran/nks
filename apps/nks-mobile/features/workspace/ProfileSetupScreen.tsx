@@ -63,7 +63,7 @@ export function ProfileSetupScreen() {
           email: data.email,
           password: data.password,
         },
-      })
+      }),
     );
 
     if (profileComplete.fulfilled.match(result)) {
@@ -85,9 +85,7 @@ export function ProfileSetupScreen() {
 
   return (
     <Container>
-      <KeyboardAvoiding
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
+      <KeyboardAvoiding behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <ScrollArea
           contentContainerStyle={{ flexGrow: 1 }}
           keyboardShouldPersistTaps="handled"
@@ -136,11 +134,7 @@ export function ProfileSetupScreen() {
 
             {/* Info Banner */}
             <InfoBanner>
-              <LucideIcon
-                name="Info"
-                size={18}
-                color={theme.colorWarning}
-              />
+              <LucideIcon name="Info" size={18} color={theme.colorWarning} />
               <InfoBannerText>
                 <Typography.Caption type="secondary">
                   You logged in with phone number. Please set your email and

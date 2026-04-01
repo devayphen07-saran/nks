@@ -1,10 +1,11 @@
 import { ScrollView } from "react-native";
+import { useRouter } from "expo-router";
 import styled from "styled-components/native";
-import { 
-  Column, 
-  Row, 
-  Typography, 
-  LucideIcon, 
+import {
+  Column,
+  Row,
+  Typography,
+  LucideIcon,
   Header,
   Button,
   MetricCard
@@ -16,6 +17,7 @@ import { WelcomeBanner, ExpenseRow } from "./components";
 import type { ExpenseItem } from "./components/ExpenseRow";
 
 export function PersonalScreen() {
+  const router = useRouter();
   const { theme } = useMobileTheme();
   const user = useAuth().authResponse?.data?.user;
   const { logout } = useLogout();
@@ -108,6 +110,21 @@ export function PersonalScreen() {
               </ActionButton>
             </Row>
           </Section>
+
+          {/* Debug Button (Dev Only) */}
+          {__DEV__ && (
+            <Section gap="medium">
+              <ActionButton
+                flex={1}
+                onPress={() => router.push("/(protected)/(workspace)/(app)/(debug)/database")}
+              >
+                <LucideIcon name="Database" size={24} color={theme.colorWarning} />
+                <Typography.Caption weight="semiBold" style={{ marginTop: 4, color: theme.colorWarning }}>
+                  🔧 Database Debug
+                </Typography.Caption>
+              </ActionButton>
+            </Section>
+          )}
         </Column>
       </ScrollArea>
     </ScreenContainer>

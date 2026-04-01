@@ -217,4 +217,25 @@ export class StoreRepository {
       .limit(1);
     return result || null;
   }
+
+  /**
+   * Check if a user has access to a store (owned or staff).
+   * Returns true if user has any role mapping to the store.
+   */
+  async userHasAccessToStore(
+    userId: number,
+    storeId: number,
+  ): Promise<boolean> {
+    const [result] = await this.db
+      .select({ id: schema.userRoleMapping.id })
+      .from(schema.userRoleMapping)
+      .where(
+        and(
+          eq(schema.userRoleMapping.userFk, userId),
+          eq(schema.userRoleMapping.storeFk, storeId),
+        ),
+      )
+      .limit(1);
+    return !!result;
+  }
 }

@@ -5,6 +5,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import { setupSwagger } from './config/swagger.config';
 import { buildCorsConfig } from './config/cors.config';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import {
@@ -13,6 +14,7 @@ import {
   LoggingInterceptor,
 } from './common/interceptors';
 import { validateEnv } from './config/env.validation';
+import { CsrfMiddleware } from './common/middleware/csrf.middleware';
 
 // ─── Env Validation ──────────────────────────────────────────────────────────
 // Validate all required environment variables before anything else in the app.
@@ -26,18 +28,57 @@ async function bootstrap() {
 
   app.useLogger(app.get(Logger));
 
-  // ─── Security ─────────────────────────────────────────────────────────────
-  app.use(helmet());
-
   // ─── Config ───────────────────────────────────────────────────────────────
   const configService = app.get(ConfigService);
   const port = configService.get<number>('app.port') ?? 4000;
+  const nodeEnv = configService.get('NODE_ENV') || 'development';
+
+  // ─── Security: Helmet with CSP Headers ────────────────────────────────────
+  // ✅ Content Security Policy (CSP) - prevents XSS attacks
+  // ✅ X-Frame-Options - prevents clickjacking
+  // ✅ X-Content-Type-Options - prevents MIME type sniffing
+  // ✅ Strict-Transport-Security - enforces HTTPS
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"], // Needed for styled-components
+          imgSrc: ["'self'", 'https:', 'data:'],
+          fontSrc: ["'self'", 'https:'],
+          connectSrc: ["'self'", 'https:'],
+          frameSrc: ["'none'"], // Prevent framing (clickjacking)
+          formAction: ["'self'"], // Prevent form submission to external sites
+          baseUri: ["'self'"],
+          objectSrc: ["'none'"],
+        },
+      },
+      hsts: {
+        maxAge: 31536000, // 1 year
+        includeSubDomains: nodeEnv === 'production',
+        preload: nodeEnv === 'production',
+      },
+      frameguard: { action: 'deny' }, // Prevent clickjacking
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    }),
+  );
 
   // ─── Global Prefix ────────────────────────────────────────────────────────
   app.setGlobalPrefix('api/v1');
 
   // ─── CORS ─────────────────────────────────────────────────────────────────
   app.enableCors(buildCorsConfig(configService));
+
+  // ✅ CRITICAL: Cookie Parser Middleware (must be FIRST before other middleware)
+  // This parses Cookie headers into request.cookies object
+  // Without this, request.headers.cookie is unparseable
+  app.use(cookieParser());
+
+  // ─── CSRF Protection ──────────────────────────────────────────────────────
+  // ✅ Prevents cross-site request forgery attacks
+  const csrfMiddleware = new CsrfMiddleware();
+  app.use(csrfMiddleware.use.bind(csrfMiddleware));
 
   // ─── Swagger ──────────────────────────────────────────────────────────────
   setupSwagger(app);
@@ -59,4 +100,7 @@ async function bootstrap() {
   logger.log(`🚀 Backend running on: http://localhost:${port}/api/v1`);
   logger.log(`📚 Swagger docs at:    http://localhost:${port}/api/v1/docs`);
 }
-bootstrap();
+bootstrap().catch((error) => {
+  console.error('Failed to start application:', error);
+  process.exit(1);
+});

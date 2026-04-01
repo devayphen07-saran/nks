@@ -20,8 +20,8 @@ import { ErrorCode } from '../../common/constants/error-codes.constants';
 @Injectable()
 export class StaffInviteService {
   constructor(
-    private readonly inviteRepo: StaffInviteRepository,
-    private readonly rolesRepo: RolesRepository,
+    private readonly staffInviteRepository: StaffInviteRepository,
+    private readonly rolesRepository: RolesRepository,
     private readonly txService: TransactionService,
     private readonly authService: AuthService,
   ) {}
@@ -32,7 +32,7 @@ export class StaffInviteService {
    */
   async inviteStaff(ownerId: number, dto: InviteStaffDto) {
     // 1. Verify caller is STORE_OWNER and get their store
-    const storeFk = await this.inviteRepo.findOwnerStore(ownerId);
+    const storeFk = await this.staffInviteRepository.findOwnerStore(ownerId);
     if (storeFk == null) {
       throw new ForbiddenException({
         errorCode: ErrorCode.FORBIDDEN,
@@ -41,7 +41,7 @@ export class StaffInviteService {
     }
 
     // 2. Validate role
-    const role = await this.rolesRepo.findByCode(dto.roleCode);
+    const role = await this.rolesRepository.findByCode(dto.roleCode);
     if (!role) {
       throw new BadRequestException({
         errorCode: ErrorCode.ROLE_NOT_FOUND,
@@ -52,7 +52,7 @@ export class StaffInviteService {
     // 3. Validate permission IDs exist (bulk check avoids N+1)
     if (dto.permissionIds.length > 0) {
       for (const permId of dto.permissionIds) {
-        const perm = await this.rolesRepo.findPermissionById(permId);
+        const perm = await this.rolesRepository.findPermissionById(permId);
         if (!perm) {
           throw new BadRequestException({
             errorCode: ErrorCode.VALIDATION_ERROR,
@@ -63,7 +63,7 @@ export class StaffInviteService {
     }
 
     // 4. Pre-link inviteeFk if the invitee already has an account
-    const existingUser = await this.inviteRepo.findUserByEmail(
+    const existingUser = await this.staffInviteRepository.findUserByEmail(
       dto.inviteeEmail,
     );
 
@@ -73,7 +73,7 @@ export class StaffInviteService {
 
     // 6. Create invite + permission rows atomically
     const invite = await this.txService.run(async (tx) => {
-      const created = await this.inviteRepo.create(
+      const created = await this.staffInviteRepository.create(
         {
           storeFk,
           invitedByFk: ownerId,
@@ -90,7 +90,7 @@ export class StaffInviteService {
 
       // Insert permissions into staff_invite_permission junction table
       if (dto.permissionIds.length > 0) {
-        await this.inviteRepo.createPermissions(
+        await this.staffInviteRepository.createPermissions(
           created.id,
           dto.permissionIds,
           tx,
@@ -117,7 +117,7 @@ export class StaffInviteService {
    */
   async acceptInvite(userId: number, dto: AcceptInviteDto) {
     // 1. Find invite
-    const invite = await this.inviteRepo.findByToken(dto.token);
+    const invite = await this.staffInviteRepository.findByToken(dto.token);
     if (!invite) {
       throw new NotFoundException({
         errorCode: ErrorCode.NOT_FOUND,
@@ -136,7 +136,8 @@ export class StaffInviteService {
       }
     } else {
       // Invitee registered after the invite was created — fall back to email check
-      const userEmail = await this.inviteRepo.findUserEmailById(userId);
+      const userEmail =
+        await this.staffInviteRepository.findUserEmailById(userId);
       if (
         !userEmail ||
         userEmail.toLowerCase() !== invite.inviteeEmail.toLowerCase()
@@ -149,7 +150,9 @@ export class StaffInviteService {
     }
 
     // 3. Fetch the live permission IDs from the junction table (FKs guarantee these exist)
-    const permissionIds = await this.inviteRepo.findPermissionIds(invite.id);
+    const permissionIds = await this.staffInviteRepository.findPermissionIds(
+      invite.id,
+    );
 
     // 4. Execute atomically
     await this.txService.run(async (tx) => {
@@ -166,7 +169,7 @@ export class StaffInviteService {
 
       // b. Assign direct permissions (only those still alive in the DB)
       if (permissionIds.length > 0 && invite.storeFk != null) {
-        await this.rolesRepo.setUserDirectPermissions(
+        await this.rolesRepository.setUserDirectPermissions(
           userId,
           invite.storeFk,
           permissionIds,
@@ -177,11 +180,15 @@ export class StaffInviteService {
 
       // c. Backfill inviteeFk if the invitee was not yet registered at invite creation
       if (invite.inviteeFk == null) {
-        await this.inviteRepo.backfillInviteeFk(invite.id, userId, tx);
+        await this.staffInviteRepository.backfillInviteeFk(
+          invite.id,
+          userId,
+          tx,
+        );
       }
 
       // d. Mark invite as accepted
-      await this.inviteRepo.markAccepted(invite.id, userId, tx);
+      await this.staffInviteRepository.markAccepted(invite.id, userId, tx);
 
       // e. Initialize session with the store context
       await tx
@@ -198,14 +205,14 @@ export class StaffInviteService {
    * List all accepted staff for the owner's store.
    */
   async listStaff(ownerId: number) {
-    const storeFk = await this.inviteRepo.findOwnerStore(ownerId);
+    const storeFk = await this.staffInviteRepository.findOwnerStore(ownerId);
     if (storeFk == null) {
       throw new ForbiddenException({
         errorCode: ErrorCode.FORBIDDEN,
         message: 'Only store owners can view staff',
       });
     }
-    return this.inviteRepo.findStaffByStore(storeFk);
+    return this.staffInviteRepository.findStaffByStore(storeFk);
   }
 
   /**
@@ -216,7 +223,7 @@ export class StaffInviteService {
     staffUserId: number,
     dto: UpdateStaffPermissionsDto,
   ) {
-    const storeFk = await this.inviteRepo.findOwnerStore(ownerId);
+    const storeFk = await this.staffInviteRepository.findOwnerStore(ownerId);
     if (storeFk == null) {
       throw new ForbiddenException({
         errorCode: ErrorCode.FORBIDDEN,
@@ -226,7 +233,7 @@ export class StaffInviteService {
 
     if (dto.permissionIds.length > 0) {
       for (const permId of dto.permissionIds) {
-        const perm = await this.rolesRepo.findPermissionById(permId);
+        const perm = await this.rolesRepository.findPermissionById(permId);
         if (!perm) {
           throw new BadRequestException({
             errorCode: ErrorCode.VALIDATION_ERROR,
@@ -236,7 +243,7 @@ export class StaffInviteService {
       }
     }
 
-    await this.rolesRepo.setUserDirectPermissions(
+    await this.rolesRepository.setUserDirectPermissions(
       staffUserId,
       storeFk,
       dto.permissionIds,

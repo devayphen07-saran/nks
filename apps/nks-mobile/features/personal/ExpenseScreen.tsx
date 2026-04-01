@@ -183,7 +183,8 @@ const IconCircle = styled.View`
 const Separator = styled.View`
   height: 1px;
   background-color: ${({ theme }) => theme.colorBorderSecondary};
-  margin-vertical: ${({ theme }) => theme.sizing.small}px;
+  margin-top: ${({ theme }) => theme.sizing.small}px;
+  margin-bottom: ${({ theme }) => theme.sizing.small}px;
 `;
 
 const EmptyState = styled(Column)`

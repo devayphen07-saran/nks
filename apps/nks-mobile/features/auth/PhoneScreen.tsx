@@ -1,7 +1,13 @@
-import { Platform, KeyboardAvoidingView } from "react-native";
+import {
+  Platform,
+  KeyboardAvoidingView,
+  Modal,
+  FlatList,
+  Pressable,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import styled from "styled-components/native";
 import {
   Button,
@@ -15,10 +21,21 @@ import {
   sendOtp,
   type RequestParams,
   type SendOtpRequest,
+  getPublicDialCodes,
 } from "@nks/api-manager";
 import { useRootDispatch } from "../../store";
 
-const COUNTRY_CODE = "91";
+// Country data type (matches backend response)
+interface Country {
+  id: number;
+  countryName: string;
+  isoCode2: string;
+  dialCode: string;
+  currencyCode: string;
+  currencySymbol: string;
+  timezone: string;
+  isActive?: boolean;
+}
 
 const CARD_SHADOW = {
   shadowColor: "#000000",
@@ -39,18 +56,71 @@ export function PhoneScreen() {
   const [isFocused, setIsFocused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [countries, setCountries] = useState<Country[]>([]);
+  const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
+  const [countriesLoading, setCountriesLoading] = useState(true);
+
+  // Fetch countries on component mount
+  useEffect(() => {
+    const loadCountries = async () => {
+      try {
+        // Use api-manager thunk to fetch public dial codes (no auth required)
+        const result = await dispatch(getPublicDialCodes({}));
+
+        if (getPublicDialCodes.fulfilled.match(result)) {
+          const data = result.payload?.data as Country[];
+          if (data && Array.isArray(data)) {
+            // Filter to show only active countries (extra safety - backend already filters)
+            const activeCountries = data.filter((c) => c.isActive !== false);
+            setCountries(activeCountries);
+
+            // Default to India if available, else first active country
+            const india = activeCountries.find((c) => c.isoCode2 === "IN");
+            setSelectedCountry(india || activeCountries[0]);
+          }
+        } else {
+          // Fallback on error
+          throw new Error("Failed to fetch countries");
+        }
+      } catch (error) {
+        console.error("Failed to fetch countries:", error);
+        // Fallback to India
+        setSelectedCountry({
+          id: 1,
+          countryName: "India",
+          isoCode2: "IN",
+          dialCode: "+91",
+          currencyCode: "INR",
+          currencySymbol: "₹",
+          timezone: "Asia/Kolkata",
+          isActive: true,
+        });
+      } finally {
+        setCountriesLoading(false);
+      }
+    };
+
+    loadCountries();
+  }, [dispatch]);
 
   const handleSendOtp = async () => {
-    if (isLoading) return;
+    if (isLoading || !selectedCountry) return;
     const digits = phone.trim();
-    if (digits.length !== 10) {
-      setErrorMessage("Enter a valid 10-digit mobile number");
+
+    // Validate phone number (basic check - country-specific validation can be added later)
+    if (digits.length < 9 || digits.length > 15) {
+      setErrorMessage("Enter a valid mobile number");
       return;
     }
+
     setErrorMessage(null);
     setIsLoading(true);
     try {
-      const fullPhone = COUNTRY_CODE + digits;
+      // Combine dial code with phone number (remove leading + if present)
+      const dialCode = selectedCountry.dialCode.replace(/\D/g, "");
+      const fullPhone = "+" + dialCode + digits;
+
       const params: RequestParams<SendOtpRequest> = {
         bodyParam: { phone: fullPhone },
       };
@@ -64,7 +134,7 @@ export function PhoneScreen() {
       } else {
         setErrorMessage(
           (result.payload as any)?.message ??
-            "Failed to send OTP. Please try again."
+            "Failed to send OTP. Please try again.",
         );
       }
     } catch {
@@ -136,28 +206,103 @@ export function PhoneScreen() {
                   $isFocused={isFocused}
                   $hasError={errorMessage !== null}
                 >
-                  <CountryCodeBadge>
-                    <Typography.Body weight="semiBold" color={theme.colorText}>
-                      🇮🇳 +91
-                    </Typography.Body>
-                  </CountryCodeBadge>
+                  <CountryCodeButton
+                    onPress={() => setShowCountryPicker(true)}
+                    disabled={countriesLoading}
+                  >
+                    <CountryCodeContent>
+                      <CountryFlag>
+                        {getCountryFlag(selectedCountry?.isoCode2)}
+                      </CountryFlag>
+                      <Typography.Body
+                        weight="semiBold"
+                        color={theme.colorText}
+                      >
+                        {selectedCountry?.dialCode || "+91"}
+                      </Typography.Body>
+                      <DropdownIcon>
+                        <LucideIcon
+                          name="ChevronDown"
+                          size={16}
+                          color={theme.colorTextSecondary}
+                        />
+                      </DropdownIcon>
+                    </CountryCodeContent>
+                  </CountryCodeButton>
+
                   <PhoneInput
                     value={phone}
                     onFocus={() => setIsFocused(true)}
                     onBlur={() => setIsFocused(false)}
                     onChangeText={(t) => {
                       setErrorMessage(null);
-                      setPhone(t.replace(/[^0-9]/g, "").slice(0, 10));
+                      setPhone(t.replace(/[^0-9]/g, "").slice(0, 15));
                     }}
-                    placeholder="98765 43210"
+                    placeholder="Phone number"
                     placeholderTextColor={theme.colorTextTertiary}
                     keyboardType="phone-pad"
-                    maxLength={10}
+                    maxLength={15}
                     returnKeyType="done"
                     onSubmitEditing={handleSendOtp}
                     autoFocus
                   />
                 </PhoneInputRow>
+
+                {/* Country Picker Modal */}
+                <Modal
+                  visible={showCountryPicker}
+                  transparent
+                  animationType="slide"
+                  onRequestClose={() => setShowCountryPicker(false)}
+                >
+                  <CountryPickerContainer>
+                    <CountryPickerHeader>
+                      <Typography.H5 weight="bold" color={theme.colorText}>
+                        Select Country
+                      </Typography.H5>
+                      <Pressable onPress={() => setShowCountryPicker(false)}>
+                        <LucideIcon
+                          name="X"
+                          size={24}
+                          color={theme.colorText}
+                        />
+                      </Pressable>
+                    </CountryPickerHeader>
+
+                    <FlatList
+                      data={countries}
+                      keyExtractor={(item) => item.isoCode2}
+                      renderItem={({ item }) => (
+                        <CountryOption
+                          onPress={() => {
+                            setSelectedCountry(item);
+                            setShowCountryPicker(false);
+                            setPhone("");
+                            setErrorMessage(null);
+                          }}
+                        >
+                          <CountryOptionContent>
+                            <Typography.Body color={theme.colorText}>
+                              {getCountryFlag(item.isoCode2)} {item.countryName}
+                            </Typography.Body>
+                            <Typography.Caption
+                              color={theme.colorTextSecondary}
+                            >
+                              {item.dialCode}
+                            </Typography.Caption>
+                          </CountryOptionContent>
+                          {selectedCountry?.isoCode2 === item.isoCode2 && (
+                            <LucideIcon
+                              name="Check"
+                              size={20}
+                              color={theme.colorPrimary}
+                            />
+                          )}
+                        </CountryOption>
+                      )}
+                    />
+                  </CountryPickerContainer>
+                </Modal>
 
                 {errorMessage !== null && (
                   <ErrorBanner gap="xSmall" align="center">
@@ -180,7 +325,12 @@ export function PhoneScreen() {
                   loading={isLoading}
                   style={{ borderRadius: 14 }}
                 />
-                <InfoRow gap={8} align="center" justify="center" style={{ marginTop: 8 }}>
+                <InfoRow
+                  gap={8}
+                  align="center"
+                  justify="center"
+                  style={{ marginTop: 8 }}
+                >
                   <LucideIcon
                     name="ShieldCheck"
                     size={14}
@@ -213,6 +363,19 @@ export function PhoneScreen() {
       </KeyboardAvoiding>
     </Container>
   );
+}
+
+// ─── Helper Functions ─────────────────────────────────────────────────────
+
+function getCountryFlag(isoCode?: string): string {
+  if (!isoCode || isoCode.length !== 2) return "🌍";
+
+  // Convert ISO 3166-1 alpha-2 to flag emoji
+  const codePoints = isoCode
+    .toUpperCase()
+    .split("")
+    .map((char) => 127397 + char.charCodeAt(0));
+  return String.fromCodePoint(...codePoints);
 }
 
 // ─── Styled Components ────────────────────────────────────────────────────────
@@ -324,7 +487,10 @@ const PhoneLabel = styled(Typography.Caption)`
   font-weight: 500;
 `;
 
-const PhoneInputRow = styled.View<{ $isFocused?: boolean; $hasError?: boolean }>`
+const PhoneInputRow = styled.View<{
+  $isFocused?: boolean;
+  $hasError?: boolean;
+}>`
   flex-direction: row;
   align-items: center;
   border-width: 1.5px;
@@ -332,8 +498,8 @@ const PhoneInputRow = styled.View<{ $isFocused?: boolean; $hasError?: boolean }>
     $hasError
       ? theme.colorError
       : $isFocused
-      ? theme.colorPrimary
-      : theme.colorBorder};
+        ? theme.colorPrimary
+        : theme.colorBorder};
   border-radius: ${({ theme }) => theme.borderRadius.regular}px;
   background-color: ${({ theme, $isFocused }) =>
     $isFocused ? theme.colorBgLayout : theme.colorBgContainer};
@@ -341,7 +507,7 @@ const PhoneInputRow = styled.View<{ $isFocused?: boolean; $hasError?: boolean }>
   min-height: 56px;
 `;
 
-const CountryCodeBadge = styled.View`
+const CountryCodeButton = styled.Pressable`
   padding-left: ${({ theme }) => theme.sizing.small}px;
   padding-right: ${({ theme }) => theme.sizing.small}px;
   padding-top: ${({ theme }) => theme.sizing.small}px;
@@ -349,6 +515,51 @@ const CountryCodeBadge = styled.View`
   border-right-width: 1px;
   border-right-color: ${({ theme }) => theme.colorBorderSecondary};
   background-color: ${({ theme }) => theme.colorBgLayout};
+  justify-content: center;
+  align-items: center;
+`;
+
+const CountryCodeContent = styled(Row)`
+  gap: ${({ theme }) => theme.sizing.xSmall}px;
+  align-items: center;
+`;
+
+const CountryFlag = styled.Text`
+  font-size: 20px;
+  line-height: 24px;
+`;
+
+const DropdownIcon = styled.View`
+  margin-left: ${({ theme }) => theme.sizing.xSmall}px;
+`;
+
+const CountryPickerContainer = styled.View`
+  flex: 1;
+  background-color: ${({ theme }) => theme.colorBgContainer};
+`;
+
+const CountryPickerHeader = styled(Row)`
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: ${({ theme }) => theme.sizing.large}px;
+  border-bottom-width: 1px;
+  border-bottom-color: ${({ theme }) => theme.colorBorder};
+`;
+
+const CountryOption = styled.Pressable`
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: ${({ theme }) => theme.sizing.medium}px
+    ${({ theme }) => theme.sizing.large}px;
+  border-bottom-width: 1px;
+  border-bottom-color: ${({ theme }) => theme.colorBgLayout};
+`;
+
+const CountryOptionContent = styled(Column)`
+  flex: 1;
+  gap: ${({ theme }) => theme.sizing.xSmall}px;
 `;
 
 const PhoneInput = styled.TextInput`

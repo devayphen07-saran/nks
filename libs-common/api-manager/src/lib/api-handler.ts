@@ -149,3 +149,4 @@ export interface RequestParamsMultiPart<T> {
   queryParam?: string;
   pathParam?: PathRecord;
 }
+

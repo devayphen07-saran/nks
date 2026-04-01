@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { RolesRepository } from './roles.repository';
 import { CreateRoleDto, UpdateRoleDto, CreatePermissionDto } from './dto';
 import {
@@ -10,16 +10,20 @@ import { ErrorCode } from '../../common/constants/error-codes.constants';
 
 @Injectable()
 export class RolesService {
-  constructor(private readonly repo: RolesRepository) {}
+  private readonly logger = new Logger(RolesService.name);
+
+  constructor(private readonly rolesRepository: RolesRepository) {}
 
   // ─── Roles ────────────────────────────────────────────────────────────────
 
-  async listRoles() {
-    return this.repo.findAll();
+  async listRoles(
+    opts: { search?: string; page?: number; pageSize?: number } = {},
+  ) {
+    return this.rolesRepository.findAll(opts);
   }
 
   async getRole(id: number) {
-    const role = await this.repo.findById(id);
+    const role = await this.rolesRepository.findById(id);
     if (!role)
       throw new NotFoundException({
         errorCode: ErrorCode.ROLE_NOT_FOUND,
@@ -29,14 +33,14 @@ export class RolesService {
   }
 
   async createRole(dto: CreateRoleDto, createdBy: number) {
-    const existing = await this.repo.findByCode(dto.code);
+    const existing = await this.rolesRepository.findByCode(dto.code);
     if (existing) {
       throw new ConflictException({
         errorCode: ErrorCode.ROLE_ALREADY_EXISTS,
         message: `Role code '${dto.code}' already exists`,
       });
     }
-    return this.repo.create({
+    const created = await this.rolesRepository.create({
       roleName: dto.name,
       code: dto.code,
       description: dto.description,
@@ -44,10 +48,12 @@ export class RolesService {
       isSystem: dto.isSystem,
       createdBy,
     });
+    this.logger.log(`Created role: ${dto.code} by user ${createdBy}`);
+    return created;
   }
 
   async updateRole(id: number, dto: UpdateRoleDto, modifiedBy: number) {
-    const role = await this.repo.findById(id);
+    const role = await this.rolesRepository.findById(id);
     if (!role)
       throw new NotFoundException({
         errorCode: ErrorCode.ROLE_NOT_FOUND,
@@ -59,7 +65,7 @@ export class RolesService {
         message: 'System roles cannot be modified',
       });
     }
-    const updated = await this.repo.update(id, {
+    const updated = await this.rolesRepository.update(id, {
       roleName: dto.name,
       description: dto.description,
       sortOrder: dto.sortOrder,
@@ -70,11 +76,12 @@ export class RolesService {
         errorCode: ErrorCode.ROLE_NOT_FOUND,
         message: 'Role not found',
       });
+    this.logger.log(`Updated role ${id} by user ${modifiedBy}`);
     return updated;
   }
 
   async deleteRole(id: number, deletedBy: number) {
-    const role = await this.repo.findById(id);
+    const role = await this.rolesRepository.findById(id);
     if (!role)
       throw new NotFoundException({
         errorCode: ErrorCode.ROLE_NOT_FOUND,
@@ -86,17 +93,18 @@ export class RolesService {
         message: 'System roles cannot be deleted',
       });
     }
-    await this.repo.softDelete(id, deletedBy);
+    await this.rolesRepository.softDelete(id, deletedBy);
+    this.logger.log(`Deleted role ${id} by user ${deletedBy}`);
   }
 
   // ─── Permissions ──────────────────────────────────────────────────────────
 
   async listPermissions(resource?: string) {
-    return this.repo.findAllPermissions(resource);
+    return this.rolesRepository.findAllPermissions(resource);
   }
 
   async createPermission(dto: CreatePermissionDto) {
-    return this.repo.createPermission({
+    return this.rolesRepository.createPermission({
       name: dto.name,
       code: dto.code,
       resource: dto.resource,
@@ -107,7 +115,7 @@ export class RolesService {
 
   async getRolePermissions(roleId: number) {
     await this.getRole(roleId); // ensures role exists
-    return this.repo.findRolePermissions(roleId);
+    return this.rolesRepository.findRolePermissions(roleId);
   }
 
   async assignPermissionToRole(
@@ -116,8 +124,8 @@ export class RolesService {
     assignedBy: number,
   ) {
     const [role, perm] = await Promise.all([
-      this.repo.findById(roleId),
-      this.repo.findPermissionById(permissionId),
+      this.rolesRepository.findById(roleId),
+      this.rolesRepository.findPermissionById(permissionId),
     ]);
     if (!role)
       throw new NotFoundException({
@@ -129,28 +137,42 @@ export class RolesService {
         errorCode: ErrorCode.PERMISSION_NOT_FOUND,
         message: 'Permission not found',
       });
-    await this.repo.assignPermissionToRole(roleId, permissionId, assignedBy);
+    await this.rolesRepository.assignPermissionToRole(
+      roleId,
+      permissionId,
+      assignedBy,
+    );
   }
 
   async revokePermissionFromRole(roleId: number, permissionId: number) {
     await this.getRole(roleId);
-    await this.repo.revokePermissionFromRole(roleId, permissionId);
+    await this.rolesRepository.revokePermissionFromRole(roleId, permissionId);
   }
 
   // ─── User ↔ Role Assignment ───────────────────────────────────────────────
 
   async assignRoleToUser(userId: number, roleId: number, assignedBy: number) {
-    const role = await this.repo.findById(roleId);
+    const role = await this.rolesRepository.findById(roleId);
     if (!role)
       throw new NotFoundException({
         errorCode: ErrorCode.ROLE_NOT_FOUND,
         message: 'Role not found',
       });
-    await this.repo.assignRoleToUser(userId, roleId, assignedBy);
+    await this.rolesRepository.assignRoleToUser(userId, roleId, assignedBy);
+  }
+
+  /** Temporarily suspend a user's role (isActive=false). Keeps audit trail intact. */
+  async suspendUserRole(userId: number, roleId: number) {
+    return this.rolesRepository.setUserRoleMappingActive(userId, roleId, false);
+  }
+
+  /** Re-enable a previously suspended user role. */
+  async restoreUserRole(userId: number, roleId: number) {
+    return this.rolesRepository.setUserRoleMappingActive(userId, roleId, true);
   }
 
   async revokeRoleFromUser(userId: number, roleId: number, assignedBy: number) {
-    const role = await this.repo.findById(roleId);
+    const role = await this.rolesRepository.findById(roleId);
     if (!role)
       throw new NotFoundException({
         errorCode: ErrorCode.ROLE_NOT_FOUND,
@@ -163,7 +185,7 @@ export class RolesService {
         message: 'Cannot revoke SUPER_ADMIN from yourself',
       });
     }
-    await this.repo.revokeRoleFromUser(userId, roleId);
+    await this.rolesRepository.revokeRoleFromUser(userId, roleId);
   }
 
   // ─── Permission Checking ──────────────────────────────────────────────────
@@ -180,7 +202,7 @@ export class RolesService {
     resource: string,
     action: string,
   ): Promise<boolean> {
-    return this.repo.checkUserPermission(userId, resource, action);
+    return this.rolesRepository.checkUserPermission(userId, resource, action);
   }
 
   /**
@@ -189,7 +211,7 @@ export class RolesService {
    * @returns List of permissions
    */
   async getUserPermissions(userId: number) {
-    return this.repo.getUserPermissions(userId);
+    return this.rolesRepository.getUserPermissions(userId);
   }
 
   /**
@@ -198,6 +220,6 @@ export class RolesService {
    * @returns true if user is super admin
    */
   async isSuperAdmin(userId: number): Promise<boolean> {
-    return this.repo.isSuperAdmin(userId);
+    return this.rolesRepository.isSuperAdmin(userId);
   }
 }

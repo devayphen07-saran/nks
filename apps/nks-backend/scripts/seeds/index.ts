@@ -1,7 +1,7 @@
 export { seedSalutations } from './salutation.seed';
 export { seedCountries } from './country.seed';
 export { seedStates } from './state.seed';
-export { seedDistricts } from './district.seed';
+export { seedAdministrativeDivisions } from './district.seed';
 export { seedPincodes } from './pincode.seed';
 export { seedAddressTypes } from './address-type.seed';
 export { seedCommunicationTypes } from './communication-type.seed';
@@ -18,3 +18,14 @@ export { seedRoutes } from './routes.seed';
 export { seedRolePermissionMappings } from './role-permission-mapping.seed';
 export { seedRoleRouteMappings } from './role-route-mapping.seed';
 
+// Tax Engine
+export {
+  seedTaxAgencies,
+  seedTaxNames,
+  seedTaxLevels,
+  seedTaxLevelMappings,
+} from './tax-engine.seed';
+
+// Tax Master Data
+export { seedCommodityCodes } from './commodity-codes.seed';
+export { seedTaxRateMaster } from './tax-rate-master.seed';

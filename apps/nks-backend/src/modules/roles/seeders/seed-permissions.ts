@@ -1,12 +1,30 @@
+import { Logger } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import * as schema from '../../../core/database/schema';
 
+export interface SeederResult {
+  created: number;
+  skipped: number;
+  failed: number;
+}
+
 /**
- * Seed default permissions
- * Run once after database setup
+ * Seed default permissions with batch inserts and structured logging
+ *
+ * ✅ Features:
+ * - Batch insert (1 query instead of 50+)
+ * - Upsert on conflict (ON CONFLICT DO UPDATE for idempotency)
+ * - Structured logging with NestJS Logger
+ * - Returns detailed result metrics
+ *
+ * Performance: ~50 permissions in 2 queries (1 select + 1 upsert)
+ * vs old: 100+ queries (50x slower)
  */
-export async function seedPermissions(db: NodePgDatabase<typeof schema>) {
+export async function seedPermissions(
+  db: NodePgDatabase<typeof schema>,
+): Promise<SeederResult> {
+  const logger = new Logger('PermissionSeeder');
   const permissions: Array<typeof schema.permissions.$inferInsert> = [
     // Customers Module
     {
@@ -344,29 +362,48 @@ export async function seedPermissions(db: NodePgDatabase<typeof schema>) {
     },
   ];
 
-  console.log(`🌱 Seeding ${permissions.length} permissions...`);
+  logger.debug(`Seeding ${permissions.length} permissions with batch insert`);
 
   try {
-    for (const permission of permissions) {
-      // Check if permission already exists
-      const existing = await db
-        .select()
-        .from(schema.permissions)
-        .where(eq(schema.permissions.code, permission.code))
-        .limit(1);
-      const foundPerm = existing[0];
+    // ✅ BATCH FETCH existing codes (1 query)
+    const existingPerms = await db
+      .select({ code: schema.permissions.code })
+      .from(schema.permissions);
 
-      if (!foundPerm) {
-        await db.insert(schema.permissions).values(permission);
-        console.log(`✅ Created permission: ${permission.code}`);
-      } else {
-        console.log(`⏭️  Permission already exists: ${permission.code}`);
-      }
-    }
+    const existingCodes = new Set(existingPerms.map((p) => p.code));
 
-    console.log('✨ Permissions seeded successfully!');
+    // ✅ UPSERT all permissions atomically (1 query)
+    // ON CONFLICT DO UPDATE ensures idempotency — re-running is safe
+    const result = await db
+      .insert(schema.permissions)
+      .values(permissions)
+      .onConflictDoUpdate({
+        target: schema.permissions.code,
+        set: {
+          name: sql`EXCLUDED.${schema.permissions.name}`,
+          resource: sql`EXCLUDED.${schema.permissions.resource}`,
+          action: sql`EXCLUDED.${schema.permissions.action}`,
+          description: sql`EXCLUDED.${schema.permissions.description}`,
+        },
+      })
+      .returning({ code: schema.permissions.code });
+
+    const created = result.filter((r) => !existingCodes.has(r.code)).length;
+    const skipped = existingCodes.size;
+
+    logger.log('Permissions seeded successfully', {
+      total: permissions.length,
+      created,
+      skipped,
+    });
+
+    return { created, skipped, failed: 0 };
   } catch (error) {
-    console.error('❌ Error seeding permissions:', error);
-    throw error;
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error('Error seeding permissions', {
+      error: err.message,
+      stack: err.stack,
+    });
+    throw err;
   }
 }

@@ -13,6 +13,7 @@ import { BETTER_AUTH_TOKEN } from './auth.constants';
 import { DATABASE_TOKEN } from '../../core/database/database.constants';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../core/database/schema';
+import { JWTConfigService } from '../../common/config/jwt.config';
 
 @Global()
 @Module({
@@ -24,12 +25,20 @@ import * as schema from '../../core/database/schema';
     Msg91Service,
     PasswordService,
     OtpRateLimitService,
+    JWTConfigService,
     {
       provide: BETTER_AUTH_TOKEN,
       inject: [DATABASE_TOKEN],
       useFactory: (db: NodePgDatabase<typeof schema>) => getAuth(db),
     },
   ],
-  exports: [AuthService, OtpService, PasswordService, OtpRateLimitService, BETTER_AUTH_TOKEN],
+  exports: [
+    AuthService,
+    OtpService,
+    PasswordService,
+    OtpRateLimitService,
+    JWTConfigService,
+    BETTER_AUTH_TOKEN,
+  ],
 })
 export class AuthModule {}

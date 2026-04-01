@@ -28,14 +28,10 @@ export const store = pgTable(
     storeName: varchar('store_name', { length: 255 }).notNull(),
     storeCode: varchar('store_code', { length: 50 }).unique(),
 
-    // ownerFk — non-nullable FK to the founding user.
-    // Enforces at the row level that a store cannot exist without an owner.
-    // store_user_mapping (isPrimary) and user_role_mapping (STORE_OWNER) are
-    // still required for permission checks, but ownerFk is the schema-level guarantee
-    // that orphaned stores cannot be created even if those writes fail mid-transaction.
-    ownerFk: bigint('owner_fk', { mode: 'number' })
-      .notNull()
-      .references(() => users.id, { onDelete: 'restrict' }),
+    // ── OWNERSHIP SINGLE SOURCE OF TRUTH ─────────────────────────────────────
+    // Store ownership is managed exclusively through store_user_mapping with isPrimary flag.
+    // This eliminates the "Double Truth" problem where ownerFk could conflict with isPrimary.
+    // See: store_user_mapping table for ownership metadata.
 
     // Legal entity type for KYC (Pvt Ltd, Sole Proprietor, etc.)
     storeLegalTypeFk: bigint('store_legal_type_fk', { mode: 'number' })
@@ -86,7 +82,7 @@ export const store = pgTable(
 
     ...auditFields(() => users.id),
   },
-  (_table) => [
+  () => [
     // isActive must always match storeStatus — prevents split-brain lifecycle state.
     // Do not set isActive directly; update storeStatus instead and let this rule enforce consistency.
     check(

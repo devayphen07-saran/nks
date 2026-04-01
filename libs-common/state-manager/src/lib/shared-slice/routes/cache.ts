@@ -3,11 +3,13 @@
  * Caches routes/permissions within a session to avoid re-fetching on page refresh
  */
 
+import type { Route, Permission } from "./model";
+
 const ROUTES_CACHE_KEY = "nks-routes-cache";
 
 export interface RoutesCacheData {
-  routes: any[];
-  permissions: any[];
+  routes: Route[];
+  permissions: Permission[];
   isSynced: boolean;
   fetchedAt: number;
 }

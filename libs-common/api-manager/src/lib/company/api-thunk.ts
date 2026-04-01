@@ -6,6 +6,9 @@ import {
   GET_STAFF,
   GET_MY_STORES,
   GET_INVITED_STORES,
+  GET_STORES_PAGINATED,
+  GET_STORE_DETAIL,
+  SELECT_STORE_V2,
 } from "./api-data";
 import {
   RegisterStoreRequest,
@@ -39,3 +42,18 @@ export const getMyStores = GET_MY_STORES.generateAsyncThunk(
 export const getInvitedStores = GET_INVITED_STORES.generateAsyncThunk(
   "store/getInvitedStores",
 );
+
+// ✅ NEW: Paginated store list
+export const getStoresPaginated = GET_STORES_PAGINATED.generateAsyncThunk(
+  "store/getStoresPaginated",
+);
+
+// ✅ NEW: Store details
+export const getStoreDetail = GET_STORE_DETAIL.generateAsyncThunk(
+  "store/getStoreDetail",
+);
+
+// ✅ NEW: Recommended store selection endpoint (v2)
+export const selectStoreV2 = SELECT_STORE_V2.generateAsyncThunk<{
+  storeId: number;
+}>("store/selectStoreV2");

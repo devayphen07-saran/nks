@@ -13,10 +13,23 @@ import { contactPersonType } from '../contact-person-type';
 import { salutation } from '../salutation';
 import { baseEntity, auditFields } from '../base.entity';
 
+/**
+ * CONTACT_PERSON
+ *
+ * Polymorphic contact person registry for any entity (customer, vendor, store, etc.)
+ * Uses soft-delete pattern: isActive (legacy) and deletedAt (preferred).
+ *
+ * Soft-delete strategy:
+ *   - Active contacts: isActive=true AND deletedAt IS NULL
+ *   - Deleted contacts: isActive=false OR deletedAt IS NOT NULL
+ *   - Queries should filter: WHERE is_active = true AND deleted_at IS NULL
+ *   - Historical records retained for audit/compliance purposes
+ *   - Contact details (email, phone) are stored in the communication table
+ */
 export const contactPerson = pgTable(
   'contact_person',
   {
-    ...baseEntity(),
+    ...baseEntity(), // includes: isActive, deletedAt
 
     // Polymorphic ownership
     entityFk: bigint('entity_fk', { mode: 'number' })

@@ -11,8 +11,8 @@ import {
   Typography,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { setPassword, type RequestParams, type SetPasswordRequest } from "@nks/api-manager";
-import { useRootDispatch } from "../../store";
+import { profileComplete } from "@nks/api-manager";
+import { useRootDispatch, useAuth } from "../../store";
 
 const CARD_SHADOW = {
   shadowColor: "#000000",
@@ -26,6 +26,7 @@ export function SetPasswordScreen() {
   const dispatch = useRootDispatch();
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
+  const authState = useAuth();
 
   const [password, setPasswordValue] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -47,15 +48,16 @@ export function SetPasswordScreen() {
     setErrorMessage(null);
     setIsLoading(true);
     try {
-      const params: RequestParams<SetPasswordRequest> = {
-        bodyParam: { password },
-      };
-      const result = await dispatch(setPassword(params));
-      if (setPassword.fulfilled.match(result)) {
+      const userName = authState.authResponse?.data?.user?.name || "User";
+      const result = await dispatch(
+        profileComplete({ bodyParam: { name: userName, password } }),
+      );
+      if (profileComplete.fulfilled.match(result)) {
         router.replace("/(protected)/(workspace)");
       } else {
         setErrorMessage(
-          (result.payload as any)?.message ?? "Failed to set password. Please try again."
+          (result.payload as any)?.message ??
+            "Failed to set password. Please try again.",
         );
       }
     } catch {
@@ -175,7 +177,9 @@ export function SetPasswordScreen() {
                   onPress={handleSubmit}
                   loading={isLoading}
                 />
-                <SkipButton onPress={() => router.replace("/(protected)/(workspace)")}>
+                <SkipButton
+                  onPress={() => router.replace("/(protected)/(workspace)")}
+                >
                   <Typography.Body
                     weight="semiBold"
                     color={theme.colorTextSecondary}

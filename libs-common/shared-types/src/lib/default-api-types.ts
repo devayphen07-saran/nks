@@ -33,9 +33,19 @@ export interface ApiResponse<T> {
 }
 
 export interface UserProfile {
-  id: string;
+  id: number;
+  guuid: string;
   name: string;
-  email: string;
-  role: string;
-  isEmailVerified: boolean;
+  email: string | null;
+  emailVerified: boolean;
+  image: string | null;
+  phoneNumber: string;
+  phoneNumberVerified: boolean;
+  kycLevel: string;
+  languagePreference: string;
+  whatsappOptedIn: boolean;
+  loginCount: number;
+  isBlocked: boolean;
+  createdAt: string;
+  updatedAt: string;
 }

@@ -15,6 +15,11 @@ export const storeUserMappingRelations = relations(
       fields: [storeUserMapping.userFk],
       references: [users.id],
     }),
+    assignedByUser: one(users, {
+      fields: [storeUserMapping.assignedBy],
+      references: [users.id],
+      relationName: 'assignedByUser',
+    }),
     designation: one(designation, {
       fields: [storeUserMapping.designationFk],
       references: [designation.id],

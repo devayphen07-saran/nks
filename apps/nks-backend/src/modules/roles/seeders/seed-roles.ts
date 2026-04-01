@@ -1,12 +1,30 @@
+import { Logger } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../../core/database/schema';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
+
+export interface SeederResult {
+  created: number;
+  skipped: number;
+  failed: number;
+}
 
 /**
- * Seed default roles
- * Run once after database setup
+ * Seed default roles with batch insert and structured logging
+ *
+ * ✅ Features:
+ * - Batch upsert (1 query for all 5 roles)
+ * - ON CONFLICT ensures idempotency
+ * - Structured logging
+ * - Returns detailed metrics
+ *
+ * Performance: 5 roles in ~1 query
+ * vs old: 10 queries (5 selects + 5 inserts)
  */
-export async function seedRoles(db: NodePgDatabase<typeof schema>) {
+export async function seedRoles(
+  db: NodePgDatabase<typeof schema>,
+): Promise<SeederResult> {
+  const logger = new Logger('RoleSeeder');
   const roles: Array<typeof schema.roles.$inferInsert> = [
     {
       code: 'SUPER_ADMIN',
@@ -50,74 +68,112 @@ export async function seedRoles(db: NodePgDatabase<typeof schema>) {
     },
   ];
 
-  console.log(`🌱 Seeding ${roles.length} roles...`);
+  logger.debug(`Seeding ${roles.length} roles with batch upsert`);
 
   try {
-    const createdRoles: Record<string, any> = {};
+    // ✅ BATCH FETCH existing codes (1 query)
+    const existingRoles = await db
+      .select({ code: schema.roles.code })
+      .from(schema.roles);
 
-    for (const role of roles) {
-      // Check if role already exists
-      const existing = await db
-        .select()
-        .from(schema.roles)
-        .where(eq(schema.roles.code, role.code))
-        .limit(1);
-      const foundRole = existing[0];
+    const existingCodes = new Set(existingRoles.map((r) => r.code));
 
-      if (!foundRole) {
-        const [created] = await db
-          .insert(schema.roles)
-          .values(role)
-          .returning();
-        createdRoles[role.code] = created;
-        console.log(`✅ Created role: ${role.code} (ID: ${created.id})`);
-      } else {
-        createdRoles[foundRole.code] = foundRole;
-        console.log(
-          `⏭️  Role already exists: ${foundRole.code} (ID: ${foundRole.id})`,
-        );
-      }
-    }
+    // ✅ UPSERT all roles atomically (1 query)
+    const result = await db
+      .insert(schema.roles)
+      .values(roles)
+      .onConflictDoUpdate({
+        target: schema.roles.code,
+        set: {
+          roleName: sql`EXCLUDED.${schema.roles.roleName}`,
+          description: sql`EXCLUDED.${schema.roles.description}`,
+          isActive: sql`EXCLUDED.${schema.roles.isActive}`,
+        },
+      })
+      .returning({ code: schema.roles.code, id: schema.roles.id });
 
-    console.log('✨ Roles seeded successfully!');
-    return createdRoles;
+    const created = result.filter((r) => !existingCodes.has(r.code)).length;
+    const skipped = existingCodes.size;
+
+    logger.log('Roles seeded successfully', {
+      total: roles.length,
+      created,
+      skipped,
+    });
+
+    return { created, skipped, failed: 0 };
   } catch (error) {
-    console.error('❌ Error seeding roles:', error);
-    throw error;
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error('Error seeding roles', {
+      error: err.message,
+      stack: err.stack,
+    });
+    throw err;
   }
 }
 
 /**
- * Seed role-permission mappings for default roles
+ * Seed role-permission mappings for default roles with batch insert
+ *
+ * ✅ Features:
+ * - Batch insert mappings (1 query instead of 50+)
+ * - Validates all roles exist before proceeding
+ * - Idempotent: safe to re-run
  */
 export async function seedRolePermissions(
   db: NodePgDatabase<typeof schema>,
-) {
-  console.log(`🌱 Seeding role-permission mappings...`);
+): Promise<SeederResult> {
+  const logger = new Logger('RolePermissionSeeder');
+  logger.debug('Seeding role-permission mappings with batch insert');
 
   try {
-    // Get all roles and permissions
-    const allRoles = await db.select().from(schema.roles);
-    const allPermissions = await db.select().from(schema.permissions);
+    // Get all roles and permissions (2 queries)
+    const [allRoles, allPermissions] = await Promise.all([
+      db.select().from(schema.roles),
+      db.select().from(schema.permissions),
+    ]);
 
+    // Validate all required roles exist
     const superAdminRole = allRoles.find((r) => r.code === 'SUPER_ADMIN');
     const adminRole = allRoles.find((r) => r.code === 'ADMIN');
     const managerRole = allRoles.find((r) => r.code === 'MANAGER');
     const staffRole = allRoles.find((r) => r.code === 'STAFF');
     const customerRole = allRoles.find((r) => r.code === 'CUSTOMER');
 
-    if (!superAdminRole || !adminRole || !managerRole || !staffRole || !customerRole) {
-      throw new Error('Some system roles not found. Run seedRoles first.');
+    if (
+      !superAdminRole ||
+      !adminRole ||
+      !managerRole ||
+      !staffRole ||
+      !customerRole
+    ) {
+      const missing = [
+        !superAdminRole && 'SUPER_ADMIN',
+        !adminRole && 'ADMIN',
+        !managerRole && 'MANAGER',
+        !staffRole && 'STAFF',
+        !customerRole && 'CUSTOMER',
+      ].filter(Boolean);
+      throw new Error(
+        `Seeder error: System roles not found [${missing.join(', ')}]. Run seedRoles() first.`,
+      );
     }
 
-    // Get existing mappings to avoid duplicates
-    const existingMappings = await db.select().from(schema.rolePermissionMapping);
+    // Get existing mappings to detect new ones
+    const existingMappings = await db
+      .select()
+      .from(schema.rolePermissionMapping);
     const mappingSet = new Set(
       existingMappings.map((m) => `${m.roleFk}-${m.permissionFk}`),
     );
 
-    // SUPER_ADMIN: All permissions (except we won't explicitly map, it's implicit)
-    console.log('✅ SUPER_ADMIN has implicit all permissions');
+    // ✅ Build all mappings to insert in single batch
+    const mappingsToInsert: Array<
+      typeof schema.rolePermissionMapping.$inferInsert
+    > = [];
+
+    // SUPER_ADMIN: All permissions (implicit, we log but don't insert)
+    logger.log('SUPER_ADMIN has implicit all permissions');
 
     // ADMIN: All permissions except system settings
     const adminPermissions = allPermissions.filter(
@@ -126,11 +182,10 @@ export async function seedRolePermissions(
     for (const perm of adminPermissions) {
       const key = `${adminRole.id}-${perm.id}`;
       if (!mappingSet.has(key)) {
-        await db.insert(schema.rolePermissionMapping).values({
+        mappingsToInsert.push({
           roleFk: adminRole.id,
           permissionFk: perm.id,
         });
-        console.log(`✅ Assigned ${perm.code} to ADMIN`);
       }
     }
 
@@ -146,11 +201,10 @@ export async function seedRolePermissions(
     for (const perm of managerPermissions) {
       const key = `${managerRole.id}-${perm.id}`;
       if (!mappingSet.has(key)) {
-        await db.insert(schema.rolePermissionMapping).values({
+        mappingsToInsert.push({
           roleFk: managerRole.id,
           permissionFk: perm.id,
         });
-        console.log(`✅ Assigned ${perm.code} to MANAGER`);
       }
     }
 
@@ -161,20 +215,38 @@ export async function seedRolePermissions(
     for (const perm of staffPermissions) {
       const key = `${staffRole.id}-${perm.id}`;
       if (!mappingSet.has(key)) {
-        await db.insert(schema.rolePermissionMapping).values({
+        mappingsToInsert.push({
           roleFk: staffRole.id,
           permissionFk: perm.id,
         });
-        console.log(`✅ Assigned ${perm.code} to STAFF`);
       }
     }
 
-    // CUSTOMER: View own data only (no permissions, access controlled separately)
-    console.log('✅ CUSTOMER role created (access controlled separately)');
+    // CUSTOMER: No explicit permissions (access controlled separately)
+    logger.log('CUSTOMER role created (access controlled separately)');
 
-    console.log('✨ Role-permission mappings seeded successfully!');
+    // ✅ BATCH INSERT all new mappings in single query
+    let created = 0;
+    if (mappingsToInsert.length > 0) {
+      await db.insert(schema.rolePermissionMapping).values(mappingsToInsert);
+      created = mappingsToInsert.length;
+    }
+
+    const skipped = mappingSet.size;
+
+    logger.log('Role-permission mappings seeded successfully', {
+      total: allPermissions.length * 4, // Estimated max
+      created,
+      skipped,
+    });
+
+    return { created, skipped, failed: 0 };
   } catch (error) {
-    console.error('❌ Error seeding role-permissions:', error);
-    throw error;
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error('Error seeding role-permissions', {
+      error: err.message,
+      stack: err.stack,
+    });
+    throw err;
   }
 }

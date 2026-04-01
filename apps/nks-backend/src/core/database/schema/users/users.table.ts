@@ -51,7 +51,9 @@ export const users = pgTable(
     isBlocked: boolean('is_blocked').notNull().default(false),
     blockedReason: text('blocked_reason'),
     blockedAt: timestamp('blocked_at', { withTimezone: true }),
-    accountLockedUntil: timestamp('account_locked_until', { withTimezone: true }),
+    accountLockedUntil: timestamp('account_locked_until', {
+      withTimezone: true,
+    }),
     blockedBy: bigint('blocked_by', { mode: 'number' }).references(selfRef, {
       onDelete: 'set null',
     }),
@@ -68,7 +70,9 @@ export const users = pgTable(
 
     // Onboarding lifecycle
     profileCompleted: boolean('profile_completed').notNull().default(false),
-    profileCompletedAt: timestamp('profile_completed_at', { withTimezone: true }),
+    profileCompletedAt: timestamp('profile_completed_at', {
+      withTimezone: true,
+    }),
 
     ...auditFields(selfRef),
   },

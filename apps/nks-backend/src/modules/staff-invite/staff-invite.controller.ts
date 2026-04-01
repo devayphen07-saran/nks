@@ -18,6 +18,8 @@ import {
   UpdateStaffPermissionsDto,
 } from './dto/staff-invite.dto';
 import { AuthGuard } from '../../common/guards/auth.guard';
+import { RBACGuard } from '../../common/guards/rbac.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ApiResponse } from '../../common/utils/api-response';
 
@@ -29,6 +31,8 @@ export class StaffInviteController {
   constructor(private readonly service: StaffInviteService) {}
 
   @Post('invite-staff')
+  @UseGuards(RBACGuard)
+  @Roles('STORE_OWNER')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Invite a staff member (STORE_OWNER only)' })
   async inviteStaff(
@@ -54,6 +58,8 @@ export class StaffInviteController {
   }
 
   @Get('staff')
+  @UseGuards(RBACGuard)
+  @Roles('STORE_OWNER')
   @ApiOperation({ summary: 'List staff members (STORE_OWNER only)' })
   async listStaff(@CurrentUser('userId') ownerId: number) {
     const result = await this.service.listStaff(ownerId);
@@ -61,6 +67,8 @@ export class StaffInviteController {
   }
 
   @Patch('staff/:userId/permissions')
+  @UseGuards(RBACGuard)
+  @Roles('STORE_OWNER')
   @ApiOperation({
     summary: 'Update staff member permissions (STORE_OWNER only)',
   })

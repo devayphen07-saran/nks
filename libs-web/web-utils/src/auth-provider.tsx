@@ -11,8 +11,6 @@ import {
 import { getSession, type AuthResponse } from "@nks/api-manager";
 import { authSlice } from "@nks/state-manager";
 import {
-  setAccessToken,
-  getAccessToken,
   clearAuthData,
   setIamUserIdToken,
   setSessionId,
@@ -90,28 +88,13 @@ export function AuthProvider({
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (typeof window !== "undefined") {
-          const urlParams = new URLSearchParams(window.location.search);
-          const urlToken = urlParams.get("accessToken");
+        // ✅ FIXED: Use httpOnly cookies, not localStorage
+        // Browser automatically sends nks_session cookie with requests
+        // No need to check for token in localStorage first
 
-          if (urlToken) {
-            setAccessToken(urlToken);
-            const url = new URL(window.location.href);
-            url.searchParams.delete("accessToken");
-            window.history.replaceState({}, "", url.toString());
-          }
-        }
-
-        const token = getAccessToken();
-
-        if (!token) {
-          dispatch(authSlice.actions.setUnauthenticated());
-          redirectToAuth();
-          return;
-        }
-
-        // Token exists, validate with backend via getSession
         try {
+          // Validate session via httpOnly cookie
+          // Browser will automatically send nks_session cookie
           const result = await dispatch(getSession({}));
 
           if (getSession.fulfilled.match(result)) {

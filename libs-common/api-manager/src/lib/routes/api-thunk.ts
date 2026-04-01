@@ -1,8 +1,19 @@
 import {
+  GET_USER_ROUTES,
   GET_ADMIN_ROUTES_PERMISSIONS,
   GET_STORE_ROUTES,
 } from "./api-data";
 import type { FetchRoutesRequest } from "./request-dto";
+
+// ── User Routes Thunk ──────────────────────────────────────────────────────────
+
+/**
+ * Fetch routes for the current authenticated user based on their roles
+ * Used after login/register to populate navigation
+ */
+export const fetchUserRoutes = GET_USER_ROUTES.generateAsyncThunk<FetchRoutesRequest>(
+  "routes/fetchUserRoutes"
+);
 
 // ── Admin Routes & Permissions Thunk ──────────────────────────────────────────
 

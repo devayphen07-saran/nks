@@ -3,6 +3,8 @@ import { store } from './store.table';
 import { storeLegalType } from '../store-legal-type';
 import { storeCategory } from '../store-category';
 import { storeUserMapping } from '../store-user-mapping';
+import { storeOperatingHours } from '../store-operating-hours';
+import { storeDocuments } from '../store-documents';
 
 export const storeRelations = relations(store, ({ one, many }) => ({
   parent: one(store, {
@@ -22,4 +24,6 @@ export const storeRelations = relations(store, ({ one, many }) => ({
     references: [storeCategory.id],
   }),
   members: many(storeUserMapping),
+  operatingHours: many(storeOperatingHours),
+  documents: many(storeDocuments),
 }));

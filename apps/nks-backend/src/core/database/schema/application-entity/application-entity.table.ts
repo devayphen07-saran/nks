@@ -88,6 +88,4 @@ export const applicationEntity: PgTableWithColumns<{
 
 export type ApplicationEntity = typeof applicationEntity.$inferSelect;
 export type NewApplicationEntity = typeof applicationEntity.$inferInsert;
-export type UpdateApplicationEntity = Partial<
-  Omit<NewApplicationEntity, 'id'>
->;
+export type UpdateApplicationEntity = Partial<Omit<NewApplicationEntity, 'id'>>;

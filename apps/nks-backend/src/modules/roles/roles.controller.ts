@@ -44,16 +44,33 @@ export class RolesController {
   // ─── Roles ────────────────────────────────────────────────────────────────
 
   @Get()
-  @ApiOperation({ summary: 'List all active roles' })
+  @ApiOperation({
+    summary: 'List active roles with optional search and pagination',
+  })
   @SwaggerResponse({
     type: [RoleResponseDto],
     status: 200,
     description: 'Roles listed',
   })
-  async listRoles() {
-    const roles = await this.rolesService.listRoles();
-    const mapped = roles.map((r) => RoleMapper.toResponseDto(r));
-    return ApiResponse.ok(mapped, 'Roles retrieved');
+  async listRoles(
+    @Query('search') search?: string,
+    @Query('page') page?: number,
+    @Query('pageSize') pageSize?: number,
+  ) {
+    const result = await this.rolesService.listRoles({
+      search,
+      page,
+      pageSize,
+    });
+    return ApiResponse.ok(
+      {
+        items: result.rows.map((r) => RoleMapper.toResponseDto(r)),
+        total: result.total,
+        page: result.page,
+        pageSize: result.pageSize,
+      },
+      'Roles retrieved',
+    );
   }
 
   @Get(':id')
@@ -198,7 +215,7 @@ export class RolesController {
 
   @Get('users/:userId/roles')
   @ApiOperation({ summary: 'Get all roles assigned to a user' })
-  async getUserRoles(@Param('userId', ParseIntPipe) userId: number) {
+  getUserRoles(@Param('userId', ParseIntPipe) userId: number) {
     // Get user roles - will be implemented in service
     // For now return empty array with proper structure
     return ApiResponse.ok({ roles: [], userId }, 'User roles retrieved');
@@ -216,7 +233,7 @@ export class RolesController {
   }
 
   @Delete('users/:userId/roles/:roleId')
-  @ApiOperation({ summary: 'Revoke a role from a user' })
+  @ApiOperation({ summary: 'Revoke a role from a user (hard delete)' })
   async revokeRoleFromUserByPath(
     @Param('userId', ParseIntPipe) userId: number,
     @Param('roleId', ParseIntPipe) roleId: number,
@@ -224,6 +241,28 @@ export class RolesController {
   ) {
     await this.rolesService.revokeRoleFromUser(userId, roleId, currentUserId);
     return ApiResponse.ok(null, 'Role revoked from user');
+  }
+
+  @Patch('users/:userId/roles/:roleId/suspend')
+  @ApiOperation({
+    summary: 'Suspend a user role (keeps audit trail, isActive=false)',
+  })
+  async suspendUserRole(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Param('roleId', ParseIntPipe) roleId: number,
+  ) {
+    await this.rolesService.suspendUserRole(userId, roleId);
+    return ApiResponse.ok(null, 'Role suspended');
+  }
+
+  @Patch('users/:userId/roles/:roleId/restore')
+  @ApiOperation({ summary: 'Restore a previously suspended user role' })
+  async restoreUserRole(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Param('roleId', ParseIntPipe) roleId: number,
+  ) {
+    await this.rolesService.restoreUserRole(userId, roleId);
+    return ApiResponse.ok(null, 'Role restored');
   }
 
   @Get('users/:userId/has-permission')

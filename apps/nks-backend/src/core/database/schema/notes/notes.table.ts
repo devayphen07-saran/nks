@@ -5,10 +5,23 @@ import { users } from '../users';
 import { notesType } from '../notes-type';
 import { baseEntity, auditFields } from '../base.entity';
 
+/**
+ * NOTES
+ *
+ * Polymorphic note storage for any entity (internal remarks, customer notes, etc.)
+ * Uses soft-delete pattern: isActive (legacy) and deletedAt (preferred).
+ *
+ * Soft-delete strategy:
+ *   - Active notes: isActive=true AND deletedAt IS NULL
+ *   - Deleted notes: isActive=false OR deletedAt IS NOT NULL
+ *   - Queries should filter: WHERE is_active = true AND deleted_at IS NULL
+ *   - Historical records retained for audit/compliance purposes
+ *   - Once a note is soft-deleted, it cannot be recovered
+ */
 export const notes = pgTable(
   'notes',
   {
-    ...baseEntity(),
+    ...baseEntity(), // includes: isActive, deletedAt
 
     // Polymorphic ownership
     entityFk: bigint('entity_fk', { mode: 'number' })
@@ -30,6 +43,11 @@ export const notes = pgTable(
     index('notes_entity_record_active_idx')
       .on(table.entityFk, table.recordId)
       .where(sql`is_active = true`),
+
+    // Single-column indexes for FK-only queries
+    index('notes_entity_idx').on(table.entityFk),
+    index('notes_record_idx').on(table.recordId),
+    index('notes_type_idx').on(table.notesTypeFk),
   ],
 );
 

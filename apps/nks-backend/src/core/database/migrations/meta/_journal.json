@@ -5,22 +5,15 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1774280802160,
-      "tag": "0000_aberrant_azazel",
+      "when": 1774859797058,
+      "tag": "0000_init_pos_schema_v2",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1774414104099,
-      "tag": "0001_smart_skaar",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1774414294344,
-      "tag": "0002_hesitant_fat_cobra",
+      "when": 1774865260372,
+      "tag": "0001_multi_country_tax_v2",
       "breakpoints": true
     }
   ]

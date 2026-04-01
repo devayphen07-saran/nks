@@ -5,6 +5,8 @@
     "baseUrl": ".",
     "paths": {
       "@/features/*": ["./features/*"],
+      "@nks/local-db": ["../../libs-mobile/local-db/src"],
+      "@nks/local-db/*": ["../../libs-mobile/local-db/src/*"],
       "@nks/mobile-theme": ["../../libs-mobile/mobile-theme/src"],
       "@nks/mobile-theme/*": ["../../libs-mobile/mobile-theme/src/*"],
       "@nks/mobile-ui-components": ["../../libs-mobile/mobile-ui-components/src"],

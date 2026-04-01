@@ -5,66 +5,87 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { RolesService } from '../../modules/roles/roles.service';
+import { RolesRepository } from '../../modules/roles/roles.repository';
 import { ErrorCode } from '../constants/error-codes.constants';
+import { REQUIRE_PERMISSION_KEY } from '../decorators/require-permission.decorator';
+import type { AuthenticatedRequest } from './auth.guard';
 
 /**
- * PermissionGuard checks if the user has the required permissions
- * Works with @RequirePermission decorator
+ * PermissionGuard — store-scoped per-request permission enforcement.
+ *
+ * Must run AFTER AuthGuard (relies on request.user and request.session.token).
+ *
+ * Flow:
+ *  1. Read required permission code from @RequirePermission decorator.
+ *  2. If no permission required, pass through.
+ *  3. Resolve permission codes from the user's active store (scoped via session token).
+ *     - SUPER_ADMIN bypasses all checks.
+ *     - Store users only inherit permissions from roles in their ACTIVE store.
+ *  4. Cache result on request.userPermissions so subsequent guards in the
+ *     same request (e.g. RBACGuard) don't re-query.
+ *  5. Deny with 403 if the required code is not in the user's permission set.
  *
  * Usage:
- * @UseGuards(PermissionGuard)
- * @RequirePermission('customers', 'edit')
- * async editCustomer() {}
+ *   @UseGuards(AuthGuard, PermissionGuard)
+ *   @RequirePermission('orders', 'view')
+ *   async listOrders() {}
  */
 @Injectable()
 export class PermissionGuard implements CanActivate {
   constructor(
-    private reflector: Reflector,
-    private rolesService: RolesService,
+    private readonly reflector: Reflector,
+    private readonly rolesRepository: RolesRepository,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    // Get the resource and action from the decorator metadata
-    const resource = this.reflector.get<string>(
-      'permission_resource',
-      context.getHandler(),
-    );
-    const action = this.reflector.get<string>(
-      'permission_action',
-      context.getHandler(),
+    // 1. Read required permission from decorator
+    const required = this.reflector.getAllAndOverride<string | undefined>(
+      REQUIRE_PERMISSION_KEY,
+      [context.getHandler(), context.getClass()],
     );
 
-    // If no permission requirement, allow access
-    if (!resource || !action) {
-      return true;
-    }
+    // No permission requirement — pass through
+    if (!required) return true;
 
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user;
 
-    // If no user context, deny access
-    if (!user || !user.id) {
+    if (!user?.userId) {
       throw new ForbiddenException({
-        errorCode: ErrorCode.UNAUTHORIZED,
+        errorCode: ErrorCode.PERMISSION_DENIED,
         message: 'User not authenticated',
       });
     }
 
-    // Check if user has the required permission
-    const hasPermission = await this.rolesService.checkUserPermission(
-      user.id,
-      resource,
-      action,
-    );
+    // 2. Populate permission cache if not already done this request
+    if (request.userPermissions === undefined) {
+      const token = request.session?.token;
+      if (!token) {
+        throw new ForbiddenException({
+          errorCode: ErrorCode.PERMISSION_DENIED,
+          message: 'Session token missing',
+        });
+      }
 
-    if (!hasPermission) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.PERMISSION_DENIED,
-        message: `Insufficient permissions: ${resource}.${action}`,
-      });
+      const { isSuperAdmin, permissionCodes } =
+        await this.rolesRepository.getActiveStorePermissionCodes(
+          user.userId,
+          token,
+        );
+
+      request.isSuperAdmin = isSuperAdmin;
+      request.userPermissions = new Set(permissionCodes);
     }
 
-    return true;
+    // 3. SUPER_ADMIN bypasses all permission checks
+    if (request.isSuperAdmin) return true;
+
+    // 4. Check required permission against the user's active-store permission set
+    if (request.userPermissions.has(required)) return true;
+
+    throw new ForbiddenException({
+      errorCode: ErrorCode.PERMISSION_DENIED,
+      message: `Insufficient permissions: requires '${required}'`,
+    });
   }
 }

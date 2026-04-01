@@ -14,7 +14,7 @@ export default function AuthLayout() {
       screenOptions={{
         headerShown: false,
         animation: "none",
-        contentStyle: { backgroundColor: "#df005c" },
+        contentStyle: { backgroundColor: "#ffffff" },
       }}
     >
       <Stack.Screen name="phone" />

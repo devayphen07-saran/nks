@@ -1,4 +1,12 @@
-import { pgTable, text, timestamp, index, bigint, boolean, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  text,
+  timestamp,
+  index,
+  bigint,
+  boolean,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { betterAuthEntity } from '../base.entity';
 import { users } from '../users';
 
@@ -19,10 +27,10 @@ export const userAuthProvider = pgTable(
     accessToken: text('access_token'),
     refreshToken: text('refresh_token'),
     idToken: text('id_token'),
-    accessTokenExpiresAt: timestamp('access_token_expires_date', {
+    accessTokenExpiresAt: timestamp('access_token_expires_at', {
       withTimezone: true,
     }),
-    refreshTokenExpiresAt: timestamp('refresh_token_expires_date', {
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', {
       withTimezone: true,
     }),
     scope: text('scope'),
@@ -35,7 +43,10 @@ export const userAuthProvider = pgTable(
   },
   (table) => [
     index('user_auth_provider_user_idx').on(table.userId),
-    uniqueIndex('user_auth_provider_user_provider_unique').on(table.userId, table.providerId),
+    uniqueIndex('user_auth_provider_user_provider_unique').on(
+      table.userId,
+      table.providerId,
+    ),
   ],
 );
 

@@ -8,7 +8,9 @@ import {
   HttpCode,
   Param,
   Query,
+  Req,
   ParseIntPipe,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -27,11 +29,19 @@ import { StoreMapper } from './mapper';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ApiResponse } from '../../common/utils/api-response';
+import { ForbiddenException } from '../../common/exceptions';
+import { RoutesService } from '../routes/routes.service';
+import { AuthService } from '../auth/services/auth.service';
+import type { AuthenticatedRequest } from '../../common/guards/auth.guard';
 
 @ApiTags('Store')
 @Controller('store')
 export class StoreController {
-  constructor(private readonly storeService: StoreService) {}
+  constructor(
+    private readonly storeService: StoreService,
+    private readonly routesService: RoutesService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Post('register')
   @UseGuards(AuthGuard)
@@ -104,6 +114,49 @@ export class StoreController {
     return ApiResponse.ok(result, 'Stores fetched successfully');
   }
 
+  @Get('dashboard/routes')
+  @UseGuards(AuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get routes and permissions for the active store',
+    description:
+      "Returns navigation routes and permission codes scoped to the user's role(s) in the currently active store. Call this after POST /auth/store/select.",
+  })
+  async getStoreRoutes(
+    @Req() req: AuthenticatedRequest,
+    @CurrentUser('userId') userId: number,
+  ) {
+    const token = (req.headers.authorization ?? '')
+      .replace('Bearer ', '')
+      .trim();
+    const result = await this.routesService.getStoreRoutes(userId, token);
+    return ApiResponse.ok(result, 'Store routes retrieved');
+  }
+
+  @Post('select/:storeId')
+  @UseGuards(AuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Select/switch to a store context (recommended endpoint)',
+    description:
+      'Set the active store for this session. Returns routes and permissions scoped to the user\'s role(s) in that store. Used by mobile app for store switching. Prefer this over /auth/store/select',
+  })
+  async selectStore(
+    @CurrentUser('userId') userId: number,
+    @Param('storeId', ParseIntPipe) storeId: number,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const token = (req.headers.authorization ?? '')
+      .replace('Bearer ', '')
+      .trim();
+
+    // Switch store (validates access + updates session)
+    const result = await this.authService.switchStore(userId, token, storeId);
+    return ApiResponse.ok(result, 'Store selected successfully');
+  }
+
   @Get(':storeId')
   @UseGuards(AuthGuard)
   @ApiBearerAuth()
@@ -118,11 +171,21 @@ export class StoreController {
     description: 'Store details fetched successfully',
   })
   async getStoreDetail(
+    @CurrentUser('userId') userId: number,
     @Param('storeId', ParseIntPipe) storeId: number,
   ) {
+    // Verify user has access to this store
+    const hasAccess = await this.storeService.userHasAccessToStore(
+      userId,
+      storeId,
+    );
+    if (!hasAccess) {
+      throw new ForbiddenException('You do not have access to this store');
+    }
+
     const result = await this.storeService.getStoreById(storeId);
     if (!result) {
-      return ApiResponse.error('Store not found', 'STORE_NOT_FOUND');
+      throw new NotFoundException('Store not found');
     }
     return ApiResponse.ok(result, 'Store details fetched successfully');
   }

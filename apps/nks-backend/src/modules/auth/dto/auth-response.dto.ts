@@ -40,15 +40,17 @@ const AuthContextSchema = z.object({
 });
 
 const UserRoleEntrySchema = z.object({
-  roleCode: z.enum([
-    'SUPER_ADMIN',
-    'STORE_OWNER',
-    'STAFF',
-    'STORE_MANAGER',
-    'CASHIER',
-    'DELIVERY',
-    'CUSTOMER',
-  ]).describe('Role code'),
+  roleCode: z
+    .enum([
+      'SUPER_ADMIN',
+      'STORE_OWNER',
+      'STAFF',
+      'STORE_MANAGER',
+      'CASHIER',
+      'DELIVERY',
+      'CUSTOMER',
+    ])
+    .describe('Role code'),
   storeId: z.number().nullable().describe('Store ID if applicable'),
   storeName: z.string().nullable().describe('Store name'),
   isPrimary: z.boolean().describe('Is this the primary role'),
@@ -60,13 +62,8 @@ const AccessControlSchema = z.object({
   isSuperAdmin: z
     .boolean()
     .describe('Whether the user has absolute administrative privileges'),
-  activeStoreId: z
-    .number()
-    .nullable()
-    .describe('Currently active store ID'),
-  roles: z
-    .array(UserRoleEntrySchema)
-    .describe('All roles assigned to user'),
+  activeStoreId: z.number().nullable().describe('Currently active store ID'),
+  roles: z.array(UserRoleEntrySchema).describe('All roles assigned to user'),
   initialRoute: z
     .string()
     .describe('Initial route to redirect user to after login'),
@@ -74,8 +71,8 @@ const AccessControlSchema = z.object({
 
 const FeatureFlagsSchema = z.record(z.string(), z.boolean());
 
-export class AccessControlDto extends (createZodDto as any)(AccessControlSchema) {}
-export class AuthContextDto extends (createZodDto as any)(AuthContextSchema) {}
+export class AccessControlDto extends createZodDto(AccessControlSchema) {}
+export class AuthContextDto extends createZodDto(AuthContextSchema) {}
 
 export const AuthDataSchema = z.object({
   user: PublicUserSchema,
@@ -97,4 +94,4 @@ export const AuthResponseSchema = ApiMetadataSchema.extend({
   data: AuthDataSchema,
 });
 
-export class AuthResponseDto extends (createZodDto as any)(AuthResponseSchema) {}
+export class AuthResponseDto extends createZodDto(AuthResponseSchema) {}

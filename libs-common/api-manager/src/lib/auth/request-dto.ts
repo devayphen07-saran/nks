@@ -71,17 +71,39 @@ export interface UserRoleEntry {
   expiresAt: string | null;
 }
 
-export interface PermissionEntry {
-  action: string;
-  resource: string;
-  scope: string;
+export interface RouteEntry {
+  id: number;
+  routeName: string;
+  routePath: string;
+  description: string | null;
+  fullPath: string;
+  iconName: string | null;
+  routeType: "screen" | "sidebar" | "tab" | "modal";
+  appCode: string | null;
+  isPublic: boolean;
+  parentRouteFk: number | null;
+  sortOrder: number;
+  hasAccess: boolean;
+  canView: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canExport: boolean;
+  children: RouteEntry[];
 }
 
 export interface AuthAccessResponse {
   isSuperAdmin: boolean;
   activeStoreId: number | null;
   roles: UserRoleEntry[];
-  permissions: PermissionEntry[];
+  initialRoute: string;
+}
+
+export interface StoreAccessResponse {
+  activeStoreId: number;
+  roles: UserRoleEntry[];
+  permissions: string[];
+  routes: RouteEntry[];
 }
 
 export interface FeatureFlagsResponse {
@@ -126,4 +148,12 @@ export interface ProfileCompleteResponse {
 
 export interface StoreSelectRequest {
   storeId: number;
+}
+
+export interface StoreSelectResponse {
+  data: {
+    access: AuthAccessResponse;
+    permissions: string[];
+    routes: RouteEntry[];
+  };
 }

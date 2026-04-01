@@ -46,7 +46,7 @@ export const volumes = pgTable(
 
     ...auditFields(() => users.id),
   },
-  (_table) => [
+  () => [
     // baseVolumeFk and conversionFactor must both be set or both be NULL.
     // Avoids: FK set with no factor (divide by null) or factor set with no base to convert to.
     check(

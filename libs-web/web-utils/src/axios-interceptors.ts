@@ -2,7 +2,7 @@
 
 import { InternalAxiosRequestConfig, AxiosError, AxiosResponse, AxiosInstance } from "axios";
 import { API, IamAPI } from "@nks/api-manager";
-import { getAccessToken, setAccessToken, clearAuthData } from "./auth-storage";
+import { clearAuthData } from "./auth-storage";
 
 /**
  * Extended AxiosError with custom permission error metadata
@@ -13,18 +13,36 @@ interface PermissionError extends AxiosError {
 }
 
 /**
+ * Get CSRF Token from cookies
+ * Backend sets it as an httpOnly cookie after auth
+ */
+const getCsrfToken = (): string | null => {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(/(?:^|;\s*)X-CSRF-Token=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+};
+
+/**
  * Interceptor Registration Utility
  */
 const setupInterceptors = (instance: AxiosInstance): void => {
-  // Request Interceptor - Attaches Bearer Token
+  // Request Interceptor - Add CSRF Token for mutations
   instance.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
-      if (typeof window !== "undefined") {
-        const token = getAccessToken();
-        if (token && config.headers) {
-          config.headers["Authorization"] = `Bearer ${token}`;
+      // ✅ SECURITY: Add CSRF token for state-changing operations
+      // GET requests don't need CSRF protection (they're read-only)
+      const method = config.method?.toUpperCase();
+      if (["POST", "PUT", "DELETE", "PATCH"].includes(method || "")) {
+        const csrfToken = getCsrfToken();
+        if (csrfToken && config.headers) {
+          config.headers["X-CSRF-Token"] = csrfToken;
         }
       }
+
+      // ✅ SECURITY: Don't add Bearer token manually
+      // Axios uses credentials: 'include' to send httpOnly cookies automatically
+      // The backend sets auth tokens in httpOnly cookies after login/register
+      // No manual token injection needed - browser handles it!
       return config;
     },
     (error: AxiosError) => Promise.reject(error),
@@ -50,7 +68,9 @@ const setupInterceptors = (instance: AxiosInstance): void => {
         return Promise.reject(error);
       }
 
-      // Handle 401 - Attempt refresh
+      // Handle 401 - Session expired
+      // ✅ SECURITY: With httpOnly cookies, token refresh is handled by backend
+      // We just redirect to login on 401
       if (
         isAuthError &&
         originalRequest &&
@@ -60,33 +80,18 @@ const setupInterceptors = (instance: AxiosInstance): void => {
         originalRequest._retry = true;
 
         try {
-          const oldToken = getAccessToken();
-          if (!oldToken) throw new Error("No access token found");
+          // Attempt to refresh token via backend
+          // Backend will set new httpOnly cookie in response
+          await API.post("/auth/refresh-token");
 
-          const refreshResp = await API.post(
-            "/auth/refresh-token",
-            { token: oldToken },
-          );
-
-          const newAccessToken = refreshResp?.data?.data?.token;
-          if (!newAccessToken) throw new Error("Invalid refresh response");
-
-          // Token rotation: only update if token actually changed
-          if (newAccessToken !== oldToken) {
-            setAccessToken(newAccessToken);
-          }
-
-          // Retry original request with new token
-          if (originalRequest.headers) {
-            originalRequest.headers["Authorization"] =
-              `Bearer ${newAccessToken}`;
-          }
-
+          // Retry original request with new auth cookie (auto-sent by browser)
           return instance(originalRequest);
         } catch (refreshErr) {
-          // Refresh failed - session invalid, clean up
-          // Let auth provider handle redirect when it detects invalid session
+          // Refresh failed - session is invalid, clear state and redirect to login
           clearAuthData();
+          if (typeof window !== "undefined") {
+            window.location.href = "/login";
+          }
           return Promise.reject(refreshErr);
         }
       }

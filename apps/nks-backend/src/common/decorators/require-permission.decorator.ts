@@ -1,29 +1,39 @@
 import { SetMetadata } from '@nestjs/common';
+import type { PermissionCode } from '../constants/permission-codes.constants';
 
 /**
- * RequirePermission decorator specifies what permission is required to access an endpoint
- *
- * Usage:
- * @RequirePermission('customers', 'create')
- * async createCustomer(@Body() dto: CreateCustomerDto) {}
- *
- * @RequirePermission('reports', 'view')
- * async getReports() {}
- *
- * The permission is checked by PermissionGuard
+ * Metadata key consumed by PermissionGuard.
+ * Value is a permission code string in 'resource.action' format, e.g. 'orders.view'.
  */
-export const RequirePermission = (resource: string, action: string) => {
-  return (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor) => {
-    if (propertyKey && descriptor) {
-      SetMetadata('permission_resource', resource)(target, propertyKey, descriptor);
-      SetMetadata('permission_action', action)(target, propertyKey, descriptor);
-    }
-  };
-};
+export const REQUIRE_PERMISSION_KEY = 'require_permission';
 
 /**
- * Alternative: Apply both resource and action at once
- * Used in conjunction with PermissionGuard
+ * Marks an endpoint as requiring a specific permission.
+ * Must be used together with AuthGuard + PermissionGuard.
+ *
+ * Prefer using PermissionCodes constants to avoid typos:
+ * @example
+ * import { PermissionCodes } from '../constants/permission-codes.constants';
+ *
+ * @UseGuards(AuthGuard, PermissionGuard)
+ * @RequirePermission(PermissionCodes.ORDERS_VIEW)
+ * async listOrders() {}
+ *
+ * // Or with resource + action (still works):
+ * @RequirePermission('products', 'create')
+ * async createProduct() {}
  */
-export const Permission = (resource: string, action: string) =>
-  SetMetadata('permissions', [{ resource, action }]);
+export function RequirePermission(
+  code: PermissionCode,
+): ReturnType<typeof SetMetadata>;
+export function RequirePermission(
+  resource: string,
+  action: string,
+): ReturnType<typeof SetMetadata>;
+export function RequirePermission(
+  codeOrResource: string,
+  action?: string,
+): ReturnType<typeof SetMetadata> {
+  const resolvedCode = action ? `${codeOrResource}.${action}` : codeOrResource;
+  return SetMetadata(REQUIRE_PERMISSION_KEY, resolvedCode);
+}

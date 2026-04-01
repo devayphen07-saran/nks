@@ -1,0 +1,1 @@
+export { usePermissionsInitializer } from './usePermissionsInitializer';

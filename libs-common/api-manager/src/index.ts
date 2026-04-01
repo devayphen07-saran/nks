@@ -4,5 +4,7 @@ export * from './lib/company';
 export * from './lib/user';
 export * from './lib/stores';
 export * from './lib/routes';
+export * from './lib/lookup';
+export * from './lib/admin';
 export * from './lib/api-handler';
-export * from './lib/index';
+export * from './lib/axios-instances';

@@ -22,6 +22,7 @@ export * from './schema/permissions';
 export * from './schema/routes';
 export * from './schema/user-role-mapping';
 export * from './schema/role-permission-mapping';
+export * from './schema/role-entity-permission';
 export * from './schema/role-route-mapping';
 export * from './schema/user-permission-mapping';
 
@@ -35,6 +36,9 @@ export * from './schema/notification-templates';
 export * from './schema/push-tokens';
 export * from './schema/notifications';
 
+// User
+export * from './schema/user-preferences';
+
 // Audit
 export * from './schema/audit-log';
 
@@ -44,12 +48,14 @@ export * from './schema/store-category';
 export * from './schema/store';
 export * from './schema/designation';
 export * from './schema/store-user-mapping';
+export * from './schema/store-operating-hours'; // Replaces store-business-hours and store-shift
 
-// Geography
+// Location
 export * from './schema/country';
 export * from './schema/state-region-province';
-export * from './schema/district';
-export * from './schema/pincode';
+export * from './schema/administrative-division';
+export * from './schema/postal_code';
+// Note: Currency is embedded in country table — no separate currency table
 
 // Polymorphic System
 export * from './schema/entity';
@@ -65,3 +71,15 @@ export * from './schema/communication-type';
 export * from './schema/notes-type';
 export * from './schema/contact-person-type';
 export * from './schema/salutation';
+
+// Tax Engine — Phase 1 (Multi-Country)
+// Order matters: agencies → names → levels → mapping → registrations → lines
+export * from './schema/commodity-codes';
+export * from './schema/tax-agencies';
+export * from './schema/tax-names';
+export * from './schema/tax-levels';
+export * from './schema/tax-level-mapping';
+export * from './schema/tax-registrations';
+export * from './schema/tax-rate-master';
+export * from './schema/daily-tax-summary';
+export * from './schema/transaction-tax-lines';

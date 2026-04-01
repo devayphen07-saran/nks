@@ -125,3 +125,23 @@ export const authMethodEnum = pgEnum('auth_method', [
   'PASSWORD',
   'GOOGLE',
 ]);
+
+export const loginStatusEnum = pgEnum('login_status', [
+  'SUCCESS', // Successful login
+  'FAILED', // Failed login attempt (invalid credentials)
+  'BLOCKED', // Account locked after failed attempts
+]);
+
+// administrative_division: type of administrative subdivision
+// Supports all countries' division types (not India-specific)
+export const divisionTypeEnum = pgEnum('division_type', [
+  'DISTRICT', // India
+  'COUNTY', // USA, UK, Canada
+  'LANDKREIS', // Germany
+  'PREFECTURE', // Japan
+  'DEPARTMENT', // France, Colombia
+  'MUNICIPALITY', // Canada, Brazil
+  'BOROUGH', // UK (London)
+  'REGION', // Generic fallback
+  'PROVINCE', // Generic fallback
+]);

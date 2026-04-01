@@ -1,51 +1,23 @@
-import { Tabs } from "expo-router";
-import { LucideIcon } from "@nks/mobile-ui-components";
-import { useMobileTheme } from "@nks/mobile-theme";
+import React from "react";
+import { Drawer } from "expo-router/drawer";
+import { PersonalDrawerContent } from "@/features/personal/PersonalDrawerContent";
 
 export default function PersonalLayout() {
-  const { theme } = useMobileTheme();
-
   return (
-    <Tabs
+    <Drawer
+      drawerContent={(props) => <PersonalDrawerContent {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: theme.colorPrimary,
-        tabBarInactiveTintColor: theme.colorTextSecondary,
-        tabBarStyle: {
-          backgroundColor: theme.colorBgContainer,
-          borderTopColor: theme.colorBorderSecondary,
-          borderTopWidth: 1,
-          height: 60,
-        },
+        drawerStatusBarAnimation: "slide",
+        drawerType: "slide",
       }}
     >
-      <Tabs.Screen
-        name="dashboard"
+      <Drawer.Screen
+        name="(tabs)"
         options={{
-          title: "Dashboard",
-          tabBarIcon: ({ color }) => (
-            <LucideIcon name="BarChart3" size={24} color={color} />
-          ),
+          drawerItemStyle: { display: "none" },
         }}
       />
-      <Tabs.Screen
-        name="expense"
-        options={{
-          title: "Expense",
-          tabBarIcon: ({ color }) => (
-            <LucideIcon name="Wallet" size={24} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profile",
-          tabBarIcon: ({ color }) => (
-            <LucideIcon name="User" size={24} color={color} />
-          ),
-        }}
-      />
-    </Tabs>
+    </Drawer>
   );
 }

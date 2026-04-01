@@ -11,12 +11,12 @@ type Db = NodePgDatabase<typeof schema>;
  * Prevents DoS attacks by limiting OTP send requests per identifier (phone/email)
  *
  * Rules:
- * - Max 5 OTP requests per identifier per 24h window
+ * - Max 100 OTP requests per identifier per 24h window
  * - Window resets after 24 hours of inactivity
  */
 @Injectable()
 export class OtpRateLimitService {
-  private readonly MAX_REQUESTS = 5;
+  private readonly MAX_REQUESTS = 100;
   private readonly WINDOW_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
   constructor(@InjectDb() private readonly db: Db) {}

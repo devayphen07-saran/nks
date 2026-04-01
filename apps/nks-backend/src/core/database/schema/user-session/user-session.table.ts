@@ -40,6 +40,23 @@ export const userSession = pgTable(
       () => store.id,
       { onDelete: 'set null' },
     ),
+
+    // User roles embedded in the session token for faster authorization checks
+    userRoles: text('user_roles'), // JSON stringified array of role objects
+    primaryRole: varchar('primary_role', { length: 50 }), // Primary role code (SUPER_ADMIN, STORE_OWNER, CASHIER, etc.)
+
+    // ✅ MODULE 2: Token Refresh Strategy
+    // Refresh token is stored as SHA256 hash (never plaintext)
+    refreshTokenHash: varchar('refresh_token_hash', { length: 64 }),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', {
+      withTimezone: true,
+    }),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', {
+      withTimezone: true,
+    }),
+
+    // Note: JWT token and role hash are now managed in application memory
+    // via the AuthService instead of persisted to the database
   },
   (table) => [
     index('user_session_user_idx').on(table.userId),

@@ -1,8 +1,16 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse as SwaggerResponse,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
 import { OtpService } from '../services/otp.service';
 import { SendOtpDto, VerifyOtpDto } from '../dto/otp.dto';
@@ -47,6 +55,7 @@ export class OtpController {
   @Post('email/send')
   @HttpCode(HttpStatus.OK)
   @UseGuards(AuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Send OTP to email during onboarding (authenticated user)',
   })
@@ -58,6 +67,7 @@ export class OtpController {
   @Post('email/verify')
   @HttpCode(HttpStatus.OK)
   @UseGuards(AuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Verify email OTP and mark email as verified',
   })

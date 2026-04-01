@@ -1,4 +1,11 @@
-import { pgTable, bigint, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  bigint,
+  boolean,
+  timestamp,
+  index,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { junctionEntity } from '../base.entity';
 import { users } from '../users';
@@ -25,6 +32,13 @@ export const userRoleMapping = pgTable(
       () => users.id,
       { onDelete: 'set null' },
     ),
+
+    // Soft-suspend: false = role temporarily disabled without losing audit trail.
+    // Java's UserRoleMapping.isActive pattern — allows re-enabling without re-assigning.
+    isActive: boolean('is_active').notNull().default(true),
+
+    // Optional expiry — null means the assignment never expires.
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
   },
   (table) => [
     // Global roles (storeFk IS NULL): PostgreSQL NULL != NULL in UNIQUE constraints,

@@ -4,12 +4,21 @@ export interface Route {
   id: number;
   routePath: string;
   routeName: string;
-  description?: string | null;
-  iconName?: string | null;
-  routeType: string;
-  fullPath?: string;
-  sortOrder?: number;
-  parentRouteFk?: number | null;
+  description: string | null;
+  iconName: string | null;
+  routeType: "screen" | "sidebar" | "tab" | "modal";
+  appCode: string | null;
+  isPublic: boolean;
+  fullPath: string;
+  sortOrder: number;
+  parentRouteFk: number | null;
+  hasAccess: boolean;
+  canView: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canExport: boolean;
+  children: Route[];
 }
 
 export interface Permission {
@@ -28,4 +37,5 @@ export interface RoutesState {
   fetchedAt: number;
   error: string | null;
   fetchState: APIState;
+  permissionsLoaded: boolean; // Flag to prevent re-fetching on page refresh
 }

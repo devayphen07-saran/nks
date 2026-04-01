@@ -1,11 +1,4 @@
-import {
-  pgTable,
-  varchar,
-  char,
-  bigint,
-  integer,
-  boolean,
-} from 'drizzle-orm/pg-core';
+import { pgTable, varchar, char, integer, boolean } from 'drizzle-orm/pg-core';
 import { baseEntity, auditFields } from '../base.entity';
 import { users } from '../users';
 

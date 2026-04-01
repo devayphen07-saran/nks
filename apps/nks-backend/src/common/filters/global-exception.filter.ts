@@ -53,7 +53,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       );
     } else {
       this.logger.warn(
-        `[${request.method}] ${request.url} → ${status} | ${body.message}`,
+        `[${request.method}] ${request.url} → ${status} | ${String(body.message ?? 'Unknown error')}`,
       );
     }
 
@@ -141,7 +141,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       process.env.NODE_ENV === 'production'
         ? 'An unexpected error occurred'
         : (((exception as Record<string, unknown>)?.message as string) ??
-            'An unexpected error occurred');
+          'An unexpected error occurred');
 
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,

@@ -43,7 +43,7 @@ export class PasswordService {
       );
     }
 
-    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+    if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)) {
       throw new BadRequestException(
         'Password must contain at least one special character (!@#$%^&*)',
       );

@@ -13,6 +13,8 @@ import {
 import { useMobileTheme } from "@nks/mobile-theme";
 import { useRootDispatch } from "../../store";
 import { logoutThunk } from "../../store/logoutThunk";
+import { setupPersonal } from "@nks/api-manager";
+import { refreshSession } from "../../store/refreshSession";
 
 export function AccountTypeScreen() {
   const { theme } = useMobileTheme();
@@ -20,14 +22,16 @@ export function AccountTypeScreen() {
   const dispatch = useRootDispatch();
 
   const handleStore = useCallback(() => {
-    // Go directly to the store list — profile completion is not required
     router.push("/(protected)/(workspace)/(app)/(store)/list");
   }, []);
 
-
   const handlePersonal = useCallback(() => {
-    router.push("/(protected)/(workspace)/(app)/(personal)/dashboard");
-  }, []);
+    dispatch(setupPersonal({})).then(() => {
+      dispatch(refreshSession()).then(() => {
+        router.push("/(protected)/(workspace)/(app)/(personal)/dashboard");
+      });
+    });
+  }, [dispatch]);
 
   const handleLogout = useCallback(() => {
     Alert.confirm(
@@ -35,7 +39,7 @@ export function AccountTypeScreen() {
       "Are you sure you want to log out?",
       () => dispatch(logoutThunk()),
       "Logout",
-      "destructive"
+      "destructive",
     );
   }, [dispatch]);
 
@@ -47,108 +51,101 @@ export function AccountTypeScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Hero $topInset={insets.top}>
-            <DecorRingTopRight />
-            <DecorRingBottomLeft />
-            <HeroContent align="center" gap="xSmall">
-              <LogoCircle>
-                <LucideIcon name="Store" size={36} color={theme.colorPrimary} />
-              </LogoCircle>
-              <Typography.H3 weight="bold" color={theme.colorWhite}>
-                NKS
-              </Typography.H3>
-              <Typography.Body color={theme.colorWhite}>
-                How will you use NKS?
-              </Typography.Body>
+            <HeroContent gap="xSmall" align="center">
+              <LogoRow gap="small" align="center">
+                <LogoCircle>
+                  <LucideIcon name="Layers" size={24} color={theme.colorWhite} />
+                </LogoCircle>
+                <Typography.H4 weight="bold" color={theme.colorText}>
+                  NKS
+                </Typography.H4>
+              </LogoRow>
             </HeroContent>
           </Hero>
 
-          <FormCard
-            style={{
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 8 },
-              shadowOpacity: 0.12,
-              shadowRadius: 24,
-              elevation: 8,
-            }}
-          >
-            <FormHeader gap="xxSmall">
-              <Typography.H4 weight="bold">Choose account type</Typography.H4>
+          <PageContent gap="large">
+            <Column gap="medium">
+              <SetupBadge>
+                <LucideIcon name="Settings" size={12} color={theme.colorTextSecondary} />
+                <Typography.Caption weight="semiBold" color={theme.colorTextSecondary}>
+                  ACCOUNT SETUP
+                </Typography.Caption>
+              </SetupBadge>
+              <Typography.H2 weight="bold">Select your{"\n"}workspace</Typography.H2>
               <Typography.Body type="secondary">
-                Select how you want to use the platform
+                Choose the account type that best matches your operational requirements.
               </Typography.Body>
-            </FormHeader>
+            </Column>
 
-            <Column gap="small">
+            <Column gap="medium">
               <OptionCard onPress={handleStore}>
                 <Row gap="medium" align="center">
-                  <IconBox>
-                    <LucideIcon
-                      name="Store"
-                      size={28}
-                      color={theme.colorPrimary}
-                    />
-                  </IconBox>
+                  <IconBoxPrimary>
+                    <LucideIcon name="Building2" size={28} color={theme.colorWhite} />
+                  </IconBoxPrimary>
                   <Column flex={1} gap="xxSmall">
-                    <Typography.Body weight="semiBold">
-                      Store / Business
-                    </Typography.Body>
+                    <Typography.Body weight="semiBold">Business Account</Typography.Body>
                     <Typography.Caption type="secondary">
-                      Manage inventory, orders, and staff
+                      Comprehensive tools to manage inventory, process orders, and collaborate with your team.
                     </Typography.Caption>
                   </Column>
-                  <LucideIcon
-                    name="ChevronRight"
-                    size={20}
-                    color={theme.colorTextSecondary}
-                  />
+                  <LucideIcon name="ChevronRight" size={20} color={theme.colorTextSecondary} />
                 </Row>
               </OptionCard>
 
               <OptionCard onPress={handlePersonal}>
                 <Row gap="medium" align="center">
-                  <IconBox>
-                    <LucideIcon
-                      name="User"
-                      size={28}
-                      color={theme.colorPrimary}
-                    />
-                  </IconBox>
+                  <IconBoxSecondary>
+                    <LucideIcon name="User" size={28} color={theme.colorTextSecondary} />
+                  </IconBoxSecondary>
                   <Column flex={1} gap="xxSmall">
-                    <Typography.Body weight="semiBold">
-                      Personal
-                    </Typography.Body>
+                    <Typography.Body weight="semiBold">Personal Account</Typography.Body>
                     <Typography.Caption type="secondary">
-                      Track personal expenses and purchases
+                      Simplified experience to track individual expenses and manage personal purchases.
                     </Typography.Caption>
                   </Column>
-                  <LucideIcon
-                    name="ChevronRight"
-                    size={20}
-                    color={theme.colorTextSecondary}
-                  />
+                  <LucideIcon name="ChevronRight" size={20} color={theme.colorTextSecondary} />
                 </Row>
               </OptionCard>
             </Column>
-          </FormCard>
+          </PageContent>
 
-          <Column flex={1} justify="flex-end" align="center" padding="xLarge" gap="medium">
-            <InviteLink
-              onPress={() => router.push("/(protected)/(workspace)/(onboarding)/accept-invite")}
+          <BottomSection gap="medium">
+            <InviteLinkCard
+              onPress={() =>
+                router.push(
+                  "/(protected)/(workspace)/(app)/(onboarding)/accept-invite",
+                )
+              }
             >
-              <Typography.Body weight="semiBold" type="primary">
-                Have an invite token? Join a store
-              </Typography.Body>
-            </InviteLink>
-
-            <LogoutButton onPress={handleLogout}>
-              <Row gap="xSmall" align="center">
-                <LucideIcon name="LogOut" size={18} color={theme.colorTextTertiary} />
-                <Typography.Body weight="medium" color={theme.colorTextTertiary}>
-                  Logout
-                </Typography.Body>
+              <Row gap="medium" align="center" style={{ flex: 1 }}>
+                <LucideIcon
+                  name="Link"
+                  size={24}
+                  color={theme.colorTextSecondary}
+                />
+                <Column flex={1} gap="xxSmall">
+                  <Typography.Body weight="semiBold" color={theme.colorText}>
+                    Have an invite link?
+                  </Typography.Body>
+                  <Typography.Caption color={theme.colorTextSecondary}>
+                    Join an existing organization team
+                  </Typography.Caption>
+                </Column>
+                <LucideIcon
+                  name="ChevronRight"
+                  size={20}
+                  color={theme.colorTextSecondary}
+                />
               </Row>
-            </LogoutButton>
-          </Column>
+            </InviteLinkCard>
+
+            <SignOutButton onPress={handleLogout}>
+              <Typography.Body color={theme.colorTextSecondary}>
+                Sign out securely
+              </Typography.Body>
+            </SignOutButton>
+          </BottomSection>
         </ScrollArea>
       </KeyboardAvoiding>
     </Container>
@@ -159,7 +156,7 @@ export function AccountTypeScreen() {
 
 const Container = styled.View`
   flex: 1;
-  background-color: ${({ theme }) => theme.colorPrimary};
+  background-color: ${({ theme }) => theme.colorBgLayout};
 `;
 
 const KeyboardAvoiding = styled(KeyboardAvoidingView)`
@@ -172,88 +169,94 @@ const ScrollArea = styled.ScrollView`
 `;
 
 const Hero = styled.View<{ $topInset: number }>`
-  background-color: ${({ theme }) => theme.colorPrimary};
-  padding-top: ${({ theme, $topInset }) => theme.sizing.xLarge + $topInset}px;
-  padding-bottom: ${({ theme }) =>
-    theme.sizing.xxLarge + theme.sizing.xLarge}px;
-  align-items: center;
-  justify-content: center;
+  background-color: ${({ theme }) => theme.colorBgLayout};
+  padding-top: ${({ theme, $topInset }) => theme.sizing.medium + $topInset}px;
+  padding-bottom: ${({ theme }) => theme.sizing.medium}px;
+  padding-left: ${({ theme }) => theme.sizing.large}px;
+  padding-right: ${({ theme }) => theme.sizing.large}px;
+  align-items: flex-start;
+  justify-content: flex-start;
   overflow: hidden;
-`;
-
-const DecorRingTopRight = styled.View`
-  position: absolute;
-  width: 240px;
-  height: 240px;
-  border-radius: 120px;
-  border-width: 40px;
-  border-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.07;
-  top: -80px;
-  right: -60px;
-`;
-
-const DecorRingBottomLeft = styled.View`
-  position: absolute;
-  width: 160px;
-  height: 160px;
-  border-radius: 80px;
-  border-width: 30px;
-  border-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.07;
-  bottom: -50px;
-  left: -30px;
 `;
 
 const HeroContent = styled(Column)``;
 
+const LogoRow = styled(Row)`
+  align-self: flex-start;
+`;
+
 const LogoCircle = styled.View`
-  width: 80px;
-  height: 80px;
-  border-radius: 40px;
-  background-color: ${({ theme }) => theme.colorWhite};
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background-color: ${({ theme }) => theme.colorPrimary};
   align-items: center;
   justify-content: center;
-  margin-bottom: ${({ theme }) => theme.sizing.xSmall}px;
 `;
 
-const FormCard = styled(Column)`
-  margin-left: ${({ theme }) => theme.sizing.medium}px;
-  margin-right: ${({ theme }) => theme.sizing.medium}px;
-  margin-top: -${({ theme }) => theme.sizing.xLarge}px;
-  background-color: ${({ theme }) => theme.colorBgContainer};
-  border-radius: ${({ theme }) => theme.borderRadius.xLarge}px;
-  padding: ${({ theme }) => theme.sizing.xLarge}px;
+const PageContent = styled(Column)`
+  padding-left: ${({ theme }) => theme.sizing.large}px;
+  padding-right: ${({ theme }) => theme.sizing.large}px;
+  padding-top: ${({ theme }) => theme.sizing.medium}px;
+  padding-bottom: ${({ theme }) => theme.sizing.large}px;
 `;
 
-const FormHeader = styled(Column)`
-  margin-bottom: ${({ theme }) => theme.sizing.large}px;
+const SetupBadge = styled(Row)`
+  background-color: ${({ theme }) => theme.colorBgLayout};
+  border-radius: 20px;
+  padding-left: ${({ theme }) => theme.sizing.small}px;
+  padding-right: ${({ theme }) => theme.sizing.small}px;
+  padding-top: ${({ theme }) => theme.sizing.xxSmall}px;
+  padding-bottom: ${({ theme }) => theme.sizing.xxSmall}px;
+  align-self: flex-start;
+  gap: ${({ theme }) => theme.sizing.xxSmall}px;
 `;
 
 const OptionCard = styled.TouchableOpacity`
-  background-color: ${({ theme }) => theme.colorBgLayout};
+  background-color: ${({ theme }) => theme.colorBgContainer};
   border-radius: ${({ theme }) => theme.borderRadius.large}px;
-  padding: ${({ theme }) => theme.sizing.medium}px;
+  padding: ${({ theme }) => theme.sizing.large}px;
   border-width: 1px;
   border-color: ${({ theme }) => theme.colorBorderSecondary};
 `;
 
-const IconBox = styled.View`
+
+const IconBoxPrimary = styled.View`
   width: 52px;
   height: 52px;
   border-radius: ${({ theme }) => theme.borderRadius.medium}px;
-  background-color: ${({ theme }) => theme.colorPrimaryBg};
+  background-color: ${({ theme }) => theme.colorPrimary};
   align-items: center;
   justify-content: center;
 `;
 
-const InviteLink = styled.TouchableOpacity`
-  padding-top: ${({ theme }) => theme.sizing.xxSmall}px;
-  padding-bottom: ${({ theme }) => theme.sizing.xxSmall}px;
+const IconBoxSecondary = styled.View`
+  width: 52px;
+  height: 52px;
+  border-radius: ${({ theme }) => theme.borderRadius.medium}px;
+  background-color: ${({ theme }) => theme.colorBgLayout};
+  align-items: center;
+  justify-content: center;
 `;
 
-const LogoutButton = styled.TouchableOpacity`
+const BottomSection = styled(Column)`
+  margin-left: ${({ theme }) => theme.sizing.large}px;
+  margin-right: ${({ theme }) => theme.sizing.large}px;
+  margin-top: ${({ theme }) => theme.sizing.large}px;
+  margin-bottom: ${({ theme }) => theme.sizing.large}px;
+`;
+
+const InviteLinkCard = styled.TouchableOpacity`
+  background-color: ${({ theme }) => theme.colorBgContainer};
+  border-radius: ${({ theme }) => theme.borderRadius.large}px;
+  padding: ${({ theme }) => theme.sizing.large}px;
+  border-width: 1px;
+  border-color: ${({ theme }) => theme.colorBorderSecondary};
+`;
+
+
+const SignOutButton = styled.TouchableOpacity`
   padding-top: ${({ theme }) => theme.sizing.small}px;
   padding-bottom: ${({ theme }) => theme.sizing.small}px;
-  margin-bottom: ${({ theme }) => theme.sizing.medium}px;
+  align-items: center;
 `;

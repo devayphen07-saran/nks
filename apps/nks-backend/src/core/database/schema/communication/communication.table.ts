@@ -13,10 +13,22 @@ import { communicationType } from '../communication-type';
 import { country } from '../country';
 import { baseEntity, auditFields } from '../base.entity';
 
+/**
+ * COMMUNICATION
+ *
+ * Polymorphic contact details storage (email, phone, fax, website) for any entity.
+ * Uses soft-delete pattern: isActive (legacy) and deletedAt (preferred).
+ *
+ * Soft-delete strategy:
+ *   - Active contacts: isActive=true AND deletedAt IS NULL
+ *   - Deleted contacts: isActive=false OR deletedAt IS NOT NULL
+ *   - Queries should filter: WHERE is_active = true AND deleted_at IS NULL
+ *   - Historical records retained for audit/compliance purposes
+ */
 export const communication = pgTable(
   'communication',
   {
-    ...baseEntity(),
+    ...baseEntity(), // includes: isActive, deletedAt
 
     // Polymorphic ownership
     entityFk: bigint('entity_fk', { mode: 'number' })
@@ -70,6 +82,12 @@ export const communication = pgTable(
     index('communication_entity_record_active_idx')
       .on(table.entityFk, table.recordId)
       .where(sql`is_active = true`),
+
+    // Single-column indexes for FK-only queries
+    index('communication_entity_idx').on(table.entityFk),
+    index('communication_record_idx').on(table.recordId),
+    index('communication_type_idx').on(table.communicationTypeFk),
+    index('communication_dial_country_idx').on(table.dialCountryFk),
   ],
 );
 

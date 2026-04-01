@@ -1,0 +1,240 @@
+{
+  "codeQualityStandards": {
+    "typescript": {
+      "strictMode": true,
+      "rules": {
+        "noExplicitAny": {
+          "enabled": true,
+          "severity": "error",
+          "message": "Avoid 'any' types. Use specific interfaces from src/common/types/"
+        },
+        "explicitReturnTypes": {
+          "enabled": true,
+          "severity": "error",
+          "message": "All functions must have explicit return types"
+        },
+        "explicitParameterTypes": {
+          "enabled": true,
+          "severity": "error",
+          "message": "All parameters must have explicit types"
+        }
+      }
+    },
+    "logging": {
+      "rules": {
+        "noConsoleInProduction": {
+          "enabled": true,
+          "severity": "error",
+          "allowedFiles": ["seeders/", ".spec.ts"],
+          "message": "Use NestJS Logger instead of console.log()"
+        },
+        "errorLoggingRequired": {
+          "enabled": true,
+          "severity": "warning",
+          "message": "All catch blocks must log error details"
+        }
+      }
+    },
+    "constants": {
+      "rules": {
+        "noMagicNumbers": {
+          "enabled": true,
+          "severity": "warning",
+          "ignoredNumbers": [0, 1, -1, 2],
+          "message": "Use constants from src/common/constants/app-constants.ts"
+        },
+        "noHardcodedStrings": {
+          "enabled": true,
+          "severity": "warning",
+          "ignoredPatterns": ["^[a-z_]+@[a-z_]+\\.[a-z]+$"],
+          "message": "Use constants for business logic strings"
+        }
+      }
+    },
+    "security": {
+      "rules": {
+        "noPasswordLogging": {
+          "enabled": true,
+          "severity": "error",
+          "sensitiveFields": [
+            "password",
+            "token",
+            "secret",
+            "apiKey",
+            "otpHash"
+          ],
+          "message": "Never log sensitive data"
+        },
+        "noLocalhostInProduction": {
+          "enabled": true,
+          "severity": "warning",
+          "allowedInEnvironments": ["development", "test"],
+          "message": "Use environment variables for URLs, not hardcoded localhost"
+        },
+        "otpSecurityRequirement": {
+          "enabled": true,
+          "severity": "error",
+          "requirement": "OTP must be hashed before storage",
+          "message": "Use bcrypt to hash OTP values"
+        }
+      }
+    },
+    "errorHandling": {
+      "rules": {
+        "nothrowWithoutContext": {
+          "enabled": true,
+          "severity": "error",
+          "message": "Always provide descriptive error messages"
+        },
+        "noSilentFallbacks": {
+          "enabled": true,
+          "severity": "warning",
+          "message": "Log error before falling back to alternative logic"
+        },
+        "transactionSafety": {
+          "enabled": true,
+          "severity": "error",
+          "requirement": "All database writes must be in transactions",
+          "message": "Use TransactionService for atomic operations"
+        }
+      }
+    },
+    "codeDuplication": {
+      "rules": {
+        "maxDuplicationPercentage": 3,
+        "ignoredPatterns": ["test", "spec"],
+        "message": "Code duplication > 3% detected. Extract to shared utility."
+      }
+    }
+  },
+  "files": {
+    "constants": {
+      "location": "src/common/constants/app-constants.ts",
+      "purpose": "Centralized configuration for all magic numbers and strings"
+    },
+    "types": {
+      "location": "src/common/types/auth.types.ts",
+      "purpose": "Type definitions replacing 'any' types"
+    },
+    "logger": {
+      "location": "Use: import { Logger } from '@nestjs/common'",
+      "purpose": "Standard logging instead of console.log"
+    }
+  },
+  "criticalIssues": [
+    {
+      "id": "CRITICAL_001",
+      "title": "OTP plaintext comparison",
+      "file": "src/modules/auth/services/otp.service.ts",
+      "line": 144,
+      "severity": "CRITICAL",
+      "description": "OTP is compared in plaintext. Should use bcrypt hashing.",
+      "status": "NOT_FIXED",
+      "dueDate": "2026-04-07"
+    },
+    {
+      "id": "CRITICAL_002",
+      "title": "Email OTP not implemented",
+      "file": "src/modules/auth/services/otp.service.ts",
+      "line": 106,
+      "severity": "HIGH",
+      "description": "Email OTP sends via logging only. Needs email service integration.",
+      "status": "NOT_FIXED",
+      "dueDate": "2026-04-14"
+    },
+    {
+      "id": "CRITICAL_003",
+      "title": "'any' types in auth service",
+      "file": "src/modules/auth/services/auth.service.ts",
+      "lines": [36, 139, 142, 143, 382, 545, 546, 592, 773, 788],
+      "severity": "HIGH",
+      "description": "Multiple 'any' types reduce type safety",
+      "status": "IN_PROGRESS",
+      "dueDate": "2026-04-07"
+    }
+  ],
+  "reviewChecklist": {
+    "preCommit": [
+      "No console.log/console.error in production code",
+      "All functions have explicit return types",
+      "No 'any' types used",
+      "Error messages are descriptive",
+      "Sensitive data is not logged",
+      "Constants used instead of magic numbers"
+    ],
+    "pullRequest": [
+      "Code duplication < 3%",
+      "Test coverage > 80% for new code",
+      "All TODOs have associated tickets",
+      "Error handling covers all edge cases",
+      "Documentation updated for API changes"
+    ]
+  },
+  "enabledLinters": {
+    "eslint": {
+      "config": ".eslintrc.json",
+      "rules": {
+        "no-console": "error",
+        "@typescript-eslint/no-explicit-any": "error",
+        "@typescript-eslint/explicit-function-return-types": "error",
+        "@typescript-eslint/naming-convention": "warn"
+      }
+    },
+    "prettier": {
+      "config": ".prettierrc",
+      "enforceOnCommit": true
+    },
+    "sonarqube": {
+      "enabled": false,
+      "note": "Consider enabling for enterprise deployment"
+    }
+  },
+  "implementationStatus": {
+    "phase1": {
+      "name": "Immediate Action Items",
+      "progress": 25,
+      "items": {
+        "extractConstants": "✅ COMPLETED",
+        "createTypes": "✅ IN_PROGRESS",
+        "removeConsole": "🔴 NOT_STARTED"
+      }
+    },
+    "phase2": {
+      "name": "High Priority Refactoring",
+      "progress": 0,
+      "items": {
+        "otpHashing": "🔴 NOT_STARTED",
+        "emailService": "🔴 NOT_STARTED",
+        "codeDuplication": "🔴 NOT_STARTED",
+        "errorHandling": "🔴 NOT_STARTED"
+      }
+    },
+    "phase3": {
+      "name": "Medium Priority Refactoring",
+      "progress": 0,
+      "items": {
+        "databaseHooks": "🔴 NOT_STARTED",
+        "localhostRemoval": "🔴 NOT_STARTED",
+        "queryPatterns": "🔴 NOT_STARTED"
+      }
+    }
+  },
+  "metrics": {
+    "targetCodeQuality": {
+      "anyTypesCount": 0,
+      "consoleStatementsInProduction": 0,
+      "magicNumbersCount": 0,
+      "codeDuplicationPercentage": 3,
+      "errorHandlingCoverage": 100,
+      "typeCoverage": 80
+    },
+    "current": {
+      "anyTypesCount": 14,
+      "consoleStatementsInProduction": 7,
+      "magicNumbersCount": 20,
+      "codeDuplicationPercentage": 8,
+      "errorHandlingCoverage": 60,
+      "typeCoverage": 65
+    }
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "id": "28826351-c506-4aeb-8075-bae103978479",
+  "id": "37fa93e2-1c74-45d5-aaa5-58704ae2aa91",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -130,9 +130,22 @@
           "primaryKey": false,
           "notNull": false
         },
+        "account_locked_until": {
+          "name": "account_locked_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "blocked_by": {
           "name": "blocked_by",
           "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "primary_login_method": {
+          "name": "primary_login_method",
+          "type": "auth_method",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": false
         },
@@ -158,6 +171,19 @@
         },
         "last_active_at": {
           "name": "last_active_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "profile_completed": {
+          "name": "profile_completed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "profile_completed_at": {
+          "name": "profile_completed_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -223,6 +249,36 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_blocked_by_idx": {
+          "name": "users_blocked_by_idx",
+          "columns": [
+            {
+              "expression": "blocked_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_profile_completed_idx": {
+          "name": "users_profile_completed_idx",
+          "columns": [
+            {
+              "expression": "profile_completed",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -401,6 +457,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "login_method": {
+          "name": "login_method",
+          "type": "auth_method",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
         "active_store_fk": {
           "name": "active_store_fk",
           "type": "bigint",
@@ -554,14 +617,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "access_token_expires_date": {
-          "name": "access_token_expires_date",
+        "access_token_expires_at": {
+          "name": "access_token_expires_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
-        "refresh_token_expires_date": {
-          "name": "refresh_token_expires_date",
+        "refresh_token_expires_at": {
+          "name": "refresh_token_expires_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -575,6 +638,19 @@
         "password": {
           "name": "password",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_verified": {
+          "name": "is_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         }
@@ -591,6 +667,27 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "user_auth_provider_user_provider_unique": {
+          "name": "user_auth_provider_user_provider_unique",
+          "columns": [
+            {
+              "expression": "user_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -692,6 +789,12 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
+        },
+        "auth_provider_fk": {
+          "name": "auth_provider_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -715,13 +818,123 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "otp_verification_auth_provider_idx": {
+          "name": "otp_verification_auth_provider_idx",
+          "columns": [
+            {
+              "expression": "auth_provider_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "otp_verification_auth_provider_fk_user_auth_provider_id_fk": {
+          "name": "otp_verification_auth_provider_fk_user_auth_provider_id_fk",
+          "tableFrom": "otp_verification",
+          "tableTo": "user_auth_provider",
+          "columnsFrom": [
+            "auth_provider_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "otp_verification_guuid_unique": {
+          "name": "otp_verification_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.otp_request_log": {
+      "name": "otp_request_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "identifier": {
+          "name": "identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_count": {
+          "name": "request_count",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "window_expires_at": {
+          "name": "window_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "otp_request_log_identifier_idx": {
+          "name": "otp_request_log_identifier_idx",
+          "columns": [
+            {
+              "expression": "identifier",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "otp_verification_guuid_unique": {
-          "name": "otp_verification_guuid_unique",
+        "otp_request_log_guuid_unique": {
+          "name": "otp_request_log_guuid_unique",
           "nullsNotDistinct": false,
           "columns": [
             "guuid"
@@ -999,6 +1212,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1011,6 +1231,32 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_hidden": {
+          "name": "is_hidden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_system": {
+          "name": "is_system",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "name": {
           "name": "name",
@@ -1344,6 +1590,19 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": false
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -1402,6 +1661,21 @@
           "columns": [
             {
               "expression": "role_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "user_role_mapping_assigned_by_idx": {
+          "name": "user_role_mapping_assigned_by_idx",
+          "columns": [
+            {
+              "expression": "assigned_by",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1509,7 +1783,38 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "role_permission_mapping_permission_idx": {
+          "name": "role_permission_mapping_permission_idx",
+          "columns": [
+            {
+              "expression": "permission_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "role_permission_mapping_assigned_by_idx": {
+          "name": "role_permission_mapping_assigned_by_idx",
+          "columns": [
+            {
+              "expression": "assigned_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "role_permission_mapping_role_fk_roles_id_fk": {
           "name": "role_permission_mapping_role_fk_roles_id_fk",
@@ -1559,6 +1864,221 @@
           "columns": [
             "role_fk",
             "permission_fk"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.role_entity_permission": {
+      "name": "role_entity_permission",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_hidden": {
+          "name": "is_hidden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_system": {
+          "name": "is_system",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "role_fk": {
+          "name": "role_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_code": {
+          "name": "entity_code",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "can_view": {
+          "name": "can_view",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "can_create": {
+          "name": "can_create",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "can_edit": {
+          "name": "can_edit",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "can_delete": {
+          "name": "can_delete",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "allow": {
+          "name": "allow",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {
+        "role_entity_permission_role_entity_idx": {
+          "name": "role_entity_permission_role_entity_idx",
+          "columns": [
+            {
+              "expression": "role_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entity_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "role_entity_permission_role_idx": {
+          "name": "role_entity_permission_role_idx",
+          "columns": [
+            {
+              "expression": "role_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "role_entity_permission_entity_idx": {
+          "name": "role_entity_permission_entity_idx",
+          "columns": [
+            {
+              "expression": "entity_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "role_entity_permission_active_idx": {
+          "name": "role_entity_permission_active_idx",
+          "columns": [
+            {
+              "expression": "is_active",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "role_entity_permission_role_fk_roles_id_fk": {
+          "name": "role_entity_permission_role_fk_roles_id_fk",
+          "tableFrom": "role_entity_permission",
+          "tableTo": "roles",
+          "columnsFrom": [
+            "role_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "role_entity_permission_guuid_unique": {
+          "name": "role_entity_permission_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        },
+        "role_entity_permission_unique_idx": {
+          "name": "role_entity_permission_unique_idx",
+          "nullsNotDistinct": false,
+          "columns": [
+            "role_fk",
+            "entity_code"
           ]
         }
       },
@@ -1644,7 +2164,23 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "role_route_mapping_route_idx": {
+          "name": "role_route_mapping_route_idx",
+          "columns": [
+            {
+              "expression": "route_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "role_route_mapping_role_fk_roles_id_fk": {
           "name": "role_route_mapping_role_fk_roles_id_fk",
@@ -2747,6 +3283,21 @@
         }
       },
       "indexes": {
+        "notifications_created_at_idx": {
+          "name": "notifications_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "notifications_user_fk_idx": {
           "name": "notifications_user_fk_idx",
           "columns": [
@@ -2905,6 +3456,176 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.user_preferences": {
+      "name": "user_preferences",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_fk": {
+          "name": "user_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "theme": {
+          "name": "theme",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'light'"
+        },
+        "timezone": {
+          "name": "timezone",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notifications_enabled": {
+          "name": "notifications_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "two_factor_enabled": {
+          "name": "two_factor_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by": {
+          "name": "modified_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "user_preferences_user_fk_users_id_fk": {
+          "name": "user_preferences_user_fk_users_id_fk",
+          "tableFrom": "user_preferences",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "user_preferences_created_by_users_id_fk": {
+          "name": "user_preferences_created_by_users_id_fk",
+          "tableFrom": "user_preferences",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "user_preferences_modified_by_users_id_fk": {
+          "name": "user_preferences_modified_by_users_id_fk",
+          "tableFrom": "user_preferences",
+          "tableTo": "users",
+          "columnsFrom": [
+            "modified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "user_preferences_deleted_by_users_id_fk": {
+          "name": "user_preferences_deleted_by_users_id_fk",
+          "tableFrom": "user_preferences",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "user_preferences_guuid_unique": {
+          "name": "user_preferences_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        },
+        "user_preferences_user_unique": {
+          "name": "user_preferences_user_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_fk"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.audit_logs": {
       "name": "audit_logs",
       "schema": "",
@@ -3023,6 +3744,21 @@
         }
       },
       "indexes": {
+        "audit_logs_created_at_idx": {
+          "name": "audit_logs_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "audit_logs_user_idx": {
           "name": "audit_logs_user_idx",
           "columns": [
@@ -3056,6 +3792,27 @@
         "audit_logs_action_idx": {
           "name": "audit_logs_action_idx",
           "columns": [
+            {
+              "expression": "action",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "audit_logs_store_action_idx": {
+          "name": "audit_logs_store_action_idx",
+          "columns": [
+            {
+              "expression": "store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
             {
               "expression": "action",
               "isExpression": false,
@@ -3516,6 +4273,12 @@
           "notNull": true,
           "default": false
         },
+        "iam_store_id": {
+          "name": "iam_store_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "store_name": {
           "name": "store_name",
           "type": "varchar(255)",
@@ -3527,12 +4290,6 @@
           "type": "varchar(50)",
           "primaryKey": false,
           "notNull": false
-        },
-        "owner_fk": {
-          "name": "owner_fk",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
         },
         "store_legal_type_fk": {
           "name": "store_legal_type_fk",
@@ -3633,19 +4390,6 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "store_owner_fk_users_id_fk": {
-          "name": "store_owner_fk_users_id_fk",
-          "tableFrom": "store",
-          "tableTo": "users",
-          "columnsFrom": [
-            "owner_fk"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
         "store_store_legal_type_fk_store_legal_type_id_fk": {
           "name": "store_store_legal_type_fk_store_legal_type_id_fk",
           "tableFrom": "store",
@@ -3745,6 +4489,13 @@
           "nullsNotDistinct": false,
           "columns": [
             "guuid"
+          ]
+        },
+        "store_iam_store_id_unique": {
+          "name": "store_iam_store_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "iam_store_id"
           ]
         },
         "store_store_code_unique": {
@@ -3939,6 +4690,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "designation_store_fk_idx": {
+          "name": "designation_store_fk_idx",
+          "columns": [
+            {
+              "expression": "store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -4081,6 +4847,36 @@
           "method": "btree",
           "with": {}
         },
+        "store_user_mapping_designation_idx": {
+          "name": "store_user_mapping_designation_idx",
+          "columns": [
+            {
+              "expression": "designation_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "store_user_mapping_assigned_by_idx": {
+          "name": "store_user_mapping_assigned_by_idx",
+          "columns": [
+            {
+              "expression": "assigned_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "store_user_mapping_one_primary_idx": {
           "name": "store_user_mapping_one_primary_idx",
           "columns": [
@@ -4165,6 +4961,281 @@
       },
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.store_operating_hours": {
+      "name": "store_operating_hours",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_hidden": {
+          "name": "is_hidden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_system": {
+          "name": "is_system",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "store_fk": {
+          "name": "store_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day_of_week": {
+          "name": "day_of_week",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "shift_number": {
+          "name": "shift_number",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "shift_name": {
+          "name": "shift_name",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "opening_time": {
+          "name": "opening_time",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closing_time": {
+          "name": "closing_time",
+          "type": "time",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_closed": {
+          "name": "is_closed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by": {
+          "name": "modified_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "store_operating_hours_store_idx": {
+          "name": "store_operating_hours_store_idx",
+          "columns": [
+            {
+              "expression": "store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "store_operating_hours_day_idx": {
+          "name": "store_operating_hours_day_idx",
+          "columns": [
+            {
+              "expression": "day_of_week",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "store_operating_hours_store_day_idx": {
+          "name": "store_operating_hours_store_day_idx",
+          "columns": [
+            {
+              "expression": "store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "day_of_week",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "store_operating_hours_closed_idx": {
+          "name": "store_operating_hours_closed_idx",
+          "columns": [
+            {
+              "expression": "is_closed",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "store_operating_hours_store_fk_store_id_fk": {
+          "name": "store_operating_hours_store_fk_store_id_fk",
+          "tableFrom": "store_operating_hours",
+          "tableTo": "store",
+          "columnsFrom": [
+            "store_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "store_operating_hours_created_by_users_id_fk": {
+          "name": "store_operating_hours_created_by_users_id_fk",
+          "tableFrom": "store_operating_hours",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "store_operating_hours_modified_by_users_id_fk": {
+          "name": "store_operating_hours_modified_by_users_id_fk",
+          "tableFrom": "store_operating_hours",
+          "tableTo": "users",
+          "columnsFrom": [
+            "modified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "store_operating_hours_deleted_by_users_id_fk": {
+          "name": "store_operating_hours_deleted_by_users_id_fk",
+          "tableFrom": "store_operating_hours",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "store_operating_hours_guuid_unique": {
+          "name": "store_operating_hours_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        },
+        "store_operating_hours_unique_idx": {
+          "name": "store_operating_hours_unique_idx",
+          "nullsNotDistinct": false,
+          "columns": [
+            "store_fk",
+            "day_of_week",
+            "shift_number"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "store_operating_hours_time_validity_chk": {
+          "name": "store_operating_hours_time_validity_chk",
+          "value": "\n        (is_closed = true AND opening_time IS NULL AND closing_time IS NULL)\n        OR\n        (is_closed = false AND opening_time IS NOT NULL AND closing_time IS NOT NULL AND opening_time < closing_time)\n      "
+        }
+      },
       "isRLSEnabled": false
     },
     "public.country": {
@@ -5408,6 +6479,96 @@
           "method": "btree",
           "with": {}
         },
+        "address_entity_idx": {
+          "name": "address_entity_idx",
+          "columns": [
+            {
+              "expression": "entity_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "address_record_idx": {
+          "name": "address_record_idx",
+          "columns": [
+            {
+              "expression": "record_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "address_type_idx": {
+          "name": "address_type_idx",
+          "columns": [
+            {
+              "expression": "address_type_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "address_country_idx": {
+          "name": "address_country_idx",
+          "columns": [
+            {
+              "expression": "country_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "address_state_idx": {
+          "name": "address_state_idx",
+          "columns": [
+            {
+              "expression": "state_region_province_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "address_district_idx": {
+          "name": "address_district_idx",
+          "columns": [
+            {
+              "expression": "district_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "address_one_default_idx": {
           "name": "address_one_default_idx",
           "columns": [
@@ -5765,6 +6926,66 @@
           ],
           "isUnique": false,
           "where": "is_active = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "communication_entity_idx": {
+          "name": "communication_entity_idx",
+          "columns": [
+            {
+              "expression": "entity_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "communication_record_idx": {
+          "name": "communication_record_idx",
+          "columns": [
+            {
+              "expression": "record_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "communication_type_idx": {
+          "name": "communication_type_idx",
+          "columns": [
+            {
+              "expression": "communication_type_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "communication_dial_country_idx": {
+          "name": "communication_dial_country_idx",
+          "columns": [
+            {
+              "expression": "dial_country_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -6309,6 +7530,51 @@
           ],
           "isUnique": false,
           "where": "is_active = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "notes_entity_idx": {
+          "name": "notes_entity_idx",
+          "columns": [
+            {
+              "expression": "entity_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "notes_record_idx": {
+          "name": "notes_record_idx",
+          "columns": [
+            {
+              "expression": "record_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "notes_type_idx": {
+          "name": "notes_type_idx",
+          "columns": [
+            {
+              "expression": "notes_type_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -7444,6 +8710,2104 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.hsn_codes": {
+      "name": "hsn_codes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_hidden": {
+          "name": "is_hidden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_system": {
+          "name": "is_system",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "hsn_code": {
+          "name": "hsn_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "digits": {
+          "name": "digits",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "default_gst_rate": {
+          "name": "default_gst_rate",
+          "type": "numeric(5, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "type": {
+          "name": "type",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'HSN'"
+        },
+        "is_exempted": {
+          "name": "is_exempted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by": {
+          "name": "modified_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "hsn_codes_type_code_idx": {
+          "name": "hsn_codes_type_code_idx",
+          "columns": [
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "hsn_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "hsn_codes_digits_idx": {
+          "name": "hsn_codes_digits_idx",
+          "columns": [
+            {
+              "expression": "digits",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "hsn_codes_created_by_users_id_fk": {
+          "name": "hsn_codes_created_by_users_id_fk",
+          "tableFrom": "hsn_codes",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "hsn_codes_modified_by_users_id_fk": {
+          "name": "hsn_codes_modified_by_users_id_fk",
+          "tableFrom": "hsn_codes",
+          "tableTo": "users",
+          "columnsFrom": [
+            "modified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "hsn_codes_deleted_by_users_id_fk": {
+          "name": "hsn_codes_deleted_by_users_id_fk",
+          "tableFrom": "hsn_codes",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "hsn_codes_guuid_unique": {
+          "name": "hsn_codes_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        },
+        "hsn_codes_hsn_code_unique": {
+          "name": "hsn_codes_hsn_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "hsn_code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tax_agencies": {
+      "name": "tax_agencies",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_hidden": {
+          "name": "is_hidden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_system": {
+          "name": "is_system",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "code": {
+          "name": "code",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "country_fk": {
+          "name": "country_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reference_url": {
+          "name": "reference_url",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by": {
+          "name": "modified_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "tax_agencies_code_idx": {
+          "name": "tax_agencies_code_idx",
+          "columns": [
+            {
+              "expression": "code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tax_agencies_country_idx": {
+          "name": "tax_agencies_country_idx",
+          "columns": [
+            {
+              "expression": "country_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tax_agencies_country_fk_country_id_fk": {
+          "name": "tax_agencies_country_fk_country_id_fk",
+          "tableFrom": "tax_agencies",
+          "tableTo": "country",
+          "columnsFrom": [
+            "country_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "tax_agencies_created_by_users_id_fk": {
+          "name": "tax_agencies_created_by_users_id_fk",
+          "tableFrom": "tax_agencies",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "tax_agencies_modified_by_users_id_fk": {
+          "name": "tax_agencies_modified_by_users_id_fk",
+          "tableFrom": "tax_agencies",
+          "tableTo": "users",
+          "columnsFrom": [
+            "modified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "tax_agencies_deleted_by_users_id_fk": {
+          "name": "tax_agencies_deleted_by_users_id_fk",
+          "tableFrom": "tax_agencies",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tax_agencies_guuid_unique": {
+          "name": "tax_agencies_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        },
+        "tax_agencies_code_unique": {
+          "name": "tax_agencies_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tax_names": {
+      "name": "tax_names",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_hidden": {
+          "name": "is_hidden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_system": {
+          "name": "is_system",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "code": {
+          "name": "code",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax_name": {
+          "name": "tax_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax_agency_fk": {
+          "name": "tax_agency_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by": {
+          "name": "modified_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "tax_names_code_idx": {
+          "name": "tax_names_code_idx",
+          "columns": [
+            {
+              "expression": "code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tax_names_agency_idx": {
+          "name": "tax_names_agency_idx",
+          "columns": [
+            {
+              "expression": "tax_agency_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tax_names_tax_agency_fk_tax_agencies_id_fk": {
+          "name": "tax_names_tax_agency_fk_tax_agencies_id_fk",
+          "tableFrom": "tax_names",
+          "tableTo": "tax_agencies",
+          "columnsFrom": [
+            "tax_agency_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "tax_names_created_by_users_id_fk": {
+          "name": "tax_names_created_by_users_id_fk",
+          "tableFrom": "tax_names",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "tax_names_modified_by_users_id_fk": {
+          "name": "tax_names_modified_by_users_id_fk",
+          "tableFrom": "tax_names",
+          "tableTo": "users",
+          "columnsFrom": [
+            "modified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "tax_names_deleted_by_users_id_fk": {
+          "name": "tax_names_deleted_by_users_id_fk",
+          "tableFrom": "tax_names",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tax_names_guuid_unique": {
+          "name": "tax_names_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        },
+        "tax_names_code_unique": {
+          "name": "tax_names_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tax_levels": {
+      "name": "tax_levels",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_hidden": {
+          "name": "is_hidden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_system": {
+          "name": "is_system",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "code": {
+          "name": "code",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rate": {
+          "name": "rate",
+          "type": "numeric(10, 3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tax_name_fk": {
+          "name": "tax_name_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_default": {
+          "name": "is_default",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by": {
+          "name": "modified_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "tax_levels_code_idx": {
+          "name": "tax_levels_code_idx",
+          "columns": [
+            {
+              "expression": "code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tax_levels_tax_name_idx": {
+          "name": "tax_levels_tax_name_idx",
+          "columns": [
+            {
+              "expression": "tax_name_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tax_levels_rate_idx": {
+          "name": "tax_levels_rate_idx",
+          "columns": [
+            {
+              "expression": "rate",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tax_levels_tax_name_fk_tax_names_id_fk": {
+          "name": "tax_levels_tax_name_fk_tax_names_id_fk",
+          "tableFrom": "tax_levels",
+          "tableTo": "tax_names",
+          "columnsFrom": [
+            "tax_name_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "tax_levels_created_by_users_id_fk": {
+          "name": "tax_levels_created_by_users_id_fk",
+          "tableFrom": "tax_levels",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "tax_levels_modified_by_users_id_fk": {
+          "name": "tax_levels_modified_by_users_id_fk",
+          "tableFrom": "tax_levels",
+          "tableTo": "users",
+          "columnsFrom": [
+            "modified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "tax_levels_deleted_by_users_id_fk": {
+          "name": "tax_levels_deleted_by_users_id_fk",
+          "tableFrom": "tax_levels",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tax_levels_guuid_unique": {
+          "name": "tax_levels_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        },
+        "tax_levels_code_unique": {
+          "name": "tax_levels_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tax_level_mapping": {
+      "name": "tax_level_mapping",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "tax_agency_fk": {
+          "name": "tax_agency_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax_name_fk": {
+          "name": "tax_name_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax_level_fk": {
+          "name": "tax_level_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "tax_level_mapping_unique_idx": {
+          "name": "tax_level_mapping_unique_idx",
+          "columns": [
+            {
+              "expression": "tax_agency_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tax_name_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tax_level_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tax_level_mapping_agency_name_idx": {
+          "name": "tax_level_mapping_agency_name_idx",
+          "columns": [
+            {
+              "expression": "tax_agency_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tax_name_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tax_level_mapping_tax_agency_fk_tax_agencies_id_fk": {
+          "name": "tax_level_mapping_tax_agency_fk_tax_agencies_id_fk",
+          "tableFrom": "tax_level_mapping",
+          "tableTo": "tax_agencies",
+          "columnsFrom": [
+            "tax_agency_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tax_level_mapping_tax_name_fk_tax_names_id_fk": {
+          "name": "tax_level_mapping_tax_name_fk_tax_names_id_fk",
+          "tableFrom": "tax_level_mapping",
+          "tableTo": "tax_names",
+          "columnsFrom": [
+            "tax_name_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tax_level_mapping_tax_level_fk_tax_levels_id_fk": {
+          "name": "tax_level_mapping_tax_level_fk_tax_levels_id_fk",
+          "tableFrom": "tax_level_mapping",
+          "tableTo": "tax_levels",
+          "columnsFrom": [
+            "tax_level_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tax_registrations": {
+      "name": "tax_registrations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_hidden": {
+          "name": "is_hidden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_system": {
+          "name": "is_system",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "store_fk": {
+          "name": "store_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "country_fk": {
+          "name": "country_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax_agency_fk": {
+          "name": "tax_agency_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax_name_fk": {
+          "name": "tax_name_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "registration_number": {
+          "name": "registration_number",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "filing_frequency": {
+          "name": "filing_frequency",
+          "type": "filing_frequency",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'MONTHLY'"
+        },
+        "effective_from": {
+          "name": "effective_from",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "effective_to": {
+          "name": "effective_to",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by": {
+          "name": "modified_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "tax_registrations_active_idx": {
+          "name": "tax_registrations_active_idx",
+          "columns": [
+            {
+              "expression": "store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tax_agency_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tax_name_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "deleted_at IS NULL AND effective_to IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tax_registrations_store_idx": {
+          "name": "tax_registrations_store_idx",
+          "columns": [
+            {
+              "expression": "store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tax_registrations_agency_idx": {
+          "name": "tax_registrations_agency_idx",
+          "columns": [
+            {
+              "expression": "tax_agency_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tax_registrations_number_idx": {
+          "name": "tax_registrations_number_idx",
+          "columns": [
+            {
+              "expression": "registration_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tax_registrations_store_fk_store_id_fk": {
+          "name": "tax_registrations_store_fk_store_id_fk",
+          "tableFrom": "tax_registrations",
+          "tableTo": "store",
+          "columnsFrom": [
+            "store_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "tax_registrations_country_fk_country_id_fk": {
+          "name": "tax_registrations_country_fk_country_id_fk",
+          "tableFrom": "tax_registrations",
+          "tableTo": "country",
+          "columnsFrom": [
+            "country_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "tax_registrations_tax_agency_fk_tax_agencies_id_fk": {
+          "name": "tax_registrations_tax_agency_fk_tax_agencies_id_fk",
+          "tableFrom": "tax_registrations",
+          "tableTo": "tax_agencies",
+          "columnsFrom": [
+            "tax_agency_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "tax_registrations_tax_name_fk_tax_names_id_fk": {
+          "name": "tax_registrations_tax_name_fk_tax_names_id_fk",
+          "tableFrom": "tax_registrations",
+          "tableTo": "tax_names",
+          "columnsFrom": [
+            "tax_name_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "tax_registrations_created_by_users_id_fk": {
+          "name": "tax_registrations_created_by_users_id_fk",
+          "tableFrom": "tax_registrations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "tax_registrations_modified_by_users_id_fk": {
+          "name": "tax_registrations_modified_by_users_id_fk",
+          "tableFrom": "tax_registrations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "modified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "tax_registrations_deleted_by_users_id_fk": {
+          "name": "tax_registrations_deleted_by_users_id_fk",
+          "tableFrom": "tax_registrations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tax_registrations_guuid_unique": {
+          "name": "tax_registrations_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tax_rate_master": {
+      "name": "tax_rate_master",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_hidden": {
+          "name": "is_hidden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_system": {
+          "name": "is_system",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "store_fk": {
+          "name": "store_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hsn_code_fk": {
+          "name": "hsn_code_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gst_rate": {
+          "name": "gst_rate",
+          "type": "numeric(10, 3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cgst_rate": {
+          "name": "cgst_rate",
+          "type": "numeric(10, 3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sgst_rate": {
+          "name": "sgst_rate",
+          "type": "numeric(10, 3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "igst_rate": {
+          "name": "igst_rate",
+          "type": "numeric(10, 3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cess_rate": {
+          "name": "cess_rate",
+          "type": "numeric(10, 3)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'0'"
+        },
+        "effective_from": {
+          "name": "effective_from",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "effective_to": {
+          "name": "effective_to",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by": {
+          "name": "modified_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "tax_rate_master_active_idx": {
+          "name": "tax_rate_master_active_idx",
+          "columns": [
+            {
+              "expression": "store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "hsn_code_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "is_active = true AND deleted_at IS NULL AND effective_to IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tax_rate_master_store_fk_store_id_fk": {
+          "name": "tax_rate_master_store_fk_store_id_fk",
+          "tableFrom": "tax_rate_master",
+          "tableTo": "store",
+          "columnsFrom": [
+            "store_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tax_rate_master_hsn_code_fk_hsn_codes_id_fk": {
+          "name": "tax_rate_master_hsn_code_fk_hsn_codes_id_fk",
+          "tableFrom": "tax_rate_master",
+          "tableTo": "hsn_codes",
+          "columnsFrom": [
+            "hsn_code_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "tax_rate_master_created_by_users_id_fk": {
+          "name": "tax_rate_master_created_by_users_id_fk",
+          "tableFrom": "tax_rate_master",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "tax_rate_master_modified_by_users_id_fk": {
+          "name": "tax_rate_master_modified_by_users_id_fk",
+          "tableFrom": "tax_rate_master",
+          "tableTo": "users",
+          "columnsFrom": [
+            "modified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "tax_rate_master_deleted_by_users_id_fk": {
+          "name": "tax_rate_master_deleted_by_users_id_fk",
+          "tableFrom": "tax_rate_master",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tax_rate_master_guuid_unique": {
+          "name": "tax_rate_master_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "tax_rate_master_gst_rate_positive": {
+          "name": "tax_rate_master_gst_rate_positive",
+          "value": "gst_rate >= 0"
+        },
+        "tax_rate_master_cgst_sgst_sum_chk": {
+          "name": "tax_rate_master_cgst_sgst_sum_chk",
+          "value": "cgst_rate + sgst_rate = gst_rate"
+        },
+        "tax_rate_master_date_range_chk": {
+          "name": "tax_rate_master_date_range_chk",
+          "value": "effective_from <= effective_to OR effective_to IS NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.daily_tax_summary": {
+      "name": "daily_tax_summary",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_hidden": {
+          "name": "is_hidden",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_system": {
+          "name": "is_system",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "store_fk": {
+          "name": "store_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "transaction_date": {
+          "name": "transaction_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gst_rate": {
+          "name": "gst_rate",
+          "type": "numeric(5, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_taxable_amount": {
+          "name": "total_taxable_amount",
+          "type": "numeric(15, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_cgst": {
+          "name": "total_cgst",
+          "type": "numeric(15, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "total_sgst": {
+          "name": "total_sgst",
+          "type": "numeric(15, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "total_igst": {
+          "name": "total_igst",
+          "type": "numeric(15, 2)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'0'"
+        },
+        "total_cess": {
+          "name": "total_cess",
+          "type": "numeric(15, 2)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'0'"
+        },
+        "tax_collected": {
+          "name": "tax_collected",
+          "type": "numeric(15, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by": {
+          "name": "modified_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "daily_tax_summary_store_date_rate_unique": {
+          "name": "daily_tax_summary_store_date_rate_unique",
+          "columns": [
+            {
+              "expression": "store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "transaction_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "gst_rate",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "daily_tax_summary_store_fk_store_id_fk": {
+          "name": "daily_tax_summary_store_fk_store_id_fk",
+          "tableFrom": "daily_tax_summary",
+          "tableTo": "store",
+          "columnsFrom": [
+            "store_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "daily_tax_summary_created_by_users_id_fk": {
+          "name": "daily_tax_summary_created_by_users_id_fk",
+          "tableFrom": "daily_tax_summary",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "daily_tax_summary_modified_by_users_id_fk": {
+          "name": "daily_tax_summary_modified_by_users_id_fk",
+          "tableFrom": "daily_tax_summary",
+          "tableTo": "users",
+          "columnsFrom": [
+            "modified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "daily_tax_summary_deleted_by_users_id_fk": {
+          "name": "daily_tax_summary_deleted_by_users_id_fk",
+          "tableFrom": "daily_tax_summary",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "daily_tax_summary_guuid_unique": {
+          "name": "daily_tax_summary_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "daily_tax_summary_gst_rate_valid_chk": {
+          "name": "daily_tax_summary_gst_rate_valid_chk",
+          "value": "gst_rate IN (0, 5, 12, 18, 28)"
+        },
+        "daily_tax_summary_tax_collected_chk": {
+          "name": "daily_tax_summary_tax_collected_chk",
+          "value": "tax_collected = total_cgst + total_sgst + total_igst + COALESCE(total_cess, 0)"
+        },
+        "daily_tax_summary_amounts_positive_chk": {
+          "name": "daily_tax_summary_amounts_positive_chk",
+          "value": "total_taxable_amount >= 0 AND total_cgst >= 0 AND total_sgst >= 0 AND tax_collected >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.transaction_tax_lines": {
+      "name": "transaction_tax_lines",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "store_fk": {
+          "name": "store_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax_registration_fk": {
+          "name": "tax_registration_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hsn_code_fk": {
+          "name": "hsn_code_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax_rate_master_fk": {
+          "name": "tax_rate_master_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "transaction_ref": {
+          "name": "transaction_ref",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "transaction_item_ref": {
+          "name": "transaction_item_ref",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "transaction_date": {
+          "name": "transaction_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "taxable_amount": {
+          "name": "taxable_amount",
+          "type": "numeric(15, 3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cgst_amount": {
+          "name": "cgst_amount",
+          "type": "numeric(15, 3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "sgst_amount": {
+          "name": "sgst_amount",
+          "type": "numeric(15, 3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "igst_amount": {
+          "name": "igst_amount",
+          "type": "numeric(15, 3)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'0'"
+        },
+        "cess_amount": {
+          "name": "cess_amount",
+          "type": "numeric(15, 3)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'0'"
+        },
+        "total_tax": {
+          "name": "total_tax",
+          "type": "numeric(15, 3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "applied_gst_rate": {
+          "name": "applied_gst_rate",
+          "type": "numeric(10, 3)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "transaction_tax_lines_store_date_idx": {
+          "name": "transaction_tax_lines_store_date_idx",
+          "columns": [
+            {
+              "expression": "store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "transaction_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "transaction_tax_lines_transaction_ref_idx": {
+          "name": "transaction_tax_lines_transaction_ref_idx",
+          "columns": [
+            {
+              "expression": "transaction_ref",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "transaction_tax_lines_hsn_idx": {
+          "name": "transaction_tax_lines_hsn_idx",
+          "columns": [
+            {
+              "expression": "hsn_code_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "transaction_tax_lines_registration_idx": {
+          "name": "transaction_tax_lines_registration_idx",
+          "columns": [
+            {
+              "expression": "tax_registration_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "transaction_tax_lines_store_fk_store_id_fk": {
+          "name": "transaction_tax_lines_store_fk_store_id_fk",
+          "tableFrom": "transaction_tax_lines",
+          "tableTo": "store",
+          "columnsFrom": [
+            "store_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "transaction_tax_lines_tax_registration_fk_tax_registrations_id_fk": {
+          "name": "transaction_tax_lines_tax_registration_fk_tax_registrations_id_fk",
+          "tableFrom": "transaction_tax_lines",
+          "tableTo": "tax_registrations",
+          "columnsFrom": [
+            "tax_registration_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "transaction_tax_lines_hsn_code_fk_hsn_codes_id_fk": {
+          "name": "transaction_tax_lines_hsn_code_fk_hsn_codes_id_fk",
+          "tableFrom": "transaction_tax_lines",
+          "tableTo": "hsn_codes",
+          "columnsFrom": [
+            "hsn_code_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "transaction_tax_lines_tax_rate_master_fk_tax_rate_master_id_fk": {
+          "name": "transaction_tax_lines_tax_rate_master_fk_tax_rate_master_id_fk",
+          "tableFrom": "transaction_tax_lines",
+          "tableTo": "tax_rate_master",
+          "columnsFrom": [
+            "tax_rate_master_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "transaction_tax_lines_total_tax_chk": {
+          "name": "transaction_tax_lines_total_tax_chk",
+          "value": "total_tax = cgst_amount + sgst_amount + COALESCE(igst_amount, 0) + COALESCE(cess_amount, 0)"
+        },
+        "transaction_tax_lines_amounts_positive_chk": {
+          "name": "transaction_tax_lines_amounts_positive_chk",
+          "value": "taxable_amount >= 0 AND cgst_amount >= 0 AND sgst_amount >= 0 AND total_tax >= 0"
+        },
+        "transaction_tax_lines_rate_positive_chk": {
+          "name": "transaction_tax_lines_rate_positive_chk",
+          "value": "applied_gst_rate >= 0"
+        }
+      },
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -7477,12 +10841,30 @@
         "ACCOUNT_UNBLOCKED"
       ]
     },
+    "public.auth_method": {
+      "name": "auth_method",
+      "schema": "public",
+      "values": [
+        "OTP",
+        "PASSWORD",
+        "GOOGLE"
+      ]
+    },
     "public.device_type": {
       "name": "device_type",
       "schema": "public",
       "values": [
         "IOS",
         "ANDROID"
+      ]
+    },
+    "public.login_status": {
+      "name": "login_status",
+      "schema": "public",
+      "values": [
+        "SUCCESS",
+        "FAILED",
+        "BLOCKED"
       ]
     },
     "public.notification_channel": {
@@ -7571,6 +10953,15 @@
         "length",
         "count",
         "area"
+      ]
+    },
+    "public.filing_frequency": {
+      "name": "filing_frequency",
+      "schema": "public",
+      "values": [
+        "MONTHLY",
+        "QUARTERLY",
+        "ANNUALLY"
       ]
     }
   },

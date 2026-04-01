@@ -52,6 +52,10 @@ export async function seedStates(db: Db) {
   if (!india)
     throw new Error('Country "IN" not found — run seedCountries first');
 
-  const rows = STATES.map((s) => ({ ...s, countryFk: india.id, isSystem: true }));
+  const rows = STATES.map((s) => ({
+    ...s,
+    countryFk: india.id,
+    isSystem: true,
+  }));
   return db.insert(stateRegionProvince).values(rows).onConflictDoNothing();
 }

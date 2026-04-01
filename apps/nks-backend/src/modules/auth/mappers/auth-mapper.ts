@@ -66,8 +66,12 @@ export class AuthMapper {
         ? authResult.session.expiresAt.toISOString()
         : (authResult.session?.expiresAt ??
           new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString());
-    const refreshExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    const absoluteExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    const refreshExpiresAt = new Date(
+      Date.now() + 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const absoluteExpiry = new Date(
+      Date.now() + 90 * 24 * 60 * 60 * 1000,
+    ).toISOString();
 
     const {
       isSuperAdmin,
@@ -130,7 +134,9 @@ export class AuthMapper {
       );
 
     const lastLoginAt = user.lastLoginAt
-      ? (typeof user.lastLoginAt === 'string' ? user.lastLoginAt : user.lastLoginAt.toISOString())
+      ? typeof user.lastLoginAt === 'string'
+        ? user.lastLoginAt
+        : user.lastLoginAt.toISOString()
       : null;
 
     return {

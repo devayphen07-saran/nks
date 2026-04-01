@@ -6,10 +6,13 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { StoreModule } from './modules/store/store.module';
 import { RolesModule } from './modules/roles/roles.module';
+import { RoutesModule } from './modules/routes/routes.module';
 import { LookupModule } from './modules/lookup/lookup.module';
-import { GeographyModule } from './modules/geography/geography.module';
+import { LocationModule } from './modules/location/location.module';
 import { LoggerModule } from './core/logger/logger.module';
 import { StaffInviteModule } from './modules/staff-invite/staff-invite.module';
+import { AdminModule } from './modules/admin/admin.module';
+import { TaxModule } from './modules/tax/tax.module';
 
 @Module({
   imports: [
@@ -19,10 +22,13 @@ import { StaffInviteModule } from './modules/staff-invite/staff-invite.module';
     UsersModule,
     StoreModule,
     RolesModule,
+    RoutesModule,
     LookupModule,
-    GeographyModule,
+    LocationModule,
     LoggerModule,
     StaffInviteModule,
+    AdminModule,
+    TaxModule,
   ],
   controllers: [],
   providers: [],

@@ -1,234 +1,297 @@
+import React, { useState, useEffect } from "react";
+import {
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableOpacity,
+  Keyboard,
+} from "react-native";
 import { router } from "expo-router";
-import { Platform, KeyboardAvoidingView } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import styled from "styled-components/native";
 import {
+  Typography,
   Button,
   Column,
-  Input,
+  Row,
   LucideIcon,
-  Typography,
+  Header,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { registerStore, type RegisterStoreRequest } from "@nks/api-manager";
+import { apiPost } from "@nks/mobile-utils";
 import { useRootDispatch } from "../../store";
-import { refreshSession } from "../../store/refreshSession";
-
-const schema = z.object({
-  storeName: z.string().min(2, "Store name must be at least 2 characters"),
-  storeCode: z
-    .string()
-    .min(2, "Store code must be at least 2 characters")
-    .max(50, "Store code max 50 characters")
-    .regex(/^[A-Z0-9_]+$/, "Only uppercase letters, numbers, and underscores"),
-  storeTypeCode: z.string().min(1, "Store type is required"),
-});
-type FormData = z.infer<typeof schema>;
+import { getAllConfig, getAllCountry } from "@nks/api-manager";
+import { useStoreSetupForm, type StoreFormValues } from "./hooks/useStoreSetupForm";
+import { StoreSetupStep1, StoreSetupStep2, StoreSetupStep3 } from "./components";
 
 export function StoreSetupScreen() {
   const { theme } = useMobileTheme();
-  const insets = useSafeAreaInsets();
   const dispatch = useRootDispatch();
+  const form = useStoreSetupForm();
+  const { handleSubmit, trigger } = form;
 
-  const {
-    control,
-    handleSubmit,
-    setError,
-    formState: { isSubmitting },
-  } = useForm<FormData>({
-    resolver: zodResolver(schema),
-    defaultValues: { storeName: "", storeCode: "", storeTypeCode: "RETAIL" },
-  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [currentStep, setCurrentStep] = useState(1);
 
-  const onSubmit = async (data: FormData) => {
-    const body: RegisterStoreRequest = {
-      storeName: data.storeName,
-      storeCode: data.storeCode,
-      storeTypeCode: data.storeTypeCode,
-    };
-    const result = await dispatch(registerStore({ bodyParam: body }));
-    if (registerStore.fulfilled.match(result)) {
-      await dispatch(refreshSession());
-      router.replace("/(protected)/(workspace)/(app)/(store)/main");
+  useEffect(() => {
+    dispatch(getAllCountry());
+    dispatch(getAllConfig());
+  }, [dispatch]);
+
+  const handleNext = async () => {
+    Keyboard.dismiss();
+    setError(null);
+    let isStepValid = false;
+
+    if (currentStep === 1) {
+      isStepValid = await trigger([
+        "storeName",
+        "storeCode",
+        "storeLegalTypeCode",
+        "storeCategoryCode",
+      ]);
+    } else if (currentStep === 2) {
+      isStepValid = await trigger(["registrationNumber", "taxNumber"]);
+    }
+
+    if (isStepValid) {
+      setCurrentStep((prev) => prev + 1);
+    }
+  };
+
+  const handleBack = () => {
+    Keyboard.dismiss();
+    setError(null);
+    if (currentStep > 1) {
+      setCurrentStep((prev) => prev - 1);
     } else {
-      const msg =
-        (result.payload as { message?: string })?.message ??
-        "Store creation failed. Please try again.";
-      setError("storeName", { message: msg });
+      router.back();
+    }
+  };
+
+  const onSubmit = async (values: StoreFormValues) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiPost<any>("store/register", {
+        storeName: values.storeName.trim(),
+        storeCode: values.storeCode?.trim() || undefined,
+        countryFk: values.countryFk,
+        storeCategoryCode: values.storeCategoryCode,
+        storeLegalTypeCode: values.storeLegalTypeCode,
+        registrationNumber: values.registrationNumber?.trim() || undefined,
+        taxNumber: values.taxNumber?.trim() || undefined,
+        address: {
+          line1: values.addressLine1.trim(),
+          line2: values.addressLine2?.trim() || undefined,
+          cityName: values.city.trim(),
+          postalCode: values.postalCode.trim(),
+          stateRegionProvinceText:
+            values.stateRegionProvinceText?.trim() || undefined,
+          stateRegionProvinceFk: values.stateRegionProvinceFk || undefined,
+          districtText: values.districtText?.trim() || undefined,
+          districtFk: values.districtFk || undefined,
+          countryFk: values.countryFk,
+        },
+      });
+
+      if (response.success) {
+        router.push("/(protected)/(workspace)/(app)/(store)/list");
+      } else {
+        setError(response.message || "Registration failed");
+      }
+    } catch (err: any) {
+      setError(err.message || "An unexpected error occurred");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <Container>
-      <KeyboardAvoiding behavior={Platform.OS === "ios" ? "padding" : "height"}>
-        <ScrollArea
+      <Header
+        title={
+          currentStep === 1
+            ? "Basic Info"
+            : currentStep === 2
+              ? "Legal & Tax"
+              : "Location"
+        }
+        leftElement={
+          <TouchableOpacity onPress={handleBack}>
+            <LucideIcon name="ChevronLeft" size={24} />
+          </TouchableOpacity>
+        }
+      />
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
           contentContainerStyle={{ flexGrow: 1 }}
-          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
-          <Hero $topInset={insets.top}>
-            <DecorRingTopRight />
-            <DecorRingBottomLeft />
-            <HeroContent align="center" gap="xSmall">
-              <LogoCircle>
-                <LucideIcon name="Store" size={36} color={theme.colorPrimary} />
-              </LogoCircle>
-              <Typography.H3 weight="bold" color={theme.colorWhite}>
-                NKS
-              </Typography.H3>
-              <Typography.Body color={theme.colorWhite}>
-                Set up your store
-              </Typography.Body>
-            </HeroContent>
-          </Hero>
+          <Content gap="medium">
+            <ProgressBar>
+              <ProgressStep isActive={currentStep >= 1} />
+              <ProgressLine isActive={currentStep >= 2} />
+              <ProgressStep isActive={currentStep >= 2} />
+              <ProgressLine isActive={currentStep >= 3} />
+              <ProgressStep isActive={currentStep >= 3} />
+            </ProgressBar>
 
-          <FormCard
-            style={{
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 8 },
-              shadowOpacity: 0.12,
-              shadowRadius: 24,
-              elevation: 8,
-            }}
-          >
-            <FormHeader gap="xxSmall">
-              <Typography.H4 weight="bold">Create your store</Typography.H4>
-              <Typography.Body type="secondary">
-                You can update these details later from settings
-              </Typography.Body>
-            </FormHeader>
+            <HeroSection>
+              <IconCircle>
+                <LucideIcon
+                  name={
+                    currentStep === 1
+                      ? "Building"
+                      : currentStep === 2
+                        ? "FileText"
+                        : "MapPin"
+                  }
+                  size={32}
+                  color={theme.colorPrimary}
+                />
+              </IconCircle>
+              <HeroContent gap="xxSmall">
+                <Typography.H4 weight="bold">
+                  {currentStep === 1
+                    ? "Store Details"
+                    : currentStep === 2
+                      ? "Regulatory"
+                      : "Store Address"}
+                </Typography.H4>
+                <Typography.Body type="secondary" style={{ fontSize: 13 }}>
+                  {currentStep === 1
+                    ? "Start with the basic shop identity"
+                    : currentStep === 2
+                      ? "Enter taxation and registration"
+                      : "Where is this store located?"}
+                </Typography.Body>
+              </HeroContent>
+            </HeroSection>
 
-            <Column gap="xxSmall">
-              <Input
-                name="storeName"
-                control={control}
-                label="Store name"
-                placeholder="e.g. Nila Stores"
-                required
-              />
+            {error && (
+              <ErrorBox>
+                <LucideIcon
+                  name="AlertCircle"
+                  size={18}
+                  color={theme.colorError}
+                />
+                <Typography.Body
+                  color={theme.colorError}
+                  style={{ marginLeft: 12, flex: 1 }}
+                >
+                  {error}
+                </Typography.Body>
+              </ErrorBox>
+            )}
 
-              <Input
-                name="storeCode"
-                control={control}
-                label="Store code"
-                placeholder="e.g. NILA_STORES"
-                required
-              />
+            {currentStep === 1 && <StoreSetupStep1 form={form} />}
+            {currentStep === 2 && <StoreSetupStep2 form={form} />}
+            {currentStep === 3 && <StoreSetupStep3 form={form} />}
 
-              <Input
-                name="storeTypeCode"
-                control={control}
-                label="Store type"
-                placeholder="e.g. RETAIL"
-                required
-              />
-
-              <SubmitButton
-                label="Create Store"
-                size="xlg"
-                variant="primary"
-                onPress={handleSubmit(onSubmit)}
-                loading={isSubmitting}
-              />
-            </Column>
-          </FormCard>
-
-          <Column flex={1} justify="flex-end" align="center" padding="xLarge">
-            <BackButton onPress={() => router.back()}>
-              <Typography.Body weight="semiBold" type="primary">
-                Go back
-              </Typography.Body>
-            </BackButton>
-          </Column>
-        </ScrollArea>
-      </KeyboardAvoiding>
+            <Footer>
+              {currentStep < 3 ? (
+                <Button
+                  onPress={handleNext}
+                  variant="primary"
+                  style={{ width: "100%" }}
+                >
+                  Continue to {currentStep === 1 ? "Regulatory" : "Address"}
+                </Button>
+              ) : (
+                <Button
+                  onPress={handleSubmit(onSubmit)}
+                  disabled={loading}
+                  loading={loading}
+                  variant="primary"
+                  style={{ width: "100%" }}
+                >
+                  {loading ? "Creating..." : "Confirm & Create Store"}
+                </Button>
+              )}
+            </Footer>
+          </Content>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Container>
   );
 }
 
-// ─── Styled Components ────────────────────────────────────────────────────────
-
 const Container = styled.View`
-  flex: 1;
-  background-color: ${({ theme }) => theme.colorPrimary};
-`;
-
-const KeyboardAvoiding = styled(KeyboardAvoidingView)`
-  flex: 1;
-`;
-
-const ScrollArea = styled.ScrollView`
   flex: 1;
   background-color: ${({ theme }) => theme.colorBgLayout};
 `;
 
-const Hero = styled.View<{ $topInset: number }>`
-  background-color: ${({ theme }) => theme.colorPrimary};
-  padding-top: ${({ theme, $topInset }) => theme.sizing.xLarge + $topInset}px;
-  padding-bottom: ${({ theme }) =>
-    theme.sizing.xxLarge + theme.sizing.xLarge}px;
+const Content = styled(Column)`
+  padding: ${({ theme }) => theme.sizing.large}px;
+  padding-bottom: ${({ theme }) => theme.sizing.xLarge}px;
+`;
+
+const Footer = styled.View`
+  padding-top: ${({ theme }) => theme.sizing.large}px;
+`;
+
+const ProgressBar = styled.View`
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  margin-top: ${({ theme }) => theme.sizing.small}px;
+  margin-bottom: ${({ theme }) => theme.sizing.xLarge}px;
 `;
 
-const DecorRingTopRight = styled.View`
-  position: absolute;
-  width: 240px;
-  height: 240px;
-  border-radius: 120px;
-  border-width: 40px;
-  border-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.07;
-  top: -80px;
-  right: -60px;
+const ProgressStep = styled.View<{ isActive: boolean }>`
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background-color: ${({ theme, isActive }) =>
+    isActive ? theme.colorPrimary : theme.colorBorderSecondary};
 `;
 
-const DecorRingBottomLeft = styled.View`
-  position: absolute;
-  width: 160px;
-  height: 160px;
-  border-radius: 80px;
-  border-width: 30px;
-  border-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.07;
-  bottom: -50px;
-  left: -30px;
+const ProgressLine = styled.View<{ isActive: boolean }>`
+  flex: 1;
+  height: 2px;
+  background-color: ${({ theme, isActive }) =>
+    isActive ? theme.colorPrimary : theme.colorBorderSecondary};
+  margin: 0 ${({ theme }) => theme.sizing.small}px;
+  max-width: 40px;
 `;
 
-const HeroContent = styled(Column)``;
-
-const LogoCircle = styled.View`
-  width: 80px;
-  height: 80px;
-  border-radius: 40px;
-  background-color: ${({ theme }) => theme.colorWhite};
+const HeroSection = styled.View`
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
-  margin-bottom: ${({ theme }) => theme.sizing.xSmall}px;
-`;
-
-const FormCard = styled(Column)`
-  margin-left: ${({ theme }) => theme.sizing.medium}px;
-  margin-right: ${({ theme }) => theme.sizing.medium}px;
-  margin-top: -${({ theme }) => theme.sizing.xLarge}px;
+  gap: ${({ theme }) => theme.sizing.medium}px;
   background-color: ${({ theme }) => theme.colorBgContainer};
-  border-radius: ${({ theme }) => theme.borderRadius.xLarge}px;
-  padding: ${({ theme }) => theme.sizing.xLarge}px;
-`;
-
-const FormHeader = styled(Column)`
+  padding: ${({ theme }) => theme.sizing.large}px;
+  border-radius: ${({ theme }) => theme.borderRadius.large}px;
+  border-width: 1px;
+  border-color: ${({ theme }) => theme.colorBorderSecondary};
   margin-bottom: ${({ theme }) => theme.sizing.large}px;
 `;
 
-const SubmitButton = styled(Button)`
-  margin-top: ${({ theme }) => theme.sizing.xSmall}px;
+const HeroContent = styled(Column)`
+  flex: 1;
 `;
 
-const BackButton = styled.TouchableOpacity`
-  padding-top: ${({ theme }) => theme.sizing.xxSmall}px;
-  padding-bottom: ${({ theme }) => theme.sizing.xxSmall}px;
+const IconCircle = styled.View`
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  background-color: ${({ theme }) => theme.colorPrimary}15;
+  align-items: center;
+  justify-content: center;
+`;
+
+const ErrorBox = styled(Row)`
+  background-color: ${({ theme }) => theme.colorErrorBg ?? "#fff1f0"};
+  padding: ${({ theme }) => theme.sizing.medium}px;
+  border-radius: ${({ theme }) => theme.borderRadius.large}px;
+  border-width: 1px;
+  border-color: ${({ theme }) => theme.colorError};
+  align-items: center;
+  margin-bottom: ${({ theme }) => theme.sizing.medium}px;
 `;

@@ -1,14 +1,23 @@
-import { Injectable, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  Logger,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../../core/database/schema';
 import { eq, and } from 'drizzle-orm';
+
+const OTP_BCRYPT_ROUNDS = 10;
+const OTP_MAX_ATTEMPTS = 5;
 import { Msg91Service } from './msg91.service';
 import { SendOtpDto, VerifyOtpDto } from '../dto/otp.dto';
 import { VerifyEmailOtpDto } from '../dto/email-verify.dto';
 import { AuthService } from './auth.service';
 import { OtpRateLimitService } from './otp-rate-limit.service';
-import { AuthMapper } from '../mappers/auth-mapper';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -35,12 +44,12 @@ export class OtpService {
 
     const response = await this.msg91.sendOtp(phone);
 
-    await this.db.insert(schema.otpVerification).values({
-      identifier: phone,
-      value: 'MSG91_MANAGED',
-      purpose: 'PHONE_VERIFY',
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-    });
+    await this.insertOtpRecord(
+      phone,
+      'PHONE_VERIFY',
+      'MSG91_MANAGED',
+      10 * 60 * 1000,
+    );
 
     return response;
   }
@@ -78,31 +87,11 @@ export class OtpService {
       user.id,
     );
 
-    // 5. Return unified auth response
-    const permissions = await this.authService.getUserPermissions(user.id);
-    const requestId = crypto.randomUUID();
-    const traceId = crypto.randomUUID();
+    // 5. Record login stats (loginCount, lastLoginAt, lastActiveAt)
+    await this.authService.recordSuccessfulLogin(user.id);
 
-    return AuthMapper.toAuthResponseDto(
-      {
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          emailVerified: user.emailVerified,
-          image: user.image,
-          phoneNumber: user.phoneNumber,
-          phoneNumberVerified: user.phoneNumberVerified,
-          lastLoginAt: new Date(),
-          lastLoginIp: null,
-        },
-        token,
-        session: { token, expiresAt, sessionId: crypto.randomUUID() },
-      },
-      permissions,
-      requestId,
-      traceId,
-    );
+    // 6. Return unified auth response
+    return this.authService.buildAuthResponse(user, token, expiresAt);
   }
 
   /**
@@ -115,16 +104,20 @@ export class OtpService {
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store OTP record with EMAIL_VERIFY purpose
-    await this.db.insert(schema.otpVerification).values({
-      identifier: email,
-      value: otp, // In production, hash this before storing
-      purpose: 'EMAIL_VERIFY',
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
-    });
+    // Hash before persisting — the plaintext OTP never touches the database
+    const otpHash = await bcrypt.hash(otp, OTP_BCRYPT_ROUNDS);
 
-    // TODO: Send email with OTP (implement email service)
-    this.logger.debug(`Email OTP for ${email}: ${otp}`);
+    // Store hashed OTP record with EMAIL_VERIFY purpose
+    await this.insertOtpRecord(
+      email,
+      'EMAIL_VERIFY',
+      otpHash,
+      24 * 60 * 60 * 1000,
+    );
+
+    // TODO: integrate email delivery service (SendGrid / AWS SES / SMTP)
+    // The OTP is intentionally NOT logged — logging it would defeat hashing.
+    this.logger.log(`Email OTP generated and stored (hashed) for: ${email}`);
   }
 
   /**
@@ -155,14 +148,15 @@ export class OtpService {
       throw new BadRequestException('OTP has expired');
     }
 
-    if (otpRecord.attempts >= 5) {
+    if (otpRecord.attempts >= OTP_MAX_ATTEMPTS) {
       throw new BadRequestException(
         'Too many failed attempts. Request a new OTP.',
       );
     }
 
-    // Check OTP value (in production, compare hashes)
-    if (otpRecord.value !== otp) {
+    // Compare provided OTP against the stored bcrypt hash
+    const isValid = await bcrypt.compare(otp, otpRecord.value);
+    if (!isValid) {
       await this.db
         .update(schema.otpVerification)
         .set({ attempts: otpRecord.attempts + 1 })
@@ -233,5 +227,22 @@ export class OtpService {
    */
   async retryOtp() {
     return this.msg91.retryOtp();
+  }
+
+  // ─── Private Helpers ───────────────────────────────────────────────────────
+
+  /** Insert an OTP verification record with a computed expiry timestamp. */
+  private async insertOtpRecord(
+    identifier: string,
+    purpose: (typeof schema.otpVerification.$inferInsert)['purpose'],
+    value: string,
+    expiresInMs: number,
+  ): Promise<void> {
+    await this.db.insert(schema.otpVerification).values({
+      identifier,
+      value,
+      purpose,
+      expiresAt: new Date(Date.now() + expiresInMs),
+    });
   }
 }

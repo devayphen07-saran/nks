@@ -15,6 +15,7 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
       database: { generateId: false },
     },
 
+    // ✅ Bearer token plugin for mobile Bearer auth
     plugins: [bearer()],
 
     database: drizzleAdapter(db, {
@@ -56,11 +57,19 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
     session: {
       hashSessionToken: true,
       additionalFields: {
+        // ✅ ISSUE #5 FIX: Device tracking fields
         deviceId: { type: 'string', required: false },
         deviceName: { type: 'string', required: false },
         deviceType: { type: 'string', required: false },
         appVersion: { type: 'string', required: false },
+
         activeStoreFk: { type: 'number', required: false },
+        userRoles: { type: 'string', required: false }, // JSON array of roles
+        primaryRole: { type: 'string', required: false }, // Primary role code
+
+        // Note: roleHash and jwtToken are handled separately in auth.service.ts
+        // They are not defined here to avoid Better Auth insertion conflicts
+        // Instead, they are UPDATEd after session creation
       },
       expiresIn: 60 * 60 * 24 * 30, // 30 days
       updateAge: 60 * 60 * 24, // refresh if older than 1 day

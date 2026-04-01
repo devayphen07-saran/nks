@@ -25,6 +25,8 @@ const iamBaseURL =
 export const API = axios.create({
   baseURL: apiBaseURL,
   timeout: 30000,
+  // ✅ SECURITY: Include cookies (for httpOnly auth tokens)
+  withCredentials: true,
   headers: {
     "Content-Type": "application/json",
   },
@@ -33,6 +35,8 @@ export const API = axios.create({
 export const IamAPI = axios.create({
   baseURL: iamBaseURL,
   timeout: 30000,
+  // ✅ SECURITY: Include cookies (for httpOnly auth tokens)
+  withCredentials: true,
   headers: {
     "Content-Type": "application/json",
   },

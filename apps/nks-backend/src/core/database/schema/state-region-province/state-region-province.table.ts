@@ -1,10 +1,4 @@
-import {
-  pgTable,
-  varchar,
-  bigint,
-  boolean,
-  uniqueIndex,
-} from 'drizzle-orm/pg-core';
+import { pgTable, varchar, bigint, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { country } from '../country';
 import { users } from '../users';

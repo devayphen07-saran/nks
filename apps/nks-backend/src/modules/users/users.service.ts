@@ -7,14 +7,14 @@ type User = typeof schema.users.$inferSelect;
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly usersRepo: UsersRepository) {}
+  constructor(private readonly usersRepository: UsersRepository) {}
 
   /**
    * Get user profile by ID.
    * Returns raw internal User. The Controller is responsible for stripping sensitive info.
    */
   async getProfile(userId: number): Promise<User> {
-    const user = await this.usersRepo.findById(userId);
+    const user = await this.usersRepository.findById(userId);
     if (!user) {
       throw new NotFoundException('User not found');
     }
@@ -27,12 +27,12 @@ export class UsersService {
    * Only allows safe, user-editable fields.
    */
   async updateProfile(userId: number, dto: UpdateProfileDto): Promise<User> {
-    const user = await this.usersRepo.findById(userId);
+    const user = await this.usersRepository.findById(userId);
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    const updated = await this.usersRepo.update(userId, {
+    const updated = await this.usersRepository.update(userId, {
       name: dto.name,
       languagePreference: dto.languagePreference,
       whatsappOptedIn: dto.whatsappOptedIn,

@@ -84,6 +84,9 @@ export const notifications = pgTable(
     readAt: timestamp('read_at', { withTimezone: true }),
   },
   (table) => [
+    // Time-range queries (e.g., notifications since last sync)
+    index('notifications_created_at_idx').on(table.createdAt),
+
     // Fast lookup: all notifications for a user (ordered by createdAt desc)
     index('notifications_user_fk_idx').on(table.userFk),
 

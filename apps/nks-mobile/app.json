@@ -13,7 +13,11 @@
       "backgroundColor": "#df005c"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nks.mobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.nks.mobile",
@@ -32,6 +36,13 @@
       "expo-router",
       "expo-font",
       "expo-secure-store"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "59646245-7f12-43f9-b40e-dd7c3afd4601"
+      }
+    },
+    "owner": "saranr123"
   }
 }

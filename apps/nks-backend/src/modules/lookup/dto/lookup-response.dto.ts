@@ -52,3 +52,27 @@ const DesignationResponseSchema = z.object({
 export class DesignationResponseDto extends createZodDto(
   DesignationResponseSchema,
 ) {}
+
+// Store Category
+const StoreCategoryResponseSchema = z.object({
+  id: z.number(),
+  guuid: z.string(),
+  code: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  sortOrder: z.number().nullable(),
+});
+
+export class StoreCategoryResponseDto extends createZodDto(
+  StoreCategoryResponseSchema,
+) {}
+
+// Global Config
+const ConfigResponseSchema = z.object({
+  storeCategories: z.array(StoreCategoryResponseSchema),
+  storeLegalTypes: z.array(StoreLegalTypeResponseSchema),
+  salutations: z.array(SalutationResponseSchema),
+  designations: z.array(DesignationResponseSchema),
+});
+
+export class ConfigResponseDto extends createZodDto(ConfigResponseSchema) {}

@@ -1,10 +1,4 @@
-import {
-  pgTable,
-  text,
-  timestamp,
-  index,
-  smallint,
-} from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, index, smallint } from 'drizzle-orm/pg-core';
 import { betterAuthEntity } from '../base.entity';
 
 // Track OTP requests per identifier to enforce rate limits.
@@ -23,7 +17,9 @@ export const otpRequestLog = pgTable(
 
     // windowExpiresAt — reset window expires at this time (24h from first request)
     // After expiry, requestCount resets to 0
-    windowExpiresAt: timestamp('window_expires_at', { withTimezone: true }).notNull(),
+    windowExpiresAt: timestamp('window_expires_at', {
+      withTimezone: true,
+    }).notNull(),
   },
   (table) => [
     // Fast lookup: find rate limit record by identifier

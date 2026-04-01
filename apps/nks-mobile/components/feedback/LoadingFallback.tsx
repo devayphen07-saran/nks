@@ -10,9 +10,9 @@ export function LoadingFallback() {
 
 const styles = StyleSheet.create({
   container: {
-    flex:            1,
-    justifyContent:  "center",
-    alignItems:      "center",
-    backgroundColor: "#df005c",
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f5f5f5",
   },
 });

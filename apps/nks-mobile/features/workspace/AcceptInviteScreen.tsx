@@ -1,114 +1,145 @@
 import { router } from "expo-router";
-import { Platform, KeyboardAvoidingView } from "react-native";
+import { Platform, KeyboardAvoidingView, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { useCallback, useState } from "react";
 import styled from "styled-components/native";
 import {
-  Button,
+  Alert,
   Column,
-  Input,
   LucideIcon,
+  Row,
   Typography,
+  Button,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { acceptInvite } from "@nks/api-manager";
 import { useRootDispatch } from "../../store";
+import { acceptInvite } from "@nks/api-manager";
 import { refreshSession } from "../../store/refreshSession";
-
-const schema = z.object({
-  token: z.string().min(1, "Invite token is required"),
-});
-type FormData = z.infer<typeof schema>;
 
 export function AcceptInviteScreen() {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const dispatch = useRootDispatch();
+  const [token, setToken] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const { control, handleSubmit, setError, formState: { isSubmitting } } =
-    useForm<FormData>({ resolver: zodResolver(schema) });
-
-  const onSubmit = async (data: FormData) => {
-    const result = await dispatch(acceptInvite({ bodyParam: { token: data.token } }));
-    if (acceptInvite.fulfilled.match(result)) {
-      await dispatch(refreshSession());
-      router.replace("/(protected)/(workspace)/(app)/(store)/main");
-    } else {
-      const msg =
-        (result.payload as { message?: string })?.message ??
-        "Invalid or expired invite token";
-      setError("token", { message: msg });
+  const handleAccept = useCallback(async () => {
+    if (!token.trim()) {
+      setError("Please enter a valid invite token");
+      return;
     }
-  };
+
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const result = await dispatch(
+        acceptInvite({ bodyParam: { token: token.trim() } }),
+      );
+
+      if (result.meta.requestStatus === "fulfilled") {
+        await dispatch(refreshSession());
+        router.replace("/(protected)/(workspace)/(app)/(store)/list");
+      } else {
+        setError(
+          "Failed to accept invite. Please check the token and try again.",
+        );
+      }
+    } catch (err) {
+      setError("An error occurred. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [dispatch, token]);
+
+  const handleBack = useCallback(() => {
+    router.back();
+  }, []);
 
   return (
     <Container>
       <KeyboardAvoiding behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <ScrollArea
           contentContainerStyle={{ flexGrow: 1 }}
-          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           <Hero $topInset={insets.top}>
-            <DecorRingTopRight />
-            <DecorRingBottomLeft />
-            <HeroContent align="center" gap="xSmall">
-              <LogoCircle>
-                <LucideIcon name="UserCheck" size={36} color={theme.colorPrimary} />
-              </LogoCircle>
-              <Typography.H3 weight="bold" color={theme.colorWhite}>
-                NKS
-              </Typography.H3>
-              <Typography.Body color={theme.colorWhite}>
-                Join your team
-              </Typography.Body>
+            <HeroContent gap="xSmall" align="center">
+              <LogoRow gap="small" align="center">
+                <LogoCircle>
+                  <LucideIcon
+                    name="Layers"
+                    size={24}
+                    color={theme.colorWhite}
+                  />
+                </LogoCircle>
+                <Typography.H4 weight="bold" color={theme.colorText}>
+                  NKS
+                </Typography.H4>
+              </LogoRow>
             </HeroContent>
           </Hero>
 
-          <FormCard
-            style={{
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 8 },
-              shadowOpacity: 0.12,
-              shadowRadius: 24,
-              elevation: 8,
-            }}
-          >
-            <FormHeader gap="xxSmall">
-              <Typography.H4 weight="bold">Accept invite</Typography.H4>
+          <PageContent gap="large">
+            <Column gap="medium">
+              <SetupBadge>
+                <LucideIcon
+                  name="Link"
+                  size={12}
+                  color={theme.colorTextSecondary}
+                />
+                <Typography.Caption
+                  weight="semiBold"
+                  color={theme.colorTextSecondary}
+                >
+                  ACCEPT INVITE
+                </Typography.Caption>
+              </SetupBadge>
+              <Typography.H2 weight="bold">
+                Join an{"\n"}organization
+              </Typography.H2>
               <Typography.Body type="secondary">
-                Enter the invite token your store owner shared with you
+                Enter the invite token provided by your organization admin to
+                get started.
               </Typography.Body>
-            </FormHeader>
-
-            <Column gap="xxSmall">
-              <Input
-                name="token"
-                control={control}
-                label="Invite token"
-                placeholder="e.g. a1b2c3d4e5f6..."
-                required
-              />
-
-              <SubmitButton
-                label="Join Store"
-                size="xlg"
-                variant="primary"
-                onPress={handleSubmit(onSubmit)}
-                loading={isSubmitting}
-              />
             </Column>
-          </FormCard>
 
-          <Column flex={1} justify="flex-end" align="center" padding="xLarge">
-            <BackButton onPress={() => router.back()}>
-              <Typography.Body weight="semiBold" type="primary">
-                Go back
-              </Typography.Body>
-            </BackButton>
-          </Column>
+            <FormCard gap="large">
+              <Column gap="small">
+                <Typography.Body weight="semiBold" color={theme.colorText}>
+                  Invite Token
+                </Typography.Body>
+
+                {error && (
+                  <ErrorText>
+                    <LucideIcon
+                      name="AlertCircle"
+                      size={14}
+                      color={theme.colorError}
+                    />
+                    <Typography.Caption color={theme.colorError}>
+                      {error}
+                    </Typography.Caption>
+                  </ErrorText>
+                )}
+              </Column>
+
+              <Button
+                onPress={handleAccept}
+                disabled={isLoading || !token.trim()}
+                loading={isLoading}
+              >
+                {isLoading ? "Accepting..." : "Accept Invite"}
+              </Button>
+
+              <BackButton onPress={handleBack} disabled={isLoading}>
+                <Typography.Body color={theme.colorTextSecondary}>
+                  Back
+                </Typography.Body>
+              </BackButton>
+            </FormCard>
+          </PageContent>
         </ScrollArea>
       </KeyboardAvoiding>
     </Container>
@@ -119,7 +150,7 @@ export function AcceptInviteScreen() {
 
 const Container = styled.View`
   flex: 1;
-  background-color: ${({ theme }) => theme.colorPrimary};
+  background-color: ${({ theme }) => theme.colorBgLayout};
 `;
 
 const KeyboardAvoiding = styled(KeyboardAvoidingView)`
@@ -132,69 +163,76 @@ const ScrollArea = styled.ScrollView`
 `;
 
 const Hero = styled.View<{ $topInset: number }>`
-  background-color: ${({ theme }) => theme.colorPrimary};
-  padding-top: ${({ theme, $topInset }) => theme.sizing.xLarge + $topInset}px;
-  padding-bottom: ${({ theme }) =>
-    theme.sizing.xxLarge + theme.sizing.xLarge}px;
-  align-items: center;
-  justify-content: center;
+  background-color: ${({ theme }) => theme.colorBgLayout};
+  padding-top: ${({ theme, $topInset }) => theme.sizing.medium + $topInset}px;
+  padding-bottom: ${({ theme }) => theme.sizing.medium}px;
+  padding-left: ${({ theme }) => theme.sizing.large}px;
+  padding-right: ${({ theme }) => theme.sizing.large}px;
+  align-items: flex-start;
+  justify-content: flex-start;
   overflow: hidden;
-`;
-
-const DecorRingTopRight = styled.View`
-  position: absolute;
-  width: 240px;
-  height: 240px;
-  border-radius: 120px;
-  border-width: 40px;
-  border-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.07;
-  top: -80px;
-  right: -60px;
-`;
-
-const DecorRingBottomLeft = styled.View`
-  position: absolute;
-  width: 160px;
-  height: 160px;
-  border-radius: 80px;
-  border-width: 30px;
-  border-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.07;
-  bottom: -50px;
-  left: -30px;
 `;
 
 const HeroContent = styled(Column)``;
 
+const LogoRow = styled(Row)`
+  align-self: flex-start;
+`;
+
 const LogoCircle = styled.View`
-  width: 80px;
-  height: 80px;
-  border-radius: 40px;
-  background-color: ${({ theme }) => theme.colorWhite};
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background-color: ${({ theme }) => theme.colorPrimary};
   align-items: center;
   justify-content: center;
-  margin-bottom: ${({ theme }) => theme.sizing.xSmall}px;
+`;
+
+const PageContent = styled(Column)`
+  padding-left: ${({ theme }) => theme.sizing.large}px;
+  padding-right: ${({ theme }) => theme.sizing.large}px;
+  padding-top: ${({ theme }) => theme.sizing.medium}px;
+  padding-bottom: ${({ theme }) => theme.sizing.large}px;
+`;
+
+const SetupBadge = styled(Row)`
+  background-color: ${({ theme }) => theme.colorBgLayout};
+  border-radius: 20px;
+  padding-left: ${({ theme }) => theme.sizing.small}px;
+  padding-right: ${({ theme }) => theme.sizing.small}px;
+  padding-top: ${({ theme }) => theme.sizing.xxSmall}px;
+  padding-bottom: ${({ theme }) => theme.sizing.xxSmall}px;
+  align-self: flex-start;
+  gap: ${({ theme }) => theme.sizing.xxSmall}px;
 `;
 
 const FormCard = styled(Column)`
-  margin-left: ${({ theme }) => theme.sizing.medium}px;
-  margin-right: ${({ theme }) => theme.sizing.medium}px;
-  margin-top: -${({ theme }) => theme.sizing.xLarge}px;
   background-color: ${({ theme }) => theme.colorBgContainer};
-  border-radius: ${({ theme }) => theme.borderRadius.xLarge}px;
-  padding: ${({ theme }) => theme.sizing.xLarge}px;
+  border-radius: ${({ theme }) => theme.borderRadius.large}px;
+  padding: ${({ theme }) => theme.sizing.large}px;
+  border-width: 1px;
+  border-color: ${({ theme }) => theme.colorBorderSecondary};
 `;
 
-const FormHeader = styled(Column)`
-  margin-bottom: ${({ theme }) => theme.sizing.large}px;
+const StyledTextInput = styled(TextInput)`
+  background-color: ${({ theme }) => theme.colorBgLayout};
+  border-radius: ${({ theme }) => theme.borderRadius.medium}px;
+  padding: ${({ theme }) => theme.sizing.medium}px;
+  border-width: 1px;
+  border-color: ${({ theme }) => theme.colorBorderSecondary};
+  color: ${({ theme }) => theme.colorText};
+  font-size: 14px;
+  min-height: 100px;
 `;
 
-const SubmitButton = styled(Button)`
-  margin-top: ${({ theme }) => theme.sizing.xSmall}px;
+const ErrorText = styled(Row)`
+  align-items: center;
+  gap: ${({ theme }) => theme.sizing.small}px;
 `;
 
-const BackButton = styled.TouchableOpacity`
-  padding-top: ${({ theme }) => theme.sizing.xxSmall}px;
-  padding-bottom: ${({ theme }) => theme.sizing.xxSmall}px;
+const BackButton = styled.TouchableOpacity<{ disabled: boolean }>`
+  padding-top: ${({ theme }) => theme.sizing.small}px;
+  padding-bottom: ${({ theme }) => theme.sizing.small}px;
+  align-items: center;
+  opacity: ${({ disabled }) => (disabled ? 0.5 : 1)};
 `;

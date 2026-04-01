@@ -50,9 +50,14 @@ export const auditLogs = pgTable(
     failureReason: text('failure_reason'),
   },
   (table) => [
+    // Time-range queries (e.g., SELECT * WHERE created_at > ?)
+    index('audit_logs_created_at_idx').on(table.createdAt),
+    // User/store/action lookups
     index('audit_logs_user_idx').on(table.userFk),
     index('audit_logs_store_idx').on(table.storeFk),
     index('audit_logs_action_idx').on(table.action),
+    // Composite for common audit lookups
+    index('audit_logs_store_action_idx').on(table.storeFk, table.action),
   ],
 );
 
