@@ -7,7 +7,17 @@ import { RBACGuard } from '../../common/guards/rbac.guard';
 
 @Module({
   controllers: [RolesController],
-  providers: [RolesService, RolesRepository, RoleEntityPermissionRepository, RBACGuard],
-  exports: [RolesService, RolesRepository, RoleEntityPermissionRepository, RBACGuard],
+  providers: [
+    RolesService,
+    RolesRepository,
+    RoleEntityPermissionRepository,
+    RBACGuard,
+  ],
+  exports: [
+    RolesService,
+    RolesRepository,
+    RoleEntityPermissionRepository,
+    RBACGuard,
+  ],
 })
 export class RolesModule {}
