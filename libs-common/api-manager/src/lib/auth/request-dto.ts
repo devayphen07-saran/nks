@@ -25,6 +25,7 @@ export interface RegisterRequest {
 
 export interface AuthUserResponse {
   id: string;
+  guuid: string;
   name: string | null;
   email: string | null;
   emailVerified: boolean;
@@ -38,13 +39,15 @@ export interface AuthUserResponse {
 export interface AuthSessionResponse {
   sessionId: string;
   tokenType: string;
-  accessToken: string;
+  sessionToken: string;
   issuedAt: string;
   expiresAt: string;
   refreshToken: string;
   refreshExpiresAt: string;
   mechanism: "password" | "otp" | "oauth" | "token";
   absoluteExpiry: string;
+  defaultStore: { guuid: string } | null;
+  jwtToken?: string;
 }
 
 export interface AuthContextResponse {
@@ -79,11 +82,11 @@ export interface RouteEntry {
   fullPath: string;
   iconName: string | null;
   routeType: "screen" | "sidebar" | "tab" | "modal";
-  appCode: string | null;
+  routeScope: "admin" | "store";
   isPublic: boolean;
+  isHidden: boolean;
   parentRouteFk: number | null;
   sortOrder: number;
-  hasAccess: boolean;
   canView: boolean;
   canCreate: boolean;
   canEdit: boolean;
@@ -96,7 +99,6 @@ export interface AuthAccessResponse {
   isSuperAdmin: boolean;
   activeStoreId: number | null;
   roles: UserRoleEntry[];
-  initialRoute: string;
 }
 
 export interface StoreAccessResponse {
@@ -114,18 +116,20 @@ export interface ApiMetadataResponse {
   requestId: string;
   traceId: string;
   apiVersion: string;
-  status: "success" | "error" | "partial";
+  status?: "success" | "error" | "partial";
   timestamp: string;
 }
 
+export interface AuthData {
+  user: AuthUserResponse;
+  session: AuthSessionResponse;
+  authContext: AuthContextResponse;
+  access: AuthAccessResponse;
+  flags: FeatureFlagsResponse;
+}
+
 export interface AuthResponse extends ApiMetadataResponse {
-  data: {
-    user: AuthUserResponse;
-    session: AuthSessionResponse;
-    authContext: AuthContextResponse;
-    access: AuthAccessResponse;
-    flags: FeatureFlagsResponse;
-  };
+  data: AuthData;
 }
 
 // ─── Profile Completion (unified endpoint for all profile updates) ─────────────
@@ -156,4 +160,41 @@ export interface StoreSelectResponse {
     permissions: string[];
     routes: RouteEntry[];
   };
+}
+
+// ─── Session Management ────────────────────────────────────────────────────
+
+export interface SessionEntry {
+  sessionId: string;
+  deviceName: string;
+  deviceType: "mobile" | "web" | "tablet" | "desktop";
+  lastActivityAt: string;
+  createdAt: string;
+  expiresAt: string;
+  ipAddress: string;
+}
+
+export type SessionListResponse = SessionEntry[];
+
+// ─── Permissions ──────────────────────────────────────────────────────────
+
+export interface EntityPermission {
+  entityCode: string;
+  canView: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canExport: boolean;
+}
+
+export interface PermissionsSnapshot {
+  version: string;
+  snapshot: Record<string, EntityPermission>;
+}
+
+export interface PermissionsDelta {
+  version: string;
+  added: Record<string, EntityPermission>;
+  removed: string[];
+  modified: Record<string, EntityPermission>;
 }

@@ -57,6 +57,11 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       );
     }
 
+    // Add Retry-After header for rate limiting (429 responses)
+    if (status === HttpStatus.TOO_MANY_REQUESTS) {
+      response.setHeader('Retry-After', '60'); // Retry after 60 seconds
+    }
+
     response.status(status).json(body);
   }
 
@@ -107,19 +112,25 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
       // NestJS class-validator pipe returns { message: string[] }
       const responseData = res as Record<string, unknown>;
+
+      // Check if response contains errorCode and message from our validators
+      const errorCode = responseData?.errorCode as string | undefined;
       const message = Array.isArray(responseData?.message)
         ? responseData.message.join('; ')
         : (responseData?.message ?? exception.message);
 
-      const code = this.inferErrorCode(status);
+      const code = errorCode ?? this.inferErrorCode(status);
 
       return {
         status,
         body: {
           status: 'error',
+          statusCode: status,
           code,
+          errorCode: errorCode ?? null,
           message,
           errors: (res as Record<string, unknown>)?.errors ?? null,
+          details: (res as Record<string, unknown>)?.details ?? null,
           meta: null,
           timestamp,
           path,

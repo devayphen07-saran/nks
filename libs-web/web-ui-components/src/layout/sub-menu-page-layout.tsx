@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Search, X } from "lucide-react";
 import { cn } from "../lib/utils";
 import { BreadcrumbNav } from "./breadcrumb-nav";
 import type { SubMenuPageLayoutProps } from "./types";
@@ -15,36 +17,73 @@ export function SubMenuPageLayout({
   children,
 }: SubMenuPageLayoutProps) {
   const pathname = usePathname();
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const hasHeader = title || (breadcrumb && breadcrumb.length > 0) || actions;
+
+  // Filter menu items based on search query
+  const filteredItems = searchQuery
+    ? subMenuItems.filter((item) =>
+        item.label.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : subMenuItems;
 
   return (
     <div className="flex flex-1 flex-col">
       {/* Page Header (not sticky in sub-menu layout) */}
-      <div className="border-b border-border bg-background px-4 py-6 lg:px-6">
-        {/* Breadcrumb */}
-        {breadcrumb && breadcrumb.length > 0 && (
-          <div className="mb-3">
-            <BreadcrumbNav items={breadcrumb} />
-          </div>
-        )}
+      {hasHeader && (
+        <div className="border-b border-border bg-background px-4 py-6 lg:px-6">
+          {/* Breadcrumb */}
+          {breadcrumb && breadcrumb.length > 0 && (
+            <div className="mb-3">
+              <BreadcrumbNav items={breadcrumb} />
+            </div>
+          )}
 
-        {/* Title Row */}
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-2xl font-bold tracking-tight lg:text-3xl">{title}</h1>
-            {subtitle && (
-              <p className="mt-1 text-sm text-muted-foreground lg:text-base">{subtitle}</p>
-            )}
+          {/* Title Row */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              {title && <h1 className="truncate text-2xl font-bold tracking-tight lg:text-3xl">{title}</h1>}
+              {subtitle && (
+                <p className="mt-1 text-sm text-muted-foreground lg:text-base">{subtitle}</p>
+              )}
+            </div>
+            {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
           </div>
-          {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
         </div>
-      </div>
+      )}
 
       {/* Sub-menu + Content Area */}
-      <div className="flex flex-1 overflow-hidden bg-muted/5">
+      <div className="flex flex-1 overflow-hidden bg-muted/5 min-h-0">
         {/* Fixed Sub-menu (left side) */}
-        <aside className="hidden w-56 shrink-0 border-r border-border bg-background lg:block">
-          <nav className="sticky top-0 flex flex-col gap-1 overflow-y-auto p-4">
-            {subMenuItems.map((item) => {
+        <aside className="hidden w-56 shrink-0 border-r border-border bg-background h-full lg:flex lg:flex-col">
+          {/* Search Input */}
+          <div className="border-b border-border p-3 shrink-0">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-8 w-full rounded-md border border-input bg-background pl-8 pr-8 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded hover:bg-accent p-0.5"
+                  aria-label="Clear search"
+                >
+                  <X className="size-4 text-muted-foreground" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Menu Items */}
+          <nav className="flex flex-col gap-1 overflow-y-auto p-4 flex-1 min-h-0">
+            {filteredItems.length > 0 ? (
+              filteredItems.map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
               const Icon = item.icon;
 
@@ -63,7 +102,12 @@ export function SubMenuPageLayout({
                   <span className="truncate">{item.label}</span>
                 </Link>
               );
-            })}
+              })
+            ) : (
+              <div className="flex items-center justify-center py-8 text-center">
+                <p className="text-sm text-muted-foreground">No results found</p>
+              </div>
+            )}
           </nav>
         </aside>
 

@@ -90,6 +90,7 @@ export interface QuickActionGroup {
  * Header configuration
  */
 export interface HeaderConfig {
+  pageTitle?: string;
   showSearch?: boolean;
   searchPlaceholder?: string;
   companySwitcher?: React.ReactNode;

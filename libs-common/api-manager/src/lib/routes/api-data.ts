@@ -1,28 +1,19 @@
 import { APIData, APIMethod } from "../api-handler";
 
-// ── User Routes ────────────────────────────────────────────────────────────────
-// Fetch routes for the current authenticated user based on their roles
+// ─── Routes Navigation ──────────────────────────────────────────────────────
+// Hierarchical navigation menu endpoints with permission flags.
+// Returns routes based on user's role hierarchy (SUPER_ADMIN sees all,
+// custom roles see only mapped routes).
 
-export const GET_USER_ROUTES: APIData = new APIData(
-  "routes/me",
-  APIMethod.GET,
-  { public: false } // Requires authentication
+// 1. Get admin routes for a user (SUPER_ADMIN only)
+// userId in path — typically the logged-in admin's own ID
+export const GET_ADMIN_ROUTES: APIData = new APIData(
+  "routes/admin",
+  APIMethod.GET
 );
 
-// ── Admin Routes & Permissions ────────────────────────────────────────────────
-// Fetch all system routes and permissions (SUPER_ADMIN only)
-
-export const GET_ADMIN_ROUTES_PERMISSIONS: APIData = new APIData(
-  "routes/admin/combined",
-  APIMethod.GET,
-  { public: false } // Requires authentication and SUPER_ADMIN role
-);
-
-// ── Store Routes ──────────────────────────────────────────────────────────────
-// Fetch store-specific routes for authenticated users
-
+// 2. Get store-scoped routes for the calling user in a given store
 export const GET_STORE_ROUTES: APIData = new APIData(
-  "store/dashboard/routes",
-  APIMethod.GET,
-  { public: false } // Requires authentication
+  "routes/store/storeGuuid",
+  APIMethod.GET
 );

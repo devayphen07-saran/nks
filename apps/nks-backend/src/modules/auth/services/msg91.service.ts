@@ -1,6 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+/**
+ * MSG91 API Response
+ * All MSG91 endpoints return a response with type, message, and optional reqId/data
+ */
+export interface Msg91Response {
+  type: 'success' | 'error';
+  message: string;
+  reqId?: string;
+  data?: Record<string, unknown>;
+}
+
 @Injectable()
 export class Msg91Service {
   private readonly logger = new Logger(Msg91Service.name);
@@ -17,7 +28,7 @@ export class Msg91Service {
   /**
    * Send OTP to the given identifier.
    */
-  async sendOtp(identifier: string) {
+  async sendOtp(identifier: string): Promise<Msg91Response> {
     return this.post('/sendOtp', { identifier });
   }
 
@@ -27,18 +38,18 @@ export class Msg91Service {
    * Based on the user-provided snippet: { otp: otpValue } was passed to /verifyOtp.
    * However, most APIs require the identifier to know which OTP to verify.
    */
-  async verifyOtp(reqId: string, otp: string) {
+  async verifyOtp(reqId: string, otp: string): Promise<Msg91Response> {
     return this.post('/verifyOtp', { reqId, otp });
   }
 
   /**
-   * Retry sending OTP.
+   * Resend OTP using the original request ID.
    */
-  async retryOtp(channel: string = '11') {
-    return this.post('/retryOtp', { channel });
+  async resendOtp(reqId: string, channel: string = '11'): Promise<Msg91Response> {
+    return this.post('/retryOtp', { reqId, channel });
   }
 
-  private async post(path: string, body: Record<string, any>) {
+  private async post(path: string, body: Record<string, any>): Promise<Msg91Response> {
     try {
       const url = `${this.baseUrl}${path}`;
       const payload = { ...body, widgetId: this.widgetId };

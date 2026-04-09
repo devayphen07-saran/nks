@@ -1,5 +1,5 @@
-import React, { useEffect } from "react";
-import { ScrollView, TouchableOpacity, Alert, View } from "react-native";
+import React from "react";
+import { ScrollView, TouchableOpacity, View } from "react-native";
 import styled from "styled-components/native";
 import {
   Typography,
@@ -12,62 +12,27 @@ import {
   Divider,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useRootDispatch, useUserPreferences } from "../../store";
-import {
-  getUserPreferences,
-  updateUserPreferences,
-  updateTheme,
-} from "@nks/api-manager";
 import { router } from "expo-router";
 import { ThemeEnum } from "@nks/shared-types";
 
 export function SettingsScreen() {
   const { theme } = useMobileTheme();
-  const dispatch = useRootDispatch();
-  const {
-    getPreferences,
-    updatePreferences,
-    updateTheme: updateThemeState,
-  } = useUserPreferences();
 
-  useEffect(() => {
-    dispatch(getUserPreferences());
-  }, [dispatch]);
-
-  const preferences = getPreferences.response;
+  // TODO: Connect to API for user preferences
+  const preferences = {
+    theme: ThemeEnum.AUTO,
+    notificationsEnabled: true,
+    timezone: "Asia/Kolkata",
+  };
 
   const handleThemeChange = async (newTheme: string) => {
-    try {
-      const resultAction = await dispatch(
-        updateTheme({ bodyParam: { theme: newTheme as any } }),
-      );
-      if (!updateTheme.fulfilled.match(resultAction)) {
-        const error = resultAction.payload as any;
-        Alert.alert(
-          "Error",
-          error?.message || "Failed to update theme preference",
-        );
-      }
-    } catch (err) {
-      Alert.alert("Error", "An unexpected error occurred");
-    }
+    // TODO: Dispatch updateTheme API call
+    console.log("Theme changed to:", newTheme);
   };
 
   const handleNotificationToggle = async (enabled: boolean) => {
-    try {
-      const resultAction = await dispatch(
-        updateUserPreferences({ bodyParam: { notificationsEnabled: enabled } }),
-      );
-      if (!updateUserPreferences.fulfilled.match(resultAction)) {
-        const error = resultAction.payload as any;
-        Alert.alert(
-          "Error",
-          error?.message || "Failed to update notification settings",
-        );
-      }
-    } catch (err) {
-      Alert.alert("Error", "An unexpected error occurred");
-    }
+    // TODO: Dispatch updateUserPreferences API call
+    console.log("Notifications toggled:", enabled);
   };
 
   const themeItems = [
@@ -128,7 +93,6 @@ export function SettingsScreen() {
                   items={themeItems}
                   selectedKey={preferences?.theme || ThemeEnum.AUTO}
                   onChange={handleThemeChange}
-                  disabled={updateThemeState.isLoading}
                 />
               </Column>
             </SettingsGroup>
@@ -159,7 +123,6 @@ export function SettingsScreen() {
                 <Switch
                   defaultChecked={preferences?.notificationsEnabled ?? true}
                   onChange={handleNotificationToggle}
-                  disabled={updatePreferences.isLoading}
                   size={32}
                 />
               </Row>

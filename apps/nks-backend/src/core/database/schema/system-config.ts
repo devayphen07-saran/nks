@@ -1,5 +1,5 @@
 import { boolean, pgTable, text, unique, varchar } from 'drizzle-orm/pg-core';
-import { users } from './users';
+import { users } from './auth/users';
 import { coreEntity, auditFields } from './base.entity';
 
 export const systemConfig = pgTable(

@@ -1,36 +1,48 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDb } from '../../core/database/inject-db.decorator';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../core/database/schema';
+import { entityType } from '../../core/database/schema/lookups/entity-type/entity-type.table';
+import { roleEntityPermission } from '../../core/database/schema/rbac/role-entity-permission/role-entity-permission.table';
 import { eq, and, inArray } from 'drizzle-orm';
+import { RolesRepository } from './roles.repository';
+import type {
+  EntityPermission,
+  RoleEntityPermissions,
+} from './dto/role-response.dto';
 
-export interface EntityPermission {
-  canView: boolean;
-  canCreate: boolean;
-  canEdit: boolean;
-  canDelete: boolean;
-  allow: boolean;
-}
-
-export interface RoleEntityPermissions {
-  [entityCode: string]: EntityPermission;
-}
+type RoleEntityPermissionRow = typeof roleEntityPermission.$inferSelect;
 
 @Injectable()
 export class RoleEntityPermissionRepository {
-  constructor(@InjectDb() private readonly db: NodePgDatabase<typeof schema>) {}
+  constructor(
+    @InjectDb() private readonly db: NodePgDatabase<typeof schema>,
+    private readonly rolesRepository: RolesRepository,
+  ) {}
 
   /**
-   * Get all entity permissions for a role
+   * Get all entity permissions for a role.
+   * Joins with entity_type to get entity codes from the lookup table.
    */
   async getPermissionsByRole(roleId: number): Promise<RoleEntityPermissions> {
     const mappings = await this.db
-      .select()
-      .from(schema.roleEntityPermission)
+      .select({
+        entityCode: entityType.code,
+        canView: roleEntityPermission.canView,
+        canCreate: roleEntityPermission.canCreate,
+        canEdit: roleEntityPermission.canEdit,
+        canDelete: roleEntityPermission.canDelete,
+        deny: roleEntityPermission.deny,
+      })
+      .from(roleEntityPermission)
+      .innerJoin(
+        entityType,
+        eq(roleEntityPermission.entityTypeFk, entityType.id),
+      )
       .where(
         and(
-          eq(schema.roleEntityPermission.roleFk, roleId),
-          eq(schema.roleEntityPermission.isActive, true),
+          eq(roleEntityPermission.roleFk, roleId),
+          eq(roleEntityPermission.isActive, true),
         ),
       );
 
@@ -41,7 +53,7 @@ export class RoleEntityPermissionRepository {
         canCreate: mapping.canCreate,
         canEdit: mapping.canEdit,
         canDelete: mapping.canDelete,
-        allow: mapping.allow,
+        deny: mapping.deny,
       };
     });
 
@@ -49,38 +61,41 @@ export class RoleEntityPermissionRepository {
   }
 
   /**
-   * Get permission for specific role and entity
+   * Get permission for specific role and entity.
+   * Accepts entityCode string and looks up entity_type to find FK.
    */
   async getPermission(
     roleId: number,
     entityCode: string,
   ): Promise<EntityPermission | null> {
-    const mapping = await this.db
+    const entityTypeId = await this.resolveEntityTypeId(entityCode);
+    if (!entityTypeId) return null;
+
+    const [mapping] = await this.db
       .select()
-      .from(schema.roleEntityPermission)
+      .from(roleEntityPermission)
       .where(
         and(
-          eq(schema.roleEntityPermission.roleFk, roleId),
-          eq(schema.roleEntityPermission.entityCode, entityCode),
-          eq(schema.roleEntityPermission.isActive, true),
+          eq(roleEntityPermission.roleFk, roleId),
+          eq(roleEntityPermission.entityTypeFk, entityTypeId),
+          eq(roleEntityPermission.isActive, true),
         ),
       )
       .limit(1);
 
-    if (!mapping.length) return null;
+    if (!mapping) return null;
 
-    const m = mapping[0];
     return {
-      canView: m.canView,
-      canCreate: m.canCreate,
-      canEdit: m.canEdit,
-      canDelete: m.canDelete,
-      allow: m.allow,
+      canView: mapping.canView,
+      canCreate: mapping.canCreate,
+      canEdit: mapping.canEdit,
+      canDelete: mapping.canDelete,
+      deny: mapping.deny,
     };
   }
 
   /**
-   * Check if role has specific permission on entity
+   * Check if role has specific permission on entity.
    */
   async checkPermission(
     roleId: number,
@@ -105,52 +120,53 @@ export class RoleEntityPermissionRepository {
   }
 
   /**
-   * Create or update entity permission for a role
+   * Create or update entity permission for a role.
+   * Accepts entityCode string and looks up entity_type to find FK.
    */
   async upsertPermission(
     roleId: number,
     entityCode: string,
     permission: Partial<EntityPermission>,
-  ) {
-    const existing = await this.db
+  ): Promise<void> {
+    const entityTypeId = await this.resolveEntityTypeIdOrThrow(entityCode);
+
+    const [existing] = await this.db
       .select()
-      .from(schema.roleEntityPermission)
+      .from(roleEntityPermission)
       .where(
         and(
-          eq(schema.roleEntityPermission.roleFk, roleId),
-          eq(schema.roleEntityPermission.entityCode, entityCode),
+          eq(roleEntityPermission.roleFk, roleId),
+          eq(roleEntityPermission.entityTypeFk, entityTypeId),
         ),
       )
       .limit(1);
 
-    if (existing.length > 0) {
-      // Update existing
-      return this.db
-        .update(schema.roleEntityPermission)
+    if (existing) {
+      await this.db
+        .update(roleEntityPermission)
         .set({
-          canView: permission.canView ?? existing[0].canView,
-          canCreate: permission.canCreate ?? existing[0].canCreate,
-          canEdit: permission.canEdit ?? existing[0].canEdit,
-          canDelete: permission.canDelete ?? existing[0].canDelete,
-          allow: permission.allow ?? existing[0].allow,
+          canView: permission.canView ?? existing.canView,
+          canCreate: permission.canCreate ?? existing.canCreate,
+          canEdit: permission.canEdit ?? existing.canEdit,
+          canDelete: permission.canDelete ?? existing.canDelete,
+          deny: permission.deny ?? existing.deny,
           updatedAt: new Date(),
         })
         .where(
           and(
-            eq(schema.roleEntityPermission.roleFk, roleId),
-            eq(schema.roleEntityPermission.entityCode, entityCode),
+            eq(roleEntityPermission.roleFk, roleId),
+            eq(roleEntityPermission.entityTypeFk, entityTypeId),
           ),
         );
     } else {
-      // Create new
-      return this.db.insert(schema.roleEntityPermission).values({
+      await this.db.insert(roleEntityPermission).values({
         roleFk: roleId,
-        entityCode,
+        entityTypeFk: entityTypeId,
         canView: permission.canView ?? false,
         canCreate: permission.canCreate ?? false,
         canEdit: permission.canEdit ?? false,
         canDelete: permission.canDelete ?? false,
-        allow: permission.allow ?? false,
+        deny: permission.deny ?? false,
         isActive: true,
         isSystem: false,
       });
@@ -158,41 +174,44 @@ export class RoleEntityPermissionRepository {
   }
 
   /**
-   * Get combined permissions for user across all their roles in a store
+   * Get combined permissions for user in a specific store.
+   * Returns entity permissions merged across all roles (union grant, but DENY overrides).
    */
   async getUserEntityPermissions(
     userId: number,
     storeId: number,
   ): Promise<RoleEntityPermissions> {
-    const userRoles = await this.db
-      .select({ roleId: schema.userRoleMapping.roleFk })
-      .from(schema.userRoleMapping)
-      .where(
-        and(
-          eq(schema.userRoleMapping.userFk, userId),
-          eq(schema.userRoleMapping.storeFk, storeId),
-          eq(schema.userRoleMapping.isActive, true),
-        ),
-      );
+    const storeRoles = await this.rolesRepository.getActiveRolesForStore(
+      userId,
+      storeId,
+    );
 
-    if (userRoles.length === 0) {
-      return {};
-    }
+    if (storeRoles.length === 0) return {};
 
-    const roleIds = userRoles.map((r) => r.roleId);
+    const roleIds = storeRoles.map((r) => r.roleId);
 
-    // Get all permissions for all user's roles
     const permissions = await this.db
-      .select()
-      .from(schema.roleEntityPermission)
+      .select({
+        entityCode: entityType.code,
+        canView: roleEntityPermission.canView,
+        canCreate: roleEntityPermission.canCreate,
+        canEdit: roleEntityPermission.canEdit,
+        canDelete: roleEntityPermission.canDelete,
+        deny: roleEntityPermission.deny,
+      })
+      .from(roleEntityPermission)
+      .innerJoin(
+        entityType,
+        eq(roleEntityPermission.entityTypeFk, entityType.id),
+      )
       .where(
         and(
-          inArray(schema.roleEntityPermission.roleFk, roleIds),
-          eq(schema.roleEntityPermission.isActive, true),
+          inArray(roleEntityPermission.roleFk, roleIds),
+          eq(roleEntityPermission.isActive, true),
         ),
       );
 
-    // Merge permissions (union - if any role has permission, user has it)
+    // Merge permissions (union grant, but DENY overrides all)
     const result: RoleEntityPermissions = {};
     permissions.forEach((perm) => {
       if (!result[perm.entityCode]) {
@@ -201,10 +220,9 @@ export class RoleEntityPermissionRepository {
           canCreate: false,
           canEdit: false,
           canDelete: false,
-          allow: false,
+          deny: false,
         };
       }
-      // Union all permissions from all roles
       result[perm.entityCode].canView =
         result[perm.entityCode].canView || perm.canView;
       result[perm.entityCode].canCreate =
@@ -213,25 +231,133 @@ export class RoleEntityPermissionRepository {
         result[perm.entityCode].canEdit || perm.canEdit;
       result[perm.entityCode].canDelete =
         result[perm.entityCode].canDelete || perm.canDelete;
-      result[perm.entityCode].allow =
-        result[perm.entityCode].allow || perm.allow;
+      result[perm.entityCode].deny =
+        result[perm.entityCode].deny || perm.deny;
     });
 
     return result;
   }
 
-  /**
-   * Delete permission (soft delete)
-   */
-  async deletePermission(roleId: number, entityCode: string) {
-    return this.db
-      .update(schema.roleEntityPermission)
+  /** Soft-delete permission. */
+  async deletePermission(roleId: number, entityCode: string): Promise<void> {
+    const entityTypeId = await this.resolveEntityTypeIdOrThrow(entityCode);
+
+    await this.db
+      .update(roleEntityPermission)
       .set({ isActive: false, deletedAt: new Date() })
       .where(
         and(
-          eq(schema.roleEntityPermission.roleFk, roleId),
-          eq(schema.roleEntityPermission.entityCode, entityCode),
+          eq(roleEntityPermission.roleFk, roleId),
+          eq(roleEntityPermission.entityTypeFk, entityTypeId),
         ),
       );
+  }
+
+  /** Find all permissions for a role with entity type codes. */
+  async findByRoleId(roleId: number): Promise<{
+    id: number;
+    roleFk: number;
+    entityTypeFk: number;
+    entityCode: string;
+    canView: boolean;
+    canCreate: boolean;
+    canEdit: boolean;
+    canDelete: boolean;
+    deny: boolean;
+    isActive: boolean;
+    isSystem: boolean;
+    createdAt: Date;
+    updatedAt: Date | null;
+  }[]> {
+    return this.db
+      .select({
+        id: roleEntityPermission.id,
+        roleFk: roleEntityPermission.roleFk,
+        entityTypeFk: roleEntityPermission.entityTypeFk,
+        entityCode: entityType.code,
+        canView: roleEntityPermission.canView,
+        canCreate: roleEntityPermission.canCreate,
+        canEdit: roleEntityPermission.canEdit,
+        canDelete: roleEntityPermission.canDelete,
+        deny: roleEntityPermission.deny,
+        isActive: roleEntityPermission.isActive,
+        isSystem: roleEntityPermission.isSystem,
+        createdAt: roleEntityPermission.createdAt,
+        updatedAt: roleEntityPermission.updatedAt,
+      })
+      .from(roleEntityPermission)
+      .innerJoin(
+        entityType,
+        eq(roleEntityPermission.entityTypeFk, entityType.id),
+      )
+      .where(
+        and(
+          eq(roleEntityPermission.roleFk, roleId),
+          eq(roleEntityPermission.isActive, true),
+        ),
+      );
+  }
+
+  /** Create a new entity permission using entity code (looks up FK). */
+  async create(
+    roleId: number,
+    entityCode: string,
+    data: Partial<EntityPermission>,
+  ): Promise<RoleEntityPermissionRow> {
+    const entityTypeId = await this.resolveEntityTypeIdOrThrow(entityCode);
+
+    const [created] = await this.db
+      .insert(roleEntityPermission)
+      .values({
+        roleFk: roleId,
+        entityTypeFk: entityTypeId,
+        canView: data.canView ?? false,
+        canCreate: data.canCreate ?? false,
+        canEdit: data.canEdit ?? false,
+        canDelete: data.canDelete ?? false,
+        deny: data.deny ?? false,
+        isActive: true,
+        isSystem: false,
+      })
+      .returning();
+    return created;
+  }
+
+  /** Delete by role and entity code (hard delete for cleanup). */
+  async deleteByRoleAndEntity(roleId: number, entityCode: string): Promise<void> {
+    const entityTypeId = await this.resolveEntityTypeId(entityCode);
+    if (!entityTypeId) return;
+
+    await this.db
+      .delete(roleEntityPermission)
+      .where(
+        and(
+          eq(roleEntityPermission.roleFk, roleId),
+          eq(roleEntityPermission.entityTypeFk, entityTypeId),
+        ),
+      );
+  }
+
+  // ─── Private Helpers ───────────────────────────────────────────────────────
+
+  /** Resolve entity_type FK by code. Returns null if not found. */
+  private async resolveEntityTypeId(entityCode: string): Promise<number | null> {
+    const [row] = await this.db
+      .select({ id: entityType.id })
+      .from(entityType)
+      .where(eq(entityType.code, entityCode))
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  /** Resolve entity_type FK by code. Throws NotFoundException if not found. */
+  private async resolveEntityTypeIdOrThrow(entityCode: string): Promise<number> {
+    const id = await this.resolveEntityTypeId(entityCode);
+    if (!id) {
+      throw new NotFoundException(
+        `Entity type '${entityCode}' not found`,
+      );
+    }
+    return id;
   }
 }

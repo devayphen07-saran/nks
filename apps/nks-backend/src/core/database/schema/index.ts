@@ -1,53 +1,46 @@
-export * from './users';
-export * from './store';
-export * from './roles';
-export * from './permissions';
-export * from './user-role-mapping';
-export * from './user-permission-mapping';
-export * from './role-permission-mapping';
-export * from './role-route-mapping';
-export * from './store-user-mapping';
-export * from './user-session';
-export * from './user-auth-provider';
-export * from './otp-verification';
-export * from './country';
-export * from './state-region-province';
-export * from './administrative-division';
-export * from './postal_code';
-export * from './address';
-export * from './address-type';
-export * from './audit-log';
-export * from './designation';
-export * from './staff-invite';
-export * from './staff-invite-permission';
-export * from './salutation';
-export * from './communication';
-export * from './communication-type';
-export * from './contact-person';
-export * from './contact-person-type';
-export * from './entity';
+// ─────────────────────────────────────────────
+// NKS Database Schema — Barrel Export
+// Domain-grouped for readability.
+// ─────────────────────────────────────────────
+
+// Base
+export * from './base.entity';
 export * from './enums';
-export * from './notes';
-export * from './notes-type';
-export * from './notification-templates';
-export * from './notification-types';
+
+// Auth & Users
+export * from './auth';
+
+// Store & Tenant
+export * from './store';
+
+// RBAC (Roles, Routes, Permissions)
+export * from './rbac';
+
+// Location (India)
+export * from './location';
+
+// Tax Engine
+export * from './tax';
+
+// Lookup Tables (code-based + dedicated)
+export * from './lookups';
+
+// Notifications
 export * from './notifications';
-export * from './push-tokens';
-export * from './routes';
-export * from './volumes';
-export * from './store-category';
-export * from './store-legal-type';
-export * from './store-documents';
-export * from './tax-agencies';
-export * from './tax-names';
-export * from './tax-levels';
-export * from './tax-level-mapping';
-export * from './commodity-codes';
-export * from './tax-rate-master';
-export * from './transaction-tax-lines';
-export * from './tax-registrations';
-export * from './daily-tax-summary';
+
+// Entity System (polymorphic entity, status)
+export * from './entity-system';
+
+// Communication, Contact Persons, Notes, Staff Invites
+export * from './communication';
+
+// Plans, Pricing, Subscriptions
+export * from './plans';
+
+// Audit
+export * from './audit-log';
+
+// Standalone
 export * from './user-preferences';
 export * from './system-config';
-export * from './login-audit';
 export * from './files';

@@ -1,142 +1,169 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../core/database/schema';
 import { isNull, asc, eq, and, inArray, sql } from 'drizzle-orm';
 import { InjectDb } from '../../core/database/inject-db.decorator';
-import { RouteMapper, PermissionMapper } from './mapper/route.mapper';
+import { RouteMapper } from './mapper/route.mapper';
+import { RolesRepository } from '../roles/roles.repository';
+import { RoutesRepository } from './repositories/routes.repository';
+import type { PartialRoute } from './routes.types';
 
 @Injectable()
 export class RoutesService {
-  constructor(@InjectDb() private readonly db: NodePgDatabase<typeof schema>) {}
+  private readonly logger = new Logger(RoutesService.name);
+
+  constructor(
+    @InjectDb() private readonly db: NodePgDatabase<typeof schema>,
+    private readonly rolesRepository: RolesRepository,
+    private readonly routesRepository: RoutesRepository,
+  ) {}
+
+  // ─── Admin Routes (SUPER_ADMIN only) ───────────────────────────────────────
 
   /**
-   * Get routes for the current user based on their roles.
-   * Returns web/dashboard routes for authenticated users.
+   * Returns only the admin routes the given user has access to, as a tree.
+   * Only users with SUPER_ADMIN role in admin route mappings get routes.
    */
-  async getUserRoutes(userId: number) {
-    // Get all active roles for this user
-    const userRoles = await this.db
-      .select({
-        roleId: schema.userRoleMapping.roleFk,
-        roleCode: schema.roles.code,
-      })
-      .from(schema.userRoleMapping)
-      .innerJoin(
-        schema.roles,
-        eq(schema.userRoleMapping.roleFk, schema.roles.id),
-      )
-      .where(
-        and(
-          eq(schema.userRoleMapping.userFk, userId),
-          eq(schema.userRoleMapping.isActive, true),
-          eq(schema.roles.isActive, true),
-        ),
-      );
-
+  async getAdminRoutes(
+    userId: number,
+  ): Promise<{ routes: ReturnType<typeof RouteMapper.buildTree> }> {
+    const userRoles = await this.rolesRepository.findUserRoles(userId);
     const roleIds = userRoles.map((r) => r.roleId);
-    const roleCodes = userRoles.map((r) => r.roleCode);
 
-    // SUPER_ADMIN gets all routes
-    if (roleCodes.includes('SUPER_ADMIN')) {
-      const routes = await this.getAdminRoutes();
-      const permissions = await this.getAdminPermissions();
-      return {
-        routes: RouteMapper.buildTree(routes),
-        permissions: PermissionMapper.toResponseObjects(permissions),
-      };
+    if (roleIds.length === 0) {
+      return { routes: [] };
     }
 
-    // For other users, get web routes based on their roles
-    if (roleIds.length === 0) return { routes: [], permissions: [] };
+    const routeRows =
+      await this.routesRepository.findAdminRoutesByRoleIds(roleIds);
+    const tree = RouteMapper.buildTree(routeRows);
 
-    const accessibleRouteIds = this.db
-      .select({ routeFk: schema.roleRouteMapping.routeFk })
-      .from(schema.roleRouteMapping)
-      .where(
-        and(
-          inArray(schema.roleRouteMapping.roleFk, roleIds),
-          eq(schema.roleRouteMapping.allow, true),
-        ),
+    this.logger.debug(
+      `User ${userId} retrieved admin routes - found ${routeRows.length} routes`,
+    );
+    return { routes: tree };
+  }
+
+  // ─── Store Routes (Store owner + Custom roles) ──────────────────────────────
+
+  /**
+   * Returns only the store routes the given user has access to in the given store, as a tree.
+   * - Store owner (ownerUserFk) → all store routes (full CRUD).
+   * - Custom roles → routes and permissions defined in role_route_mapping.
+   */
+  async getStoreRoutes(
+    userId: number,
+    storeId: number,
+  ): Promise<{ routes: ReturnType<typeof RouteMapper.buildTree> }> {
+    if (!storeId) {
+      return { routes: [] };
+    }
+
+    // Check if user is the store owner
+    const isOwner = await this.rolesRepository.isStoreOwner(userId, storeId);
+
+    // If store owner, return all store routes with full permissions
+    if (isOwner) {
+      const routeRows = await this.routesRepository.findOwnerRoutes();
+      const tree = RouteMapper.buildTree(routeRows);
+
+      this.logger.debug(
+        `Store owner ${userId} retrieved ${storeId} routes - found ${routeRows.length} routes`,
       );
+      return { routes: tree };
+    }
 
-    const [routeRows, permissionRows] = await Promise.all([
-      this.db
-        .select({
-          id: schema.routes.id,
-          routePath: schema.routes.routePath,
-          routeName: schema.routes.routeName,
-          description: schema.routes.description,
-          iconName: schema.routes.iconName,
-          routeType: schema.routes.routeType,
-          appCode: schema.routes.appCode,
-          isPublic: schema.routes.isPublic,
-          parentRouteFk: schema.routes.parentRouteFk,
-          fullPath: schema.routes.fullPath,
-          sortOrder: schema.routes.sortOrder,
-          hasAccess: sql<boolean>`
-            CASE WHEN ${schema.routes.id} IN (${accessibleRouteIds}) THEN true ELSE false END
-          `.as('hasAccess'),
-          canView: sql<boolean>`
-            CASE WHEN ${schema.routes.id} IN (${accessibleRouteIds}) THEN true ELSE false END
-          `.as('canView'),
-          canCreate: sql<boolean>`false`.as('canCreate'),
-          canEdit: sql<boolean>`false`.as('canEdit'),
-          canDelete: sql<boolean>`false`.as('canDelete'),
-          canExport: sql<boolean>`false`.as('canExport'),
-        })
-        .from(schema.routes)
-        .where(
-          and(
-            isNull(schema.routes.deletedAt),
-            eq(schema.routes.appCode, 'NKS_WEB'),
-          ),
-        )
-        .orderBy(asc(schema.routes.sortOrder), asc(schema.routes.routePath)),
+    // Get user's custom roles in this store
+    const storeRoles = await this.rolesRepository.getActiveRolesForStore(
+      userId,
+      storeId,
+    );
+    const roleIds = storeRoles.map((r) => r.roleId);
 
-      this.db
-        .selectDistinct({
-          id: schema.permissions.id,
-          code: schema.permissions.code,
-          name: schema.permissions.name,
-          resource: schema.permissions.resource,
-          action: schema.permissions.action,
-          description: schema.permissions.description,
-        })
-        .from(schema.rolePermissionMapping)
-        .innerJoin(
-          schema.permissions,
-          eq(schema.rolePermissionMapping.permissionFk, schema.permissions.id),
-        )
-        .where(inArray(schema.rolePermissionMapping.roleFk, roleIds)),
-    ]);
+    // No roles and not owner → no access
+    if (roleIds.length === 0) {
+      return { routes: [] };
+    }
 
-    return {
-      routes: RouteMapper.buildTree(routeRows),
-      permissions: PermissionMapper.toResponseObjects(permissionRows),
-    };
+    // For custom roles, get routes based on role_route_mapping
+    const routeRows = await this.routesRepository.findCustomRoleRoutes(roleIds);
+    const tree = RouteMapper.buildTree(routeRows);
+
+    this.logger.debug(
+      `User ${userId} retrieved store ${storeId} routes via custom roles - found ${routeRows.length} routes`,
+    );
+    return { routes: tree };
   }
 
   /**
-   * Returns ALL admin routes (appCode = 'NKS_WEB') as a tree.
-   * Routes assigned to SUPER_ADMIN role get hasAccess = true; all others false.
-   * SUPER_ADMIN always has full CRUD on every route they have access to.
+   * Resolves store guuid → numeric storeId, then returns store routes.
+   * Returns empty routes if no store with that guuid exists.
    */
-  async getAdminRoutes() {
-    // Subquery: route IDs accessible by SUPER_ADMIN
-    const superAdminRouteIds = this.db
-      .select({ routeFk: schema.roleRouteMapping.routeFk })
-      .from(schema.roleRouteMapping)
+  async getStoreRoutesByGuuid(
+    userId: number,
+    storeGuuid: string,
+  ): Promise<{ routes: ReturnType<typeof RouteMapper.buildTree> }> {
+    const store = await this.routesRepository.findStoreByGuuid(storeGuuid);
+
+    if (!store) {
+      this.logger.warn(`Store with guuid ${storeGuuid} not found`);
+      return { routes: [] };
+    }
+
+    return this.getStoreRoutes(userId, store.id);
+  }
+
+  // ─── Private Query Builders ────────────────────────────────────────────────
+
+  /**
+   * Build admin route rows for given role IDs.
+   * Queries routes with role permissions from role_route_mapping.
+   */
+  private async buildAdminRouteRows(
+    roleIds: number[],
+  ): Promise<PartialRoute[]> {
+    return this.db
+      .selectDistinctOn([schema.routes.id], {
+        id: schema.routes.id,
+        routePath: schema.routes.routePath,
+        routeName: schema.routes.routeName,
+        description: schema.routes.description,
+        iconName: schema.routes.iconName,
+        routeType: schema.routes.routeType,
+        routeScope: schema.routes.routeScope,
+        isPublic: schema.routes.isPublic,
+        isHidden: schema.routes.isHidden,
+        parentRouteFk: schema.routes.parentRouteFk,
+        fullPath: schema.routes.fullPath,
+        sortOrder: schema.routes.sortOrder,
+        canView: schema.roleRouteMapping.canView,
+        canCreate: schema.roleRouteMapping.canCreate,
+        canEdit: schema.roleRouteMapping.canEdit,
+        canDelete: schema.roleRouteMapping.canDelete,
+        canExport: schema.roleRouteMapping.canExport,
+      })
+      .from(schema.routes)
       .innerJoin(
-        schema.roles,
-        eq(schema.roles.id, schema.roleRouteMapping.roleFk),
+        schema.roleRouteMapping,
+        and(
+          eq(schema.roleRouteMapping.routeFk, schema.routes.id),
+          inArray(schema.roleRouteMapping.roleFk, roleIds),
+          eq(schema.roleRouteMapping.allow, true),
+        ),
       )
       .where(
         and(
-          eq(schema.roles.code, 'SUPER_ADMIN'),
-          eq(schema.roleRouteMapping.allow, true),
+          isNull(schema.routes.deletedAt),
+          eq(schema.routes.routeScope, 'admin'),
         ),
-      );
+      )
+      .orderBy(asc(schema.routes.id), asc(schema.routes.sortOrder));
+  }
 
+  /**
+   * Build store route rows for store owner (all routes with full permissions).
+   */
+  private async buildOwnerRouteRows(): Promise<PartialRoute[]> {
     return this.db
       .select({
         id: schema.routes.id,
@@ -145,196 +172,69 @@ export class RoutesService {
         description: schema.routes.description,
         iconName: schema.routes.iconName,
         routeType: schema.routes.routeType,
-        appCode: schema.routes.appCode,
+        routeScope: schema.routes.routeScope,
         isPublic: schema.routes.isPublic,
+        isHidden: schema.routes.isHidden,
         parentRouteFk: schema.routes.parentRouteFk,
         fullPath: schema.routes.fullPath,
         sortOrder: schema.routes.sortOrder,
-        hasAccess: sql<boolean>`
-          CASE WHEN ${schema.routes.id} IN (${superAdminRouteIds}) THEN true ELSE false END
-        `.as('hasAccess'),
-        canView: sql<boolean>`
-          CASE WHEN ${schema.routes.id} IN (${superAdminRouteIds}) THEN true ELSE false END
-        `.as('canView'),
-        canCreate: sql<boolean>`
-          CASE WHEN ${schema.routes.id} IN (${superAdminRouteIds}) THEN true ELSE false END
-        `.as('canCreate'),
-        canEdit: sql<boolean>`
-          CASE WHEN ${schema.routes.id} IN (${superAdminRouteIds}) THEN true ELSE false END
-        `.as('canEdit'),
-        canDelete: sql<boolean>`
-          CASE WHEN ${schema.routes.id} IN (${superAdminRouteIds}) THEN true ELSE false END
-        `.as('canDelete'),
-        canExport: sql<boolean>`
-          CASE WHEN ${schema.routes.id} IN (${superAdminRouteIds}) THEN true ELSE false END
-        `.as('canExport'),
+        canView: sql<boolean>`true`,
+        canCreate: sql<boolean>`true`,
+        canEdit: sql<boolean>`true`,
+        canDelete: sql<boolean>`true`,
+        canExport: sql<boolean>`true`,
       })
       .from(schema.routes)
       .where(
         and(
           isNull(schema.routes.deletedAt),
-          eq(schema.routes.appCode, 'NKS_WEB'),
+          eq(schema.routes.routeScope, 'store'),
         ),
       )
-      .orderBy(asc(schema.routes.sortOrder), asc(schema.routes.routePath));
+      .orderBy(asc(schema.routes.sortOrder));
   }
 
   /**
-   * Returns all non-deleted system permissions, ordered by resource then action.
+   * Build store route rows for custom roles (based on role_route_mapping).
    */
-  async getAdminPermissions() {
+  private async buildCustomRoleRouteRows(
+    roleIds: number[],
+  ): Promise<PartialRoute[]> {
     return this.db
-      .select({
-        id: schema.permissions.id,
-        code: schema.permissions.code,
-        name: schema.permissions.name,
-        resource: schema.permissions.resource,
-        action: schema.permissions.action,
-        description: schema.permissions.description,
+      .selectDistinctOn([schema.routes.id], {
+        id: schema.routes.id,
+        routePath: schema.routes.routePath,
+        routeName: schema.routes.routeName,
+        description: schema.routes.description,
+        iconName: schema.routes.iconName,
+        routeType: schema.routes.routeType,
+        routeScope: schema.routes.routeScope,
+        isPublic: schema.routes.isPublic,
+        isHidden: schema.routes.isHidden,
+        parentRouteFk: schema.routes.parentRouteFk,
+        fullPath: schema.routes.fullPath,
+        sortOrder: schema.routes.sortOrder,
+        canView: schema.roleRouteMapping.canView,
+        canCreate: schema.roleRouteMapping.canCreate,
+        canEdit: schema.roleRouteMapping.canEdit,
+        canDelete: schema.roleRouteMapping.canDelete,
+        canExport: schema.roleRouteMapping.canExport,
       })
-      .from(schema.permissions)
-      .where(isNull(schema.permissions.deletedAt))
-      .orderBy(
-        asc(schema.permissions.resource),
-        asc(schema.permissions.action),
-      );
-  }
-
-  /**
-   * Returns ALL store routes (appCode IS NULL) as a tree with hasAccess per node.
-   * hasAccess = true for routes the user's role(s) in the active store can access.
-   * Also returns full permission objects granted to those roles.
-   */
-  async getStoreRoutes(userId: number, sessionToken: string) {
-    // Resolve active store from session using userId (token is hashed, can't be used for lookup)
-    const [session] = await this.db
-      .select({ activeStoreFk: schema.userSession.activeStoreFk })
-      .from(schema.userSession)
-      .where(eq(schema.userSession.userId, userId))
-      .limit(1);
-
-    const activeStoreId = session?.activeStoreFk ?? null;
-    if (!activeStoreId) return { routes: [], permissions: [] };
-
-    // Get role IDs for this user in the active store
-    const userRoles = await this.db
-      .select({ roleId: schema.userRoleMapping.roleFk })
-      .from(schema.userRoleMapping)
-      .where(
+      .from(schema.routes)
+      .innerJoin(
+        schema.roleRouteMapping,
         and(
-          eq(schema.userRoleMapping.userFk, userId),
-          eq(schema.userRoleMapping.storeFk, activeStoreId),
-        ),
-      );
-
-    const roleIds = userRoles.map((r) => r.roleId);
-    if (roleIds.length === 0) return { routes: [], permissions: [] };
-
-    // Subquery: route IDs the user's roles can access (allow = true)
-    const accessibleRouteIds = this.db
-      .select({ routeFk: schema.roleRouteMapping.routeFk })
-      .from(schema.roleRouteMapping)
-      .where(
-        and(
+          eq(schema.roleRouteMapping.routeFk, schema.routes.id),
           inArray(schema.roleRouteMapping.roleFk, roleIds),
           eq(schema.roleRouteMapping.allow, true),
         ),
-      );
-
-    const [routeRows, permissionRows] = await Promise.all([
-      this.db
-        .select({
-          id: schema.routes.id,
-          routePath: schema.routes.routePath,
-          routeName: schema.routes.routeName,
-          description: schema.routes.description,
-          iconName: schema.routes.iconName,
-          routeType: schema.routes.routeType,
-          appCode: schema.routes.appCode,
-          isPublic: schema.routes.isPublic,
-          parentRouteFk: schema.routes.parentRouteFk,
-          fullPath: schema.routes.fullPath,
-          sortOrder: schema.routes.sortOrder,
-          hasAccess: sql<boolean>`
-            CASE WHEN ${schema.routes.id} IN (${accessibleRouteIds}) THEN true ELSE false END
-          `.as('hasAccess'),
-          canView: sql<boolean>`
-            CASE WHEN ${schema.routes.id} IN (${accessibleRouteIds}) THEN true ELSE false END
-          `.as('canView'),
-          canCreate: sql<boolean>`
-            CASE WHEN EXISTS (
-              SELECT 1 FROM ${schema.roleRouteMapping}
-              WHERE ${schema.roleRouteMapping.routeFk} = ${schema.routes.id}
-                AND ${schema.roleRouteMapping.roleFk} = ANY(${sql.raw(`ARRAY[${roleIds.join(',')}]`)})
-                AND ${schema.roleRouteMapping.canCreate} = true
-            ) THEN true ELSE false END
-          `.as('canCreate'),
-          canEdit: sql<boolean>`
-            CASE WHEN EXISTS (
-              SELECT 1 FROM ${schema.roleRouteMapping}
-              WHERE ${schema.roleRouteMapping.routeFk} = ${schema.routes.id}
-                AND ${schema.roleRouteMapping.roleFk} = ANY(${sql.raw(`ARRAY[${roleIds.join(',')}]`)})
-                AND ${schema.roleRouteMapping.canEdit} = true
-            ) THEN true ELSE false END
-          `.as('canEdit'),
-          canDelete: sql<boolean>`
-            CASE WHEN EXISTS (
-              SELECT 1 FROM ${schema.roleRouteMapping}
-              WHERE ${schema.roleRouteMapping.routeFk} = ${schema.routes.id}
-                AND ${schema.roleRouteMapping.roleFk} = ANY(${sql.raw(`ARRAY[${roleIds.join(',')}]`)})
-                AND ${schema.roleRouteMapping.canDelete} = true
-            ) THEN true ELSE false END
-          `.as('canDelete'),
-          canExport: sql<boolean>`
-            CASE WHEN EXISTS (
-              SELECT 1 FROM ${schema.roleRouteMapping}
-              WHERE ${schema.roleRouteMapping.routeFk} = ${schema.routes.id}
-                AND ${schema.roleRouteMapping.roleFk} = ANY(${sql.raw(`ARRAY[${roleIds.join(',')}]`)})
-                AND ${schema.roleRouteMapping.canExport} = true
-            ) THEN true ELSE false END
-          `.as('canExport'),
-        })
-        .from(schema.routes)
-        .where(
-          and(isNull(schema.routes.deletedAt), isNull(schema.routes.appCode)),
-        )
-        .orderBy(asc(schema.routes.sortOrder), asc(schema.routes.routePath)),
-
-      this.db
-        .select({
-          id: schema.permissions.id,
-          code: schema.permissions.code,
-          name: schema.permissions.name,
-          resource: schema.permissions.resource,
-          action: schema.permissions.action,
-          description: schema.permissions.description,
-        })
-        .from(schema.rolePermissionMapping)
-        .innerJoin(
-          schema.permissions,
-          eq(schema.rolePermissionMapping.permissionFk, schema.permissions.id),
-        )
-        .where(inArray(schema.rolePermissionMapping.roleFk, roleIds)),
-    ]);
-
-    return {
-      routes: RouteMapper.buildTree(routeRows),
-      permissions: PermissionMapper.toResponseObjects(permissionRows),
-    };
-  }
-
-  /**
-   * Combined payload used by the admin portal on startup.
-   */
-  async getAdminRoutesAndPermissions() {
-    const [routes, permissions] = await Promise.all([
-      this.getAdminRoutes(),
-      this.getAdminPermissions(),
-    ]);
-
-    return {
-      routes: RouteMapper.buildTree(routes),
-      permissions: PermissionMapper.toResponseObjects(permissions),
-    };
+      )
+      .where(
+        and(
+          isNull(schema.routes.deletedAt),
+          eq(schema.routes.routeScope, 'store'),
+        ),
+      )
+      .orderBy(asc(schema.routes.id), asc(schema.routes.sortOrder));
   }
 }

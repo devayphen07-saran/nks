@@ -1,5 +1,5 @@
 import { Redirect, Stack } from "expo-router";
-import { useAuthGuard } from "../../utils/auth-provider";
+import { useAuthGuard } from "../../lib/auth-provider";
 import { LoadingFallback } from "../../components/feedback/LoadingFallback";
 
 export default function ProtectedLayout() {

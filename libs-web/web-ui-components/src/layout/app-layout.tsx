@@ -50,7 +50,7 @@ function AppLayoutContent({
       {/* Main Content Area */}
       <main
         className={cn(
-          "min-h-svh transition-[padding] duration-300 ease-in-out",
+          "flex flex-col h-svh transition-[padding] duration-300 ease-in-out",
           showBottomNav && "pb-[var(--layout-bottomnav-height)]"
         )}
         style={{
@@ -63,9 +63,7 @@ function AppLayoutContent({
           paddingRight: showRightBar ? "var(--layout-rightbar-width)" : undefined,
         }}
       >
-        <div className="flex flex-1 flex-col">
-          <div className="@container/main flex flex-1 flex-col">{children}</div>
-        </div>
+        <div className="@container/main flex flex-1 flex-col">{children}</div>
       </main>
 
       {/* Bottom Navigation (mobile only) */}

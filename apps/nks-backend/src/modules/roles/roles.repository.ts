@@ -1,111 +1,141 @@
 import { Injectable } from '@nestjs/common';
-import * as schema from '../../core/database/schema';
-import { eq, inArray, and, isNotNull, ilike, or, sql } from 'drizzle-orm';
-import { InjectDb } from '../../core/database/inject-db.decorator';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { eq, inArray, and, ilike, or, sql, isNull } from 'drizzle-orm';
+import { InjectDb } from '../../core/database/inject-db.decorator';
+import * as schema from '../../core/database/schema';
+import { userRoleMapping } from '../../core/database/schema/auth/user-role-mapping';
+import type {
+  UserRoleRow,
+  UserRoleWithStoreRow,
+  AuthContextRow,
+  RoutePermission,
+  RouteWithPermissionsRow,
+} from './dto/role-response.dto';
 
-type Tx = NodePgDatabase<typeof schema>;
+type Db = NodePgDatabase<typeof schema>;
+type Role = typeof schema.roles.$inferSelect;
 
 @Injectable()
 export class RolesRepository {
-  constructor(@InjectDb() private readonly db: Tx) {}
+  constructor(@InjectDb() private readonly db: NodePgDatabase<typeof schema>) {}
 
-  // ─── Internal Auth Reads (consumed by AuthService / RBACGuard) ────────────
+  // ─── System Role Helpers ──────────────────────────────────────────────────
 
-  /** Get all active roles assigned to a user (RBAC check). */
-  async findUserRoles(userId: number) {
-    return this.db
-      .select({ roleId: schema.roles.id, roleCode: schema.roles.code })
-      .from(schema.userRoleMapping)
-      .innerJoin(
-        schema.roles,
-        eq(schema.userRoleMapping.roleFk, schema.roles.id),
-      )
+  /**
+   * Resolve the database ID for a system role by code.
+   * System roles have storeFk = NULL and isEditable = false.
+   */
+  async findSystemRoleId(code: string): Promise<number | null> {
+    const [row] = await this.db
+      .select({ id: schema.roles.id })
+      .from(schema.roles)
       .where(
         and(
-          eq(schema.userRoleMapping.userFk, userId),
-          eq(schema.userRoleMapping.isActive, true),
+          eq(schema.roles.code, code),
+          isNull(schema.roles.storeFk),
           eq(schema.roles.isActive, true),
         ),
-      );
+      )
+      .limit(1);
+    return row?.id ?? null;
   }
 
-  /** Get all active roles assigned to a user, including their store scope and store name. */
-  async findUserRolesWithCompany(userId: number) {
+  // ─── Auth Context Reads (consumed by AuthService / RBACGuard) ─────────────
+
+  /**
+   * Get all active roles for a user from user_role_mapping.
+   * Returns both global (storeFk=null) and store-scoped roles.
+   */
+  async findUserRoles(userId: number): Promise<UserRoleRow[]> {
+    const rows = await this.db
+      .select({
+        roleId: userRoleMapping.roleFk,
+        roleCode: schema.roles.code,
+        isSystem: schema.roles.isSystem,
+        storeFk: userRoleMapping.storeFk,
+        isPrimary: userRoleMapping.isPrimary,
+      })
+      .from(userRoleMapping)
+      .innerJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
+      .where(
+        and(
+          eq(userRoleMapping.userFk, userId),
+          eq(userRoleMapping.isActive, true),
+          isNull(userRoleMapping.deletedAt),
+        ),
+      );
+
+    return rows.map((r) => ({
+      roleId: r.roleId,
+      roleCode: r.roleCode,
+      isSystem: r.isSystem,
+      storeFk: r.storeFk ?? null,
+      isPrimary: r.isPrimary,
+    }));
+  }
+
+  /**
+   * Get all active roles for a user with store name included.
+   */
+  async findUserRolesWithCompany(userId: number): Promise<UserRoleWithStoreRow[]> {
+    const rows = await this.db
+      .select({
+        roleId: userRoleMapping.roleFk,
+        roleCode: schema.roles.code,
+        isSystem: schema.roles.isSystem,
+        storeFk: userRoleMapping.storeFk,
+        storeName: schema.store.storeName,
+        isPrimary: userRoleMapping.isPrimary,
+      })
+      .from(userRoleMapping)
+      .innerJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
+      .leftJoin(schema.store, eq(userRoleMapping.storeFk, schema.store.id))
+      .where(
+        and(
+          eq(userRoleMapping.userFk, userId),
+          eq(userRoleMapping.isActive, true),
+          isNull(userRoleMapping.deletedAt),
+        ),
+      );
+
+    return rows.map((r) => ({
+      roleId: r.roleId,
+      roleCode: r.roleCode,
+      isSystem: r.isSystem,
+      storeFk: r.storeFk ?? null,
+      storeName: r.storeName ?? null,
+      isPrimary: r.isPrimary,
+    }));
+  }
+
+  /** Get route permissions (path + CRUD flags) for a single role ID. */
+  async findRoutePermissionsByRoleId(roleId: number): Promise<RoutePermission[]> {
     return this.db
       .select({
-        roleId: schema.roles.id,
-        roleCode: schema.roles.code,
-        storeFk: schema.userRoleMapping.storeFk,
-        storeName: schema.store.storeName,
+        routeId: schema.routes.id,
+        routePath: schema.routes.routePath,
+        routeName: schema.routes.routeName,
+        routeScope: schema.routes.routeScope,
+        canView: schema.roleRouteMapping.canView,
+        canCreate: schema.roleRouteMapping.canCreate,
+        canEdit: schema.roleRouteMapping.canEdit,
+        canDelete: schema.roleRouteMapping.canDelete,
+        canExport: schema.roleRouteMapping.canExport,
       })
-      .from(schema.userRoleMapping)
-      .innerJoin(
-        schema.roles,
-        eq(schema.userRoleMapping.roleFk, schema.roles.id),
-      )
-      .leftJoin(
-        schema.store,
-        eq(schema.userRoleMapping.storeFk, schema.store.id),
-      )
+      .from(schema.roleRouteMapping)
+      .innerJoin(schema.routes, eq(schema.roleRouteMapping.routeFk, schema.routes.id))
       .where(
         and(
-          eq(schema.userRoleMapping.userFk, userId),
-          eq(schema.userRoleMapping.isActive, true),
-          eq(schema.roles.isActive, true),
+          eq(schema.roleRouteMapping.roleFk, roleId),
+          eq(schema.roleRouteMapping.allow, true),
+          isNull(schema.routes.deletedAt),
         ),
-      );
-  }
-
-  /** Get all directly granted permissions for a user within a store. */
-  async findUserDirectPermissions(userId: number, storeId: number) {
-    return this.db
-      .select({ code: schema.permissions.code })
-      .from(schema.userPermissionMapping)
-      .innerJoin(
-        schema.permissions,
-        eq(schema.userPermissionMapping.permissionFk, schema.permissions.id),
       )
-      .where(
-        and(
-          eq(schema.userPermissionMapping.userFk, userId),
-          eq(schema.userPermissionMapping.storeFk, storeId),
-        ),
-      );
-  }
-
-  /** Assign multiple permissions directly to a user for a store (replaces existing). */
-  async setUserDirectPermissions(
-    userId: number,
-    storeId: number,
-    permissionIds: number[],
-    assignedBy: number,
-    tx?: Tx,
-  ) {
-    const client = tx ?? this.db;
-    // Remove existing direct permissions for this user+store
-    await client
-      .delete(schema.userPermissionMapping)
-      .where(
-        and(
-          eq(schema.userPermissionMapping.userFk, userId),
-          eq(schema.userPermissionMapping.storeFk, storeId),
-        ),
-      );
-    if (permissionIds.length === 0) return;
-    // Insert new ones
-    await client.insert(schema.userPermissionMapping).values(
-      permissionIds.map((permissionFk) => ({
-        userFk: userId,
-        permissionFk,
-        storeFk: storeId,
-        assignedBy,
-      })),
-    );
+      .orderBy(schema.routes.routeScope, schema.routes.sortOrder);
   }
 
   /** Get all allowed routes (with CRUD flags) for a set of role IDs. */
-  async findRoutesByRoleIds(roleIds: number[]) {
+  async findRoutesByRoleIds(roleIds: number[]): Promise<RouteWithPermissionsRow[]> {
     if (roleIds.length === 0) return [];
     return this.db
       .selectDistinctOn([schema.routes.routePath], {
@@ -115,7 +145,7 @@ export class RolesRepository {
         fullPath: schema.routes.fullPath,
         iconName: schema.routes.iconName,
         routeType: schema.routes.routeType,
-        appCode: schema.routes.appCode,
+        routeScope: schema.routes.routeScope,
         isPublic: schema.routes.isPublic,
         parentRouteFk: schema.routes.parentRouteFk,
         sortOrder: schema.routes.sortOrder,
@@ -139,21 +169,8 @@ export class RolesRepository {
       .orderBy(schema.routes.routePath, schema.routes.sortOrder);
   }
 
-  /** Get all permissions for a set of role IDs (RBAC check). */
-  async findPermissionsByRoleIds(roleIds: number[]) {
-    if (roleIds.length === 0) return [];
-    return this.db
-      .select({ code: schema.permissions.code })
-      .from(schema.rolePermissionMapping)
-      .innerJoin(
-        schema.permissions,
-        eq(schema.rolePermissionMapping.permissionFk, schema.permissions.id),
-      )
-      .where(and(inArray(schema.rolePermissionMapping.roleFk, roleIds)));
-  }
-
-  /** Find a role by exact code string (used during store registration). */
-  async findByCode(code: string) {
+  /** Find a role by exact code string. */
+  async findByCode(code: string): Promise<Role | null> {
     const [role] = await this.db
       .select()
       .from(schema.roles)
@@ -162,12 +179,194 @@ export class RolesRepository {
     return role ?? null;
   }
 
-  // ─── Role CRUD (consumed by RolesService / admin endpoints) ──────────────
+  /**
+   * Check if user is SUPER_ADMIN and return active store from session.
+   * Queries user_role_mapping instead of users.globalRole enum.
+   */
+  async getAuthContext(
+    userId: number,
+    sessionToken: string,
+  ): Promise<AuthContextRow> {
+    const superAdminRoleId = await this.findSystemRoleId('SUPER_ADMIN');
 
-  /** List active roles with optional search (code, name, description) and pagination. */
+    if (superAdminRoleId) {
+      const [saRow] = await this.db
+        .select({ id: userRoleMapping.id })
+        .from(userRoleMapping)
+        .where(
+          and(
+            eq(userRoleMapping.userFk, userId),
+            eq(userRoleMapping.roleFk, superAdminRoleId),
+            isNull(userRoleMapping.storeFk),
+            isNull(userRoleMapping.deletedAt),
+            eq(userRoleMapping.isActive, true),
+          ),
+        )
+        .limit(1);
+
+      if (saRow) return { isSuperAdmin: true, activeStoreFk: null };
+    }
+
+    const [sessionRow] = await this.db
+      .select({ activeStoreFk: schema.userSession.activeStoreFk })
+      .from(schema.userSession)
+      .where(
+        and(
+          eq(schema.userSession.token, sessionToken),
+          eq(schema.userSession.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    return {
+      isSuperAdmin: false,
+      activeStoreFk: sessionRow?.activeStoreFk ?? null,
+    };
+  }
+
+  // ─── Role Assignment (user_role_mapping writes) ───────────────────────────
+
+  /**
+   * Assign a role to a user. Pass storeFk=null for platform-level roles.
+   * isPrimary=true marks the role whose code flows into JWT.primaryRole.
+   */
+  async assignRole(
+    userFk: number,
+    roleFk: number,
+    storeFk: number | null,
+    assignedBy: number | null,
+    isPrimary: boolean,
+    tx?: Db,
+  ): Promise<typeof userRoleMapping.$inferSelect> {
+    const client = tx ?? this.db;
+    const [row] = await client
+      .insert(userRoleMapping)
+      .values({
+        userFk,
+        roleFk,
+        storeFk: storeFk ?? undefined,
+        assignedBy: assignedBy ?? undefined,
+        isPrimary,
+        isActive: true,
+        assignedAt: new Date(),
+      })
+      .returning();
+    return row;
+  }
+
+  /**
+   * Soft-delete a specific role assignment for a user.
+   */
+  async removeRole(
+    userFk: number,
+    roleFk: number,
+    storeFk: number | null,
+    tx?: Db,
+  ): Promise<void> {
+    const client = tx ?? this.db;
+    await client
+      .update(userRoleMapping)
+      .set({ isActive: false, deletedAt: new Date() })
+      .where(
+        and(
+          eq(userRoleMapping.userFk, userFk),
+          eq(userRoleMapping.roleFk, roleFk),
+          storeFk != null
+            ? eq(userRoleMapping.storeFk, storeFk)
+            : isNull(userRoleMapping.storeFk),
+          isNull(userRoleMapping.deletedAt),
+        ),
+      );
+  }
+
+  /**
+   * Soft-delete ALL role assignments for a user in a specific store.
+   * Called when a user is removed from a store.
+   */
+  async removeAllStoreRoles(userFk: number, storeFk: number, tx?: Db): Promise<void> {
+    const client = tx ?? this.db;
+    await client
+      .update(userRoleMapping)
+      .set({ isActive: false, deletedAt: new Date() })
+      .where(
+        and(
+          eq(userRoleMapping.userFk, userFk),
+          eq(userRoleMapping.storeFk, storeFk),
+          isNull(userRoleMapping.deletedAt),
+        ),
+      );
+  }
+
+  /**
+   * Get all active role assignments for a user in a specific store.
+   */
+  async getActiveRolesForStore(userFk: number, storeFk: number): Promise<Pick<UserRoleRow, 'roleId' | 'roleCode' | 'isSystem' | 'isPrimary'>[]> {
+    return this.db
+      .select({
+        roleId: userRoleMapping.roleFk,
+        roleCode: schema.roles.code,
+        isSystem: schema.roles.isSystem,
+        isPrimary: userRoleMapping.isPrimary,
+      })
+      .from(userRoleMapping)
+      .innerJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
+      .where(
+        and(
+          eq(userRoleMapping.userFk, userFk),
+          eq(userRoleMapping.storeFk, storeFk),
+          isNull(userRoleMapping.deletedAt),
+          eq(userRoleMapping.isActive, true),
+        ),
+      );
+  }
+
+  // ─── Role checks ──────────────────────────────────────────────────────────
+
+  /** Check if user has SUPER_ADMIN role. */
+  async isSuperAdmin(userId: number): Promise<boolean> {
+    const superAdminRoleId = await this.findSystemRoleId('SUPER_ADMIN');
+    if (!superAdminRoleId) return false;
+
+    const [row] = await this.db
+      .select({ id: userRoleMapping.id })
+      .from(userRoleMapping)
+      .where(
+        and(
+          eq(userRoleMapping.userFk, userId),
+          eq(userRoleMapping.roleFk, superAdminRoleId),
+          isNull(userRoleMapping.storeFk),
+          isNull(userRoleMapping.deletedAt),
+          eq(userRoleMapping.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    return !!row;
+  }
+
+  /** Check if user is the STORE_OWNER of a specific store (checked via store.owner_user_fk). */
+  async isStoreOwner(userId: number, storeId: number): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: schema.store.id })
+      .from(schema.store)
+      .where(
+        and(
+          eq(schema.store.id, storeId),
+          eq(schema.store.ownerUserFk, userId),
+          eq(schema.store.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    return !!row;
+  }
+
+  // ─── Role CRUD (admin endpoints) ─────────────────────────────────────────
+
+  /** List active roles with optional search and pagination. */
   async findAll(
     opts: { search?: string; page?: number; pageSize?: number } = {},
-  ) {
+  ): Promise<{ rows: Role[]; total: number; page: number; pageSize: number }> {
     const { search, page = 1, pageSize = 50 } = opts;
     const offset = (page - 1) * pageSize;
 
@@ -198,8 +397,18 @@ export class RolesRepository {
     return { rows, total, page, pageSize };
   }
 
+  /** Find a role by guuid. */
+  async findByGuuid(guuid: string): Promise<Role | null> {
+    const [role] = await this.db
+      .select()
+      .from(schema.roles)
+      .where(and(eq(schema.roles.guuid, guuid), eq(schema.roles.isActive, true)))
+      .limit(1);
+    return role ?? null;
+  }
+
   /** Find a role by numeric PK. */
-  async findById(id: number) {
+  async findById(id: number): Promise<Role | null> {
     const [role] = await this.db
       .select()
       .from(schema.roles)
@@ -209,7 +418,7 @@ export class RolesRepository {
   }
 
   /** Create a new role. */
-  async create(data: typeof schema.roles.$inferInsert, tx?: Tx) {
+  async create(data: typeof schema.roles.$inferInsert, tx?: Db): Promise<Role> {
     const client = tx ?? this.db;
     const [created] = await client
       .insert(schema.roles)
@@ -218,12 +427,12 @@ export class RolesRepository {
     return created;
   }
 
-  /** Update mutable role fields (never updates code or isSystem). */
+  /** Update mutable role fields. */
   async update(
     id: number,
     data: Partial<typeof schema.roles.$inferInsert>,
-    tx?: Tx,
-  ) {
+    tx?: Db,
+  ): Promise<Role | null> {
     const client = tx ?? this.db;
     const [updated] = await client
       .update(schema.roles)
@@ -234,295 +443,11 @@ export class RolesRepository {
   }
 
   /** Soft-delete a role. */
-  async softDelete(id: number, deletedBy: number, tx?: Tx) {
+  async softDelete(id: number, deletedBy: number, tx?: Db): Promise<void> {
     const client = tx ?? this.db;
     await client
       .update(schema.roles)
       .set({ isActive: false, deletedAt: new Date(), deletedBy })
       .where(eq(schema.roles.id, id));
-  }
-
-  // ─── Permission CRUD ──────────────────────────────────────────────────────
-
-  /** List all active permissions, optionally filtered by resource (e.g. 'users', 'store'). */
-  async findAllPermissions(resource?: string) {
-    return this.db
-      .select()
-      .from(schema.permissions)
-      .where(resource ? eq(schema.permissions.resource, resource) : undefined)
-      .orderBy(schema.permissions.resource);
-  }
-
-  /** Find a permission by PK. */
-  async findPermissionById(id: number) {
-    const [perm] = await this.db
-      .select()
-      .from(schema.permissions)
-      .where(eq(schema.permissions.id, id))
-      .limit(1);
-    return perm ?? null;
-  }
-
-  /** Create a new permission. */
-  async createPermission(
-    data: typeof schema.permissions.$inferInsert,
-    tx?: Tx,
-  ) {
-    const client = tx ?? this.db;
-    const [created] = await client
-      .insert(schema.permissions)
-      .values(data)
-      .returning();
-    return created;
-  }
-
-  // ─── Role ↔ Permission Mapping ────────────────────────────────────────────
-
-  /** Get all permissions attached to a role. */
-  async findRolePermissions(roleId: number) {
-    return this.db
-      .select({ permission: schema.permissions })
-      .from(schema.rolePermissionMapping)
-      .innerJoin(
-        schema.permissions,
-        eq(schema.rolePermissionMapping.permissionFk, schema.permissions.id),
-      )
-      .where(and(eq(schema.rolePermissionMapping.roleFk, roleId)));
-  }
-
-  /** Assign a permission to a role. */
-  async assignPermissionToRole(
-    roleId: number,
-    permissionId: number,
-    assignedBy: number,
-    tx?: Tx,
-  ) {
-    const client = tx ?? this.db;
-    await client.insert(schema.rolePermissionMapping).values({
-      roleFk: roleId,
-      permissionFk: permissionId,
-      assignedBy,
-    });
-  }
-
-  /** Remove a permission from a role. */
-  async revokePermissionFromRole(
-    roleId: number,
-    permissionId: number,
-    tx?: Tx,
-  ) {
-    const client = tx ?? this.db;
-    await client
-      .delete(schema.rolePermissionMapping)
-      .where(
-        and(
-          eq(schema.rolePermissionMapping.roleFk, roleId),
-          eq(schema.rolePermissionMapping.permissionFk, permissionId),
-        ),
-      );
-  }
-
-  // ─── User ↔ Role Mapping ──────────────────────────────────────────────────
-
-  /** Assign a role to a user, optionally scoped to a store. */
-  async assignRoleToUser(
-    userId: number,
-    roleId: number,
-    assignedBy: number,
-    storeFk?: number | null,
-    tx?: Tx,
-  ) {
-    const client = tx ?? this.db;
-    await client.insert(schema.userRoleMapping).values({
-      userFk: userId,
-      roleFk: roleId,
-      storeFk: storeFk ?? null,
-      assignedBy,
-    });
-  }
-
-  /** Soft-suspend or restore a user's role mapping without deleting the record. */
-  async setUserRoleMappingActive(
-    userId: number,
-    roleId: number,
-    isActive: boolean,
-    tx?: Tx,
-  ) {
-    const client = tx ?? this.db;
-    await client
-      .update(schema.userRoleMapping)
-      .set({ isActive })
-      .where(
-        and(
-          eq(schema.userRoleMapping.userFk, userId),
-          eq(schema.userRoleMapping.roleFk, roleId),
-        ),
-      );
-  }
-
-  /** Revoke a role from a user. */
-  async revokeRoleFromUser(userId: number, roleId: number, tx?: Tx) {
-    const client = tx ?? this.db;
-    await client
-      .delete(schema.userRoleMapping)
-      .where(
-        and(
-          eq(schema.userRoleMapping.userFk, userId),
-          eq(schema.userRoleMapping.roleFk, roleId),
-        ),
-      );
-  }
-
-  // ─── Permission Checking ──────────────────────────────────────────────────
-
-  /**
-   * Check if a user has a specific permission (by resource and action)
-   * Checks both role-based and direct user permissions
-   */
-  async checkUserPermission(
-    userId: number,
-    resource: string,
-    action: string,
-  ): Promise<boolean> {
-    // First check if user is SUPER_ADMIN (has all permissions)
-    const isSuperAdminUser = await this.isSuperAdmin(userId);
-    if (isSuperAdminUser) return true;
-
-    // Get all permissions for this user
-    const userPermissions = await this.getUserPermissions(userId);
-    const permissionCode = `${resource}.${action}`;
-
-    // Check if user has the permission
-    return userPermissions.some(
-      (perm) => perm.code === permissionCode || perm.code === '*.*',
-    );
-  }
-
-  /**
-   * Get all permissions for a user (from all their roles + direct permissions)
-   */
-  async getUserPermissions(userId: number) {
-    // Get user's roles
-    const userRoles = await this.findUserRoles(userId);
-    const roleIds = userRoles.map((r) => r.roleId);
-
-    // Get permissions from roles
-    const rolePermissions =
-      roleIds.length > 0 ? await this.findPermissionsByRoleIds(roleIds) : [];
-
-    return rolePermissions;
-  }
-
-  /**
-   * Check if user has SUPER_ADMIN role
-   */
-  async isSuperAdmin(userId: number): Promise<boolean> {
-    const userRoles = await this.findUserRoles(userId);
-    return userRoles.some((role) => role.roleCode === 'SUPER_ADMIN');
-  }
-
-  /**
-   * Single-query permission resolution scoped to the user's active store.
-   *
-   * Returns:
-   *  - isSuperAdmin: true  → caller should bypass all permission checks
-   *  - permissionCodes: string[] → permission codes granted by the user's
-   *    roles in their currently active store (from the session token)
-   *
-   * Store scoping: Only roles where userRoleMapping.store_fk = userSession.active_store_fk
-   * are considered, preventing cross-store permission bleed.
-   */
-  async getActiveStorePermissionCodes(
-    userId: number,
-    sessionToken: string,
-  ): Promise<{ isSuperAdmin: boolean; permissionCodes: string[] }> {
-    // Fast SUPER_ADMIN check (single row lookup, no joins needed)
-    const [adminRow] = await this.db
-      .select({ roleCode: schema.roles.code })
-      .from(schema.userRoleMapping)
-      .innerJoin(
-        schema.roles,
-        eq(schema.userRoleMapping.roleFk, schema.roles.id),
-      )
-      .where(
-        and(
-          eq(schema.userRoleMapping.userFk, userId),
-          eq(schema.roles.code, 'SUPER_ADMIN'),
-          eq(schema.roles.isActive, true),
-        ),
-      )
-      .limit(1);
-
-    if (adminRow) return { isSuperAdmin: true, permissionCodes: [] };
-
-    // Fetch activeStoreFk from session (needed for store scoping)
-    const [sessionRow] = await this.db
-      .select({ activeStoreFk: schema.userSession.activeStoreFk })
-      .from(schema.userSession)
-      .where(
-        and(
-          eq(schema.userSession.token, sessionToken),
-          eq(schema.userSession.userId, userId),
-        ),
-      )
-      .limit(1);
-
-    if (!sessionRow?.activeStoreFk) {
-      // User has no active store (personal account only)
-      return { isSuperAdmin: false, permissionCodes: [] };
-    }
-
-    // Fetch permission codes from TWO sources:
-    // 1. Role-based permissions: user_role_mapping → role_permission_mapping → permissions
-    // 2. Direct permissions: user_permission_mapping → permissions
-    // Both scoped to the active store
-    const roleBasedPerms = await this.db
-      .selectDistinct({ code: schema.permissions.code })
-      .from(schema.userRoleMapping)
-      .innerJoin(
-        schema.roles,
-        eq(schema.roles.id, schema.userRoleMapping.roleFk),
-      )
-      .innerJoin(
-        schema.rolePermissionMapping,
-        eq(schema.rolePermissionMapping.roleFk, schema.userRoleMapping.roleFk),
-      )
-      .innerJoin(
-        schema.permissions,
-        eq(schema.permissions.id, schema.rolePermissionMapping.permissionFk),
-      )
-      .where(
-        and(
-          eq(schema.userRoleMapping.userFk, userId),
-          eq(schema.userRoleMapping.storeFk, sessionRow.activeStoreFk),
-          eq(schema.userRoleMapping.isActive, true),
-          eq(schema.roles.isActive, true),
-        ),
-      );
-
-    // Fetch direct user permissions for the same store
-    const directPerms = await this.db
-      .selectDistinct({ code: schema.permissions.code })
-      .from(schema.userPermissionMapping)
-      .innerJoin(
-        schema.permissions,
-        eq(schema.permissions.id, schema.userPermissionMapping.permissionFk),
-      )
-      .where(
-        and(
-          eq(schema.userPermissionMapping.userFk, userId),
-          eq(schema.userPermissionMapping.storeFk, sessionRow.activeStoreFk),
-        ),
-      );
-
-    // Merge and deduplicate
-    const allCodes = new Set<string>();
-    roleBasedPerms.forEach((r) => allCodes.add(r.code));
-    directPerms.forEach((r) => allCodes.add(r.code));
-
-    return {
-      isSuperAdmin: false,
-      permissionCodes: Array.from(allCodes),
-    };
   }
 }

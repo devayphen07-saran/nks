@@ -12,7 +12,7 @@ export interface Route {
   routeName?: string;
   iconName?: string;
   hidden?: boolean;
-  hasAccess?: boolean;
+
   enable?: boolean;
   childMenus?: Route[];
 }
@@ -28,7 +28,7 @@ export interface TransformRoutesOptions {
  * Default filter: exclude hidden routes and routes without access
  */
 export const defaultRouteFilter = (route: Route): boolean => {
-  return !route.hidden && route.hasAccess !== false && route.enable !== false;
+  return !route.hidden && route.enable !== false;
 };
 
 /**

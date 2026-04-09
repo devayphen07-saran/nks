@@ -49,3 +49,8 @@ export * from "./providers/theme-provider";
 export * from "./lib/utils";
 export * from "./ui-components/phone-verification-input";
 export * from "./ui-components/gradient-button";
+export * from "./ui-components/confirm-dialog";
+export * from "./ui-components/empty-state";
+export * from "./ui-components/status-badge";
+export * from "./ui-components/page-header";
+export * from "./ui-components/loading-spinner";

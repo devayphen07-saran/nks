@@ -3,6 +3,9 @@ import { InjectDb } from '../../../core/database/inject-db.decorator';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../../core/database/schema';
 import { eq } from 'drizzle-orm';
+import * as crypto from 'crypto';
+import { ConfigService } from '@nestjs/config';
+import { OtpRateLimitRepository } from '../repositories/otp-rate-limit.repository';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -13,13 +16,33 @@ type Db = NodePgDatabase<typeof schema>;
  * Rules:
  * - Max 100 OTP requests per identifier per 24h window
  * - Window resets after 24 hours of inactivity
+ * - Identifiers are hashed before storage (GDPR/DPDP compliance)
  */
 @Injectable()
 export class OtpRateLimitService {
   private readonly MAX_REQUESTS = 100;
   private readonly WINDOW_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-  constructor(@InjectDb() private readonly db: Db) {}
+  constructor(
+    @InjectDb() private readonly db: Db,
+    private readonly otpRateLimitRepository: OtpRateLimitRepository,
+    private readonly configService: ConfigService,
+  ) {}
+
+  /**
+   * Hash identifier (phone/email) for storage (GDPR/DPDP compliance).
+   * Uses SHA256 with server-side pepper.
+   */
+  private hashIdentifier(identifier: string): string {
+    const pepper = this.configService.get<string>(
+      'OTP_IDENTIFIER_PEPPER',
+      'default-pepper',
+    );
+    return crypto
+      .createHash('sha256')
+      .update(identifier + pepper)
+      .digest('hex');
+  }
 
   /**
    * Check if identifier can request OTP.
@@ -28,18 +51,17 @@ export class OtpRateLimitService {
    */
   async checkAndRecordRequest(identifier: string): Promise<void> {
     const now = new Date();
+    const identifierHash = this.hashIdentifier(identifier);
 
     // Find existing rate limit record
-    const [existing] = await this.db
-      .select()
-      .from(schema.otpRequestLog)
-      .where(eq(schema.otpRequestLog.identifier, identifier))
-      .limit(1);
+    const existing = await this.otpRateLimitRepository.findByIdentifierHash(
+      identifierHash,
+    );
 
     if (!existing) {
       // First request — create new record
-      await this.db.insert(schema.otpRequestLog).values({
-        identifier,
+      await this.otpRateLimitRepository.create({
+        identifierHash,
         requestCount: 1,
         windowExpiresAt: new Date(now.getTime() + this.WINDOW_DURATION_MS),
       });
@@ -59,41 +81,35 @@ export class OtpRateLimitService {
       }
 
       // Increment counter
-      await this.db
-        .update(schema.otpRequestLog)
-        .set({ requestCount: existing.requestCount + 1 })
-        .where(eq(schema.otpRequestLog.id, existing.id));
+      await this.otpRateLimitRepository.incrementRequestCount(
+        existing.id,
+        existing.requestCount + 1,
+      );
 
       return;
     }
 
     // Window expired — reset
-    await this.db
-      .update(schema.otpRequestLog)
-      .set({
-        requestCount: 1,
-        windowExpiresAt: new Date(now.getTime() + this.WINDOW_DURATION_MS),
-      })
-      .where(eq(schema.otpRequestLog.id, existing.id));
+    await this.otpRateLimitRepository.updateWindow(
+      existing.id,
+      new Date(now.getTime() + this.WINDOW_DURATION_MS),
+    );
   }
 
   /**
    * Reset request count for identifier (useful after successful verification).
    */
   async resetRequestCount(identifier: string): Promise<void> {
-    const [existing] = await this.db
-      .select()
-      .from(schema.otpRequestLog)
-      .where(eq(schema.otpRequestLog.identifier, identifier));
+    const identifierHash = this.hashIdentifier(identifier);
+    const existing = await this.otpRateLimitRepository.findByIdentifierHash(
+      identifierHash,
+    );
 
     if (existing) {
-      await this.db
-        .update(schema.otpRequestLog)
-        .set({
-          requestCount: 0,
-          windowExpiresAt: new Date(Date.now() + this.WINDOW_DURATION_MS),
-        })
-        .where(eq(schema.otpRequestLog.id, existing.id));
+      await this.otpRateLimitRepository.resetRequestCount(
+        existing.id,
+        new Date(Date.now() + this.WINDOW_DURATION_MS),
+      );
     }
   }
 }

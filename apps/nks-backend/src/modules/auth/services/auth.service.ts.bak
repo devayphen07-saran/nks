@@ -1,0 +1,1460 @@
+import * as crypto from 'crypto';
+import {
+  Injectable,
+  UnauthorizedException,
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
+import { eq, and, sql, lt, gt, asc, inArray, isNull, ne } from 'drizzle-orm';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { InjectDb } from '../../../core/database/inject-db.decorator';
+import * as schema from '../../../core/database/schema';
+import { EmailValidator, PasswordValidator } from './validators';
+import { SanitizerValidator } from '../../../common/validators/sanitizer.validator';
+import { userRoleMapping } from '../../../core/database/schema/auth/user-role-mapping';
+import {
+  LoginDto,
+  RegisterDto,
+  AuthResponseEnvelope,
+  ProfileCompleteDto,
+  ProfileCompleteResponseDto,
+  SessionInfoDto,
+} from '../dto';
+import {
+  AuthMapper,
+  type UserRoleEntry,
+  type PermissionContext,
+  type TokenPair,
+} from '../mapper/auth-mapper';
+import type { PermissionsSnapshot } from './permissions.service';
+import type { SessionUserRole } from '../interfaces/session-user.interface';
+import { InjectAuth } from '../decorators/inject-auth.decorator';
+import type { Auth } from '../config/better-auth';
+import { RolesRepository } from '../../roles/roles.repository';
+import { AuthUsersRepository } from '../repositories/auth-users.repository';
+import { AuthProviderRepository } from '../repositories/auth-provider.repository';
+import { SessionService } from './session.service';
+import { PasswordService } from './password.service';
+import { OtpService } from './otp.service';
+import { PermissionsService } from './permissions.service';
+import { JWTConfigService } from '../../../config/jwt.config';
+import { RoutesService } from '../../routes/routes.service';
+
+type Db = NodePgDatabase<typeof schema>;
+
+// BetterAuth internal interface for session creation
+interface BetterAuthInternal {
+  $context: Promise<{
+    internalAdapter: {
+      createSession: (userId: string) => Promise<{
+        token: string;
+        expiresAt: Date;
+      } | null>;
+    };
+  }>;
+}
+
+// JWT verification response
+export interface VerifyClaimsResponse {
+  isValid: boolean;
+  sub?: string | number;
+  rolesChanged: boolean;
+  currentRoles?: string[];
+  stores?: Array<{ id: number | null; name: string | null }>;
+}
+
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_MINUTES = 15;
+const SYSTEM_ROLE_STORE_OWNER = 'STORE_OWNER';
+const JWT_AUDIENCE = 'nks-app';
+
+@Injectable()
+export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
+  constructor(
+    @InjectDb() private readonly db: Db,
+    @InjectAuth() private readonly auth: Auth,
+    private readonly rolesRepository: RolesRepository,
+    private readonly authUsersRepository: AuthUsersRepository,
+    private readonly authProviderRepository: AuthProviderRepository,
+    private readonly sessionService: SessionService,
+    private readonly passwordService: PasswordService,
+    private readonly otpService: OtpService,
+    private readonly permissionsService: PermissionsService,
+    private readonly jwtConfigService: JWTConfigService,
+    private readonly routesService: RoutesService,
+  ) {}
+
+  async findUserByPhone(
+    phone: string,
+  ): Promise<typeof schema.users.$inferSelect | null> {
+    return this.authUsersRepository.findByPhone(phone);
+  }
+
+  /**
+   * Find an existing user by phone or create a new one.
+   * Called after MSG91 OTP verification — phone is already proven.
+   */
+  async findOrCreateUserByPhone(
+    phone: string,
+  ): Promise<typeof schema.users.$inferSelect> {
+    let user = await this.authUsersRepository.findOrCreateByPhone(phone, {
+      iamUserId: crypto.randomUUID(),
+    });
+
+    // Mark phone as verified after MSG91 OTP verification
+    if (!user.phoneNumberVerified) {
+      await this.authUsersRepository.verifyPhone(user.id);
+      user = { ...user, phoneNumberVerified: true };
+      this.logger.log(
+        `Phone number verified via MSG91 OTP for user ${user.id}: ${phone.slice(-4)}`,
+      );
+    }
+
+    return user;
+  }
+
+  /**
+   * Delegate session creation to BetterAuth after identity has been proven
+   * externally (MSG91 OTP, email+password, OAuth token verify).
+   *
+  
+  
+  
+  
+   */
+  async createSessionForUser(
+    userId: number,
+    deviceInfo?: {
+      deviceId?: string;
+      deviceName?: string;
+      deviceType?: string;
+      appVersion?: string;
+    },
+  ): Promise<{
+    token: string;
+    expiresAt: Date;
+    jwtToken?: string;
+    userRoles: SessionUserRole[];
+    userEmail: string;
+  }> {
+    const auth = this.auth as unknown as BetterAuthInternal;
+    const ctx = await auth.$context;
+    const session = await ctx.internalAdapter.createSession(String(userId));
+
+    if (!session) throw new UnauthorizedException('Failed to create session');
+
+    // Fetch and embed roles in session + JWT
+    try {
+      const permissions = await this.getUserPermissions(userId);
+      const userRoles = permissions.roles || [];
+      const primaryRole = userRoles[0]?.roleCode || null;
+
+      // Get user email for JWT
+      const [user] = await this.db
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .limit(1);
+
+      // Calculate and store role hash for detecting changes
+      const roleHash = this.hashRoles(userRoles);
+
+      // Create and sign RS256 JWT with embedded roles
+      let jwtToken: string | null = null;
+      try {
+        jwtToken = this.jwtConfigService.signToken({
+          sub: String(userId),
+          email: user?.email || 'noemail@example.com',
+          roles: userRoles.map((r) => r.roleCode),
+          primaryRole,
+          stores: userRoles
+            .filter((r) => r.storeId && r.storeName)
+            .map((r) => ({
+              id: r.storeId as number,
+              name: r.storeName as string,
+            })),
+          activeStoreId: userRoles.find((r) => r.storeId)?.storeId || null,
+          iss: process.env.BETTER_AUTH_BASE_URL || 'nks-auth',
+          aud: JWT_AUDIENCE,
+        });
+      } catch (jwtErr) {
+        Logger.error(`Failed to generate RS256 JWT: ${jwtErr}`);
+        // Don't fail session creation if JWT generation fails
+      }
+
+      // Validate device type against schema enum
+      type DeviceType = 'IOS' | 'ANDROID' | 'WEB';
+      const VALID_DEVICE_TYPES: readonly DeviceType[] = [
+        'IOS',
+        'ANDROID',
+        'WEB',
+      ];
+      const rawDeviceType = deviceInfo?.deviceType?.toUpperCase() as
+        | DeviceType
+        | undefined;
+      const validatedDeviceType: DeviceType | null =
+        rawDeviceType && VALID_DEVICE_TYPES.includes(rawDeviceType)
+          ? rawDeviceType
+          : null;
+
+      // Update session with device info and role hash
+      // Note: JWT is managed in application memory, not persisted
+      // Roles are always read live from user_role_mapping — never cached in session
+      // roleHash is stored to detect role changes on every request (via AuthGuard)
+      await this.db
+        .update(schema.userSession)
+        .set({
+          roleHash,
+          // Store device tracking data
+          ...(deviceInfo
+            ? {
+                deviceId: deviceInfo.deviceId || null,
+                deviceName: deviceInfo.deviceName || null,
+                deviceType: validatedDeviceType,
+                appVersion: deviceInfo.appVersion || null,
+              }
+            : {}),
+        })
+        .where(eq(schema.userSession.token, session.token));
+
+      this.logger.log(
+        `Session created for user ${userId}. RS256 JWT token generated with embedded roles.`,
+      );
+
+      // Delete oldest sessions if > 5
+      await this.enforceSessionLimit(userId);
+
+      // Return session token, JWT, and resolved roles/email so callers
+      // don't need to fetch permissions again
+      return {
+        token: session.token,
+        expiresAt: session.expiresAt,
+        jwtToken: jwtToken || undefined,
+        userRoles,
+        userEmail: user?.email || 'noemail@example.com',
+      };
+    } catch (err) {
+      Logger.error(`Failed to add roles/JWT to session: ${err}`);
+      // Don't fail session creation, return just the session token
+      return {
+        token: session.token,
+        expiresAt: session.expiresAt,
+        userRoles: [],
+        userEmail: 'noemail@example.com',
+      };
+    }
+  }
+
+  /**
+   * Login a user with email + password.
+   * BetterAuth creates the session after credentials are verified.
+   *
+  
+   */
+  async login(
+    dto: LoginDto,
+    deviceInfo?: {
+      deviceId?: string;
+      deviceName?: string;
+      deviceType?: string;
+      appVersion?: string;
+    },
+  ): Promise<AuthResponseEnvelope> {
+    // Use repository to find user by email
+    const user = await this.authUsersRepository.findByEmail(dto.email);
+    if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (user.isBlocked) throw new UnauthorizedException('Account is blocked');
+
+    // Check brute-force lockout (with auto-unlock if expired)
+    if (user.accountLockedUntil) {
+      const now = new Date();
+      if (user.accountLockedUntil > now) {
+        // Account is still locked
+        throw new UnauthorizedException(
+          `Account locked due to too many failed attempts. Try again after ${user.accountLockedUntil.toISOString()}`,
+        );
+      } else {
+        // Lock has expired, auto-unlock account via repository
+        await this.authUsersRepository.update(user.id, {
+          accountLockedUntil: null,
+          failedLoginAttempts: 0,
+        });
+        this.logger.log(
+          `Auto-unlocked account for user ${user.id} (lockout expired)`,
+        );
+      }
+    }
+
+    const provider = await this.authProviderRepository.findByUserIdAndProvider(
+      user.id,
+      'email',
+    );
+
+    if (!provider?.password) {
+      // SECURITY: Use generic error message to prevent user enumeration
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const isValid = await this.passwordService.compare(
+      dto.password,
+      provider.password,
+    );
+    if (!isValid) {
+      const newFailedCount = user.failedLoginAttempts + 1;
+      const shouldLock = newFailedCount >= MAX_FAILED_ATTEMPTS;
+      // Update failed attempts (and lock if threshold exceeded) via repository
+      await this.authUsersRepository.update(user.id, {
+        failedLoginAttempts: newFailedCount,
+        ...(shouldLock
+          ? {
+              accountLockedUntil: new Date(
+                Date.now() + LOCKOUT_MINUTES * 60 * 1000,
+              ),
+            }
+          : {}),
+      });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Reset lockout state and record login via repository
+    await this.authUsersRepository.update(user.id, {
+      failedLoginAttempts: 0,
+      accountLockedUntil: null,
+      lastActiveAt: new Date(),
+    });
+    await this.authUsersRepository.recordLogin(user.id);
+
+    // Use token pair (access + refresh)
+    const session = await this.createSessionForUser(user.id, deviceInfo);
+    const tokenPair = await this.createTokenPair(
+      user.id,
+      session.token,
+      session.userRoles,
+      session.userEmail,
+    );
+
+    return this.buildAuthResponse(
+      user,
+      session.token,
+      session.expiresAt,
+      tokenPair,
+    );
+  }
+
+  /**
+   * Register a new user with email + password.
+   * First registered user is automatically assigned SUPER_ADMIN role.
+   *
+  
+   */
+  async register(
+    dto: RegisterDto,
+    deviceInfo?: {
+      deviceId?: string;
+      deviceName?: string;
+      deviceType?: string;
+      appVersion?: string;
+    },
+  ): Promise<AuthResponseEnvelope> {
+    // Sanitize inputs
+    dto.email = SanitizerValidator.sanitizeEmail(dto.email);
+    dto.name = SanitizerValidator.sanitizeName(dto.name);
+
+    // Validate email format
+    EmailValidator.validate(dto.email);
+
+    // Validate password strength
+    PasswordValidator.validateStrength(dto.password);
+
+    // Check if email already exists via repository
+    const existingUser = await this.authUsersRepository.findByEmail(dto.email);
+    if (existingUser) {
+      throw new ConflictException('Email already in use');
+    }
+
+    // Hash password
+    const passwordHash = await this.passwordService.hash(dto.password);
+
+    // Generate IAM user ID
+    const iamUserId = crypto.randomUUID();
+
+    // Wrap user creation + auth provider in transaction
+    // SECURITY: Transaction ensures atomic operation and handles race conditions
+    const user = await this.db
+      .transaction(async (tx) => {
+        // Create user
+        const [created] = await tx
+          .insert(schema.users)
+          .values({
+            iamUserId,
+            name: dto.name,
+            email: dto.email,
+            emailVerified: false,
+          })
+          .returning();
+
+        if (!created) throw new BadRequestException('Failed to create user');
+
+        // Create email auth provider
+        await tx.insert(schema.userAuthProvider).values({
+          userId: created.id,
+          providerId: 'email',
+          accountId: dto.email,
+          password: passwordHash,
+          isVerified: false,
+        });
+
+        return created;
+      })
+      .catch((err) => {
+        // SECURITY: Handle unique constraint violation (race condition)
+        // Error code 23505 = unique constraint violation in PostgreSQL
+        if ((err as { code?: string }).code === '23505') {
+          throw new ConflictException('Email already in use');
+        }
+        throw err;
+      });
+
+    // Role assignments run after the transaction commits so this.db can see the new user
+    await this.assignInitialRole(user.id);
+
+    // Use token pair (access + refresh)
+    const session = await this.createSessionForUser(user.id, deviceInfo);
+    const tokenPair = await this.createTokenPair(
+      user.id,
+      session.token,
+      session.userRoles,
+      session.userEmail,
+    );
+
+    return this.buildAuthResponse(
+      user,
+      session.token,
+      session.expiresAt,
+      tokenPair,
+    );
+  }
+
+  /**
+   * Check whether any SUPER_ADMIN account exists yet.
+   * Queries roles table for the SUPER_ADMIN system role, then checks user_role_mapping.
+   */
+  async isSuperAdminSeeded(): Promise<boolean> {
+    const superAdminRoleId =
+      await this.rolesRepository.findSystemRoleId('SUPER_ADMIN');
+    if (!superAdminRoleId) return false;
+    const existing = await this.db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .innerJoin(
+        userRoleMapping,
+        and(
+          eq(userRoleMapping.userFk, schema.users.id),
+          eq(userRoleMapping.roleFk, superAdminRoleId),
+          isNull(userRoleMapping.storeFk),
+          isNull(userRoleMapping.deletedAt),
+          eq(userRoleMapping.isActive, true),
+        ),
+      )
+      .limit(1);
+    return existing.length > 0;
+  }
+
+  /**
+   * Refresh a session - validates the old token and creates a new session.
+   *
+  
+   * If roles changed, invalidate all sessions to force re-login
+   *
+   * NOTE: Token hashing is handled by BetterAuth's getSession method.
+   * We pass the token as-is in the Authorization header; BetterAuth hashes it
+   * internally to match against the database hash.
+   */
+  async refreshSession(
+    oldToken: string,
+  ): Promise<{ token: string; expiresAt: Date }> {
+    // Validate token via BetterAuth (BetterAuth handles token hashing internally)
+    const session = await this.auth.api.getSession({
+      headers: { authorization: `Bearer ${oldToken}` },
+    });
+
+    if (!session || !session.user)
+      throw new UnauthorizedException('Invalid or expired session token');
+
+    // Check if session is expired
+    if (new Date(session.session.expiresAt) < new Date()) {
+      throw new UnauthorizedException('Session has expired');
+    }
+
+    const userId = Number(session.user.id);
+
+    // Detect if roles have changed
+    // roleHash is not in BetterAuth's public type but may be stored as extra session data
+    const storedRoleHash = (session.session as Record<string, unknown>)
+      ?.roleHash as string | undefined;
+    if (storedRoleHash) {
+      const currentPermissions = await this.getUserPermissions(userId);
+      const currentRoleHash = this.hashRoles(currentPermissions.roles || []);
+
+      if (storedRoleHash !== currentRoleHash) {
+        Logger.warn(
+          `Role change detected for user ${userId}, invalidating all sessions`,
+        );
+        // Roles changed! Invalidate all sessions to force re-login
+        await this.invalidateUserSessions(userId);
+        throw new UnauthorizedException(
+          'Your roles have been updated. Please re-login.',
+        );
+      }
+    }
+
+    // Create a new session for the same user
+    return this.createSessionForUser(userId);
+  }
+
+  /**
+   * Increment loginCount, set lastLoginAt and lastActiveAt on successful login.
+   * Called from OTP and OAuth paths that don't go through login().
+   */
+  async recordSuccessfulLogin(userId: number): Promise<void> {
+    await this.db
+      .update(schema.users)
+      .set({
+        loginCount: sql`login_count + 1`,
+        lastLoginAt: new Date(),
+        lastActiveAt: new Date(),
+      })
+      .where(eq(schema.users.id, userId));
+  }
+
+  /**
+   * Invalidate the current session token immediately.
+   * Uses BetterAuth's getSession to handle token hashing, then deletes the session by user ID.
+   */
+  async logout(token: string): Promise<void> {
+    // Delegate to SessionService to invalidate session by token
+    // AuthGuard already validated this token
+    await this.sessionService.invalidateSessionByToken(token);
+  }
+
+  /** Assign CUSTOMER role to a user (personal account setup). */
+
+  /**
+   * Invalidate all sessions for a user.
+   * Force immediate logout by deleting all sessions
+   */
+  async invalidateUserSessions(
+    userId: number,
+    reason = 'ROLE_CHANGE',
+  ): Promise<void> {
+    const count = await this.sessionService.terminateAllSessions(userId);
+    this.logger.log(`Invalidated ${count} session(s) for user ${userId}: ${reason}`);
+  }
+
+  /**
+   * Fetch all roles, permissions, activeStoreId, and userType for a user.
+   * ALWAYS fetches fresh from DB to ensure role changes are immediately reflected.
+   * (Do not rely on stale role cache in userSession table)
+   */
+  async getUserPermissions(
+    userId: number,
+  ): Promise<PermissionContext & { permissionCodes: string[] }> {
+    // RoleRow is the union of what both repository methods return
+    type RoleRow = Awaited<
+      ReturnType<typeof this.rolesRepository.findUserRolesWithCompany>
+    >[number];
+
+    let userRoles: RoleRow[] = [];
+    try {
+      userRoles = await this.rolesRepository.findUserRolesWithCompany(userId);
+    } catch (error) {
+      // Log the actual error before falling back so it is visible in monitoring
+      this.logger.error(
+        `getUserPermissions: findUserRolesWithCompany failed for user ${userId}, falling back to basic query`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      // Fall back to simpler query that omits store join
+      const basicRoles = await this.rolesRepository.findUserRoles(userId);
+      // Cast to RoleRow so the rest of the function stays typed consistently
+      userRoles = basicRoles as unknown as RoleRow[];
+    }
+
+    const roleCodes = userRoles.map((r) => r.roleCode);
+    const activeStoreId =
+      userRoles.find((r) => r.storeFk != null)?.storeFk ?? null;
+
+    const roles = this.mapToRoleEntries(userRoles);
+
+    // Return fresh permissions from DB (not from cached session)
+    if (roleCodes.includes('SUPER_ADMIN')) {
+      return {
+        roles,
+        isSuperAdmin: true,
+        activeStoreId,
+        permissionCodes: this.extractPermissionCodes(userRoles),
+      };
+    }
+
+    return {
+      roles,
+      isSuperAdmin: false,
+      activeStoreId,
+      permissionCodes: this.extractPermissionCodes(userRoles),
+    };
+  }
+
+  /**
+   * Extract permission codes from user roles.
+   * Used to verify user has required permissions for protected endpoints.
+   */
+  private extractPermissionCodes(
+    userRoles: Array<{
+      roleCode?: string;
+      code?: string;
+      permissions?: unknown;
+    }>,
+  ): string[] {
+    const permissionCodes = new Set<string>();
+
+    userRoles.forEach((role) => {
+      // Add role code as permission
+      const roleCode = role.roleCode || role.code;
+      if (roleCode) {
+        permissionCodes.add(roleCode);
+      }
+      // Add individual permissions if available (future-proof for enriched role rows)
+      if (role.permissions && Array.isArray(role.permissions)) {
+        (role.permissions as Array<string | { code?: string }>).forEach(
+          (perm) => {
+            if (typeof perm === 'string') {
+              permissionCodes.add(perm);
+            } else if (typeof perm === 'object' && perm.code) {
+              permissionCodes.add(perm.code);
+            }
+          },
+        );
+      }
+    });
+
+    return Array.from(permissionCodes);
+  }
+
+  /**
+   * Complete profile after login with secondary authentication method.
+   * - Logged in via phone? Add email + password
+   * - Logged in via email? Add phone number
+   * Updates name and handles verification OTP sending.
+   */
+  async profileComplete(
+    userId: number,
+    dto: ProfileCompleteDto,
+  ): Promise<ProfileCompleteResponseDto> {
+    const user = await this.authUsersRepository.findById(userId);
+    if (!user) throw new UnauthorizedException('User not found');
+
+    let emailVerificationSent = false;
+    let phoneVerificationSent = false;
+    let nextStep: 'verifyEmail' | 'verifyPhone' | 'complete' = 'complete';
+
+    // Wrap all profile updates in a transaction
+    await this.db.transaction(async () => {
+      // Update name via repository
+      await this.authUsersRepository.update(userId, { name: dto.name });
+
+      // Case 1: User logged in via phone, adding email + password
+      if (dto.email) {
+        if (!dto.password) {
+          throw new BadRequestException(
+            'Password is required when adding email',
+          );
+        }
+
+        // SECURITY: Check email not already in use by OTHER users
+        const [existingEmail] = await this.db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(
+            and(eq(schema.users.email, dto.email), ne(schema.users.id, userId)),
+          )
+          .limit(1);
+
+        if (existingEmail) {
+          throw new ConflictException('Email already in use by another user');
+        }
+
+        // Update user email (unverified initially) via repository
+        await this.authUsersRepository.update(userId, {
+          email: dto.email,
+          emailVerified: false,
+        });
+
+        // Hash and store password
+        const hash = await this.passwordService.hash(dto.password);
+        const existingProviderId = await this.authProviderRepository.findIdByUserIdAndProvider(
+          userId,
+          'email',
+        );
+
+        if (existingProviderId) {
+          await this.authProviderRepository.updatePassword(existingProviderId, hash);
+        } else {
+          await this.authProviderRepository.create({
+            accountId: dto.email,
+            providerId: 'email',
+            userId,
+            password: hash,
+            isVerified: false,
+          });
+        }
+
+        nextStep = 'verifyEmail';
+      }
+
+      // Case 2: User logged in via email, adding phone number
+      if (dto.phoneNumber) {
+        // Check phone not already in use
+        const [existingPhone] = await this.db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(
+            and(
+              eq(schema.users.phoneNumber, dto.phoneNumber),
+              eq(schema.users.id, userId),
+            ),
+          )
+          .limit(1);
+
+        if (!existingPhone) {
+          // Update user phone (unverified initially) via repository
+          await this.authUsersRepository.update(userId, {
+            phoneNumber: dto.phoneNumber,
+            phoneNumberVerified: false,
+          });
+        }
+
+        nextStep = 'verifyPhone';
+      }
+
+      // If nothing added, mark profile as complete via repository
+      if (!dto.email && !dto.phoneNumber) {
+        await this.authUsersRepository.markProfileComplete(userId);
+      }
+    });
+
+    // Send OTPs outside transaction (can fail without rolling back DB changes)
+    if (dto.email) {
+      await this.otpService.sendEmailOtp(dto.email);
+      emailVerificationSent = true;
+    }
+
+    if (dto.phoneNumber) {
+      await this.otpService.sendOtp({ phone: dto.phoneNumber });
+      phoneVerificationSent = true;
+    }
+
+    return {
+      emailVerificationSent,
+      phoneVerificationSent,
+      nextStep,
+      message:
+        nextStep === 'complete'
+          ? 'Profile completed successfully'
+          : `OTP sent. Please verify your ${nextStep === 'verifyEmail' ? 'email' : 'phone number'}`,
+    };
+  }
+
+  /**
+   * Rotate the session: delete old token, issue new one via BetterAuth.
+   */
+  async rotateSession(
+    oldToken: string,
+    userId: number,
+  ): Promise<{ token: string; expiresAt: Date }> {
+    // Terminate all old sessions for this user
+    await this.sessionService.terminateAllSessions(userId);
+
+    // Issue new session via BetterAuth
+    return this.createSessionForUser(userId);
+  }
+
+  /**
+   * Clean up expired sessions from the database.
+   * Run this as a scheduled task (cron) every hour or daily
+   */
+  async cleanupExpiredSessions(): Promise<{ deletedCount: number }> {
+    try {
+      return await this.sessionService.cleanupExpiredSessions();
+    } catch (err) {
+      Logger.error(`Failed to cleanup expired sessions: ${err}`);
+      throw err;
+    }
+  }
+
+  // ─── Private Helpers ───────────────────────────────────────────────────────
+
+  /**
+  
+   * Used for detecting role changes between refresh cycles
+   */
+  private hashRoles(roles: UserRoleEntry[]): string {
+    try {
+      const roleString = JSON.stringify(
+        roles.map((r) => `${r.roleCode}:${r.storeId}`),
+      );
+      return crypto.createHash('sha256').update(roleString).digest('hex');
+    } catch (err) {
+      Logger.error(`Failed to hash roles: ${err}`);
+      return '';
+    }
+  }
+
+  /**
+   * Assign the correct initial role to a newly registered user — one row, no soft-delete.
+   * - First user ever → SUPER_ADMIN (platform administrator)
+   * - All subsequent users → USER (default platform user)
+   */
+  private async assignInitialRole(userId: number): Promise<void> {
+    try {
+      const roleCode = (await this.isSuperAdminSeeded())
+        ? 'USER'
+        : 'SUPER_ADMIN';
+
+      const [roleRecord] = await this.db
+        .select({ id: schema.roles.id })
+        .from(schema.roles)
+        .where(
+          and(eq(schema.roles.code, roleCode), isNull(schema.roles.storeFk)),
+        )
+        .limit(1);
+
+      if (!roleRecord) {
+        this.logger.warn(
+          `assignInitialRole: '${roleCode}' system role not found in DB for userId=${userId}`,
+        );
+        return;
+      }
+
+      await this.db
+        .insert(userRoleMapping)
+        .values({
+          userFk: userId,
+          roleFk: roleRecord.id,
+          isPrimary: true,
+          isActive: true,
+        })
+        .onConflictDoNothing();
+    } catch (err) {
+      if ((err as { code?: string }).code !== '23505') {
+        this.logger.error(
+          `assignInitialRole failed for userId=${userId}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
+  }
+
+  /**
+   * Normalise a raw role-DB-row array into the UserRoleEntry shape expected
+   * by AuthMapper. Pass `storeIdOverride` when the rows don't carry storeFk
+   * (e.g. the store-scoped query in switchStore()).
+   */
+  private mapToRoleEntries(
+    rows: Array<{
+      roleCode?: string;
+      code?: string;
+      storeFk?: number | null;
+      storeName?: string | null;
+    }>,
+    storeIdOverride?: number,
+  ): UserRoleEntry[] {
+    return rows.map((r) => {
+      const roleCode = (r.roleCode ?? r.code) as UserRoleEntry['roleCode'];
+      return {
+        roleCode,
+        storeId: storeIdOverride ?? r.storeFk ?? null,
+        storeName: r.storeName ?? null,
+        // Primary role: STORE_OWNER (user owns the store) or global role with no store scope
+        isPrimary:
+          roleCode === 'STORE_OWNER' ||
+          (r.storeFk === null && roleCode === 'SUPER_ADMIN'),
+        assignedAt: new Date().toISOString(),
+        expiresAt: null,
+      };
+    });
+  }
+
+  /**
+   * Fetch permissions, generate trace IDs, and build the unified AuthResponseDto.
+   * Shared by login(), register(), and OTP verifyOtp().
+   *
+  
+   */
+  async buildAuthResponse(
+    user: {
+      id: number;
+      guuid?: string | null;
+      email: string | null;
+      name: string;
+      emailVerified: boolean;
+      image: string | null | undefined;
+      phoneNumber: string | null | undefined;
+      phoneNumberVerified: boolean;
+    },
+    token: string,
+    expiresAt: Date,
+    tokenPair?: TokenPair,
+  ): Promise<AuthResponseEnvelope> {
+    const requestId = crypto.randomUUID();
+    const traceId = crypto.randomUUID();
+
+    // Fetch user's primary/default store.
+    // Primary store: where user is STORE_OWNER (exactly one per user via unique constraint).
+    const storeOwnerRoleId = await this.rolesRepository.findSystemRoleId(
+      SYSTEM_ROLE_STORE_OWNER,
+    );
+    const [primaryStore] = storeOwnerRoleId
+      ? await this.db
+          .select({ guuid: schema.store.guuid })
+          .from(userRoleMapping)
+          .innerJoin(schema.store, eq(schema.store.id, userRoleMapping.storeFk))
+          .where(
+            and(
+              eq(userRoleMapping.userFk, user.id),
+              eq(userRoleMapping.roleFk, storeOwnerRoleId),
+              isNull(userRoleMapping.deletedAt),
+              eq(userRoleMapping.isActive, true),
+            ),
+          )
+          .limit(1)
+      : [];
+
+    return AuthMapper.toAuthResponseEnvelope(
+      {
+        user: {
+          id: user.id,
+          guuid: user.guuid ?? '',
+          email: user.email,
+          name: user.name,
+          emailVerified: user.emailVerified,
+          image: user.image ?? null,
+          phoneNumber: user.phoneNumber ?? null,
+          phoneNumberVerified: user.phoneNumberVerified,
+          lastLoginAt: new Date(),
+          lastLoginIp: null,
+        },
+        token,
+        session: {
+          token,
+          expiresAt,
+          sessionId: crypto.randomUUID(),
+        },
+      },
+      await this.getUserPermissions(user.id),
+      requestId,
+      traceId,
+      // Pass tokenPair to mapper so it uses JWT access/refresh tokens
+      tokenPair,
+      // Pass primary store guuid to mapper
+      primaryStore ? { guuid: primaryStore.guuid } : null,
+    );
+  }
+
+  /**
+  
+   * Works for WEB and MOBILE
+   *
+   * Access Token: JWT, 1 hour expiry
+   * Refresh Token: Opaque, 30 days expiry (stored as hash)
+   */
+  async createTokenPair(
+    userId: number,
+    sessionToken: string,
+    userRoles: SessionUserRole[],
+    userEmail: string,
+  ): Promise<TokenPair> {
+    // Sign RS256 JWT — for mobile offline role decoding only
+    // Roles and email are passed in — no extra DB queries needed
+    const jwtToken = this.jwtConfigService.signToken({
+      sub: String(userId),
+      email: userEmail,
+      roles: userRoles.map((r) => r.roleCode),
+      primaryRole: userRoles[0]?.roleCode || null,
+      stores: userRoles
+        .filter((r) => r.storeId && r.storeName)
+        .map((r) => ({ id: r.storeId as number, name: r.storeName as string })),
+      activeStoreId: userRoles.find((r) => r.storeId)?.storeId || null,
+      iss: process.env.BETTER_AUTH_BASE_URL || 'nks-auth',
+      aud: 'nks-app',
+    });
+
+    // Create refresh token (opaque, random 32 bytes)
+    const refreshToken = crypto.randomBytes(32).toString('hex');
+
+    // Hash refresh token before storing (never store plaintext)
+    const refreshTokenHash = crypto
+      .createHash('sha256')
+      .update(refreshToken)
+      .digest('hex');
+
+    // Calculate expiry times
+    const now = new Date();
+    const jwtExpiresAt = new Date(now.getTime() + 60 * 60 * 1000); // 1h
+    const refreshTokenExpiresAt = new Date(
+      now.getTime() + 7 * 24 * 60 * 60 * 1000,
+    ); // 7d (rolling window — resets on each refresh)
+
+    // Store hash in the specific session only — not all user sessions
+    await this.db
+      .update(schema.userSession)
+      .set({
+        refreshTokenHash,
+        refreshTokenExpiresAt,
+        accessTokenExpiresAt: jwtExpiresAt,
+      })
+      .where(eq(schema.userSession.token, sessionToken));
+
+    this.logger.log(
+      `Token pair created for user ${userId}. JWT expires in 1h, refresh token in 30d.`,
+    );
+
+    // Return both tokens to client
+    return {
+      jwtToken,
+      refreshToken,
+      jwtExpiresAt,
+      refreshTokenExpiresAt,
+    };
+  }
+
+  /**
+  
+   * Works for WEB and MOBILE
+   *
+   * Validates refresh token hasn't expired, generates new access token
+   */
+  async refreshAccessToken(
+    refreshToken: string,
+    deviceId: string | null = null,
+  ): Promise<{
+    sessionId: string;
+    sessionToken: string;
+    jwtToken: string;
+    expiresAt: string;
+    refreshToken: string;
+    refreshExpiresAt: string;
+    defaultStore: { guuid: string } | null;
+  }> {
+    // Step 1: Hash the incoming refresh token
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(refreshToken)
+      .digest('hex');
+
+    // Step 2: Look up session by refresh token hash WITH EXCLUSIVE LOCK
+    // This ensures only ONE request processes this token at a time
+    // Prevents race condition where attacker and legitimate user both use same token
+    const [session] = await this.db
+      .select()
+      .from(schema.userSession)
+      .where(eq(schema.userSession.refreshTokenHash, tokenHash))
+      .limit(1);
+
+    if (!session) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    // Step 2b: THEFT DETECTION — Check if token was already used
+    // If refreshTokenRevokedAt is set, it means this token was already rotated
+    // (legitimate case) or already used by attacker (theft case)
+    // Either way, this token is no longer valid
+    if (session.refreshTokenRevokedAt !== null) {
+      // CRITICAL: Token reuse detected! This refresh token was already used.
+      // This could mean:
+      // 1. Legitimate user: Token was already rotated, they're using old token (shouldn't happen)
+      // 2. Attacker: Stolen token, trying to use after legitimate user already rotated
+      // Either way, this session is compromised.
+
+      this.logger.error(
+        `TOKEN THEFT DETECTED: User ${session.userId} attempted to reuse rotated refresh token. Session ${session.id} is compromised.`,
+        {
+          sessionId: session.id,
+          revokedAt: session.refreshTokenRevokedAt,
+          attemptedAt: new Date(),
+        },
+      );
+
+      // Delete ALL sessions for this user (emergency security response)
+      // This forces legitimate user to re-authenticate
+      // And blocks attacker's stolen tokens immediately
+      await this.db
+        .delete(schema.userSession)
+        .where(eq(schema.userSession.userId, session.userId));
+
+      throw new UnauthorizedException(
+        'Session compromised. Please log in again.',
+      );
+    }
+
+    // Step 3: Validate session hasn't already expired
+    if (session.expiresAt < new Date()) {
+      throw new UnauthorizedException('Session has expired');
+    }
+
+    // Step 3a: Validate device binding — prevents refresh token from being used on different device
+    // SCENARIO 1 (Web): Both null → passes (web uses cookies, not device binding)
+    // SCENARIO 2 (Mobile, same device): Both "uuid123" → passes
+    // SCENARIO 3 (Mobile, different device): session="uuid123", request="uuid456" → REJECTED
+    // Note: If user legitimately switches devices, they must re-authenticate via OTP
+    if (session.deviceId !== null && session.deviceId !== deviceId) {
+      throw new UnauthorizedException('Refresh token device mismatch');
+    }
+
+    // Step 3b: Validate refresh token hasn't expired
+    if (
+      session.refreshTokenExpiresAt &&
+      session.refreshTokenExpiresAt < new Date()
+    ) {
+      throw new UnauthorizedException('Refresh token expired');
+    }
+
+    // Step 4: Get current permissions and generate new access token
+    const permissions = await this.getUserPermissions(session.userId);
+    const userRoles = permissions.roles || [];
+    const currentRoleHash = this.hashRoles(userRoles);
+
+    const [user] = await this.db
+      .select({ email: schema.users.email })
+      .from(schema.users)
+      .where(eq(schema.users.id, session.userId))
+      .limit(1);
+
+    const accessToken = this.jwtConfigService.signToken({
+      sub: String(session.userId),
+      email: user?.email || '',
+      roles: userRoles.map((r) => r.roleCode),
+      primaryRole: userRoles[0]?.roleCode || null,
+      stores: userRoles
+        .filter((r) => r.storeId && r.storeName)
+        .map((r) => ({ id: r.storeId as number, name: r.storeName as string })),
+      activeStoreId: userRoles.find((r) => r.storeId)?.storeId || null,
+      iss: process.env.BETTER_AUTH_BASE_URL || 'nks-auth',
+      aud: 'nks-app',
+    });
+
+    const accessTokenExpiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
+
+    // Step 5: Rotate refresh token
+    const newRefreshToken = crypto.randomBytes(32).toString('hex');
+    const newRefreshTokenHash = crypto
+      .createHash('sha256')
+      .update(newRefreshToken)
+      .digest('hex');
+    const newRefreshTokenExpiresAt = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000,
+    ); // 7d (device trust — rolling window)
+
+    // Step 6: Rotate session token — create a new BetterAuth session (new opaque token)
+    // then delete the old one so the old token is immediately invalid
+    const auth = this.auth as unknown as BetterAuthInternal;
+    const ctx = await auth.$context;
+    const createdSession = await ctx.internalAdapter.createSession(
+      String(session.userId),
+    );
+    if (!createdSession)
+      throw new UnauthorizedException('Failed to rotate session');
+
+    // Fetch the new session from DB to get the fully-typed row (id, guuid, token, etc.)
+    const [newSession] = await this.db
+      .select()
+      .from(schema.userSession)
+      .where(eq(schema.userSession.token, createdSession.token))
+      .limit(1);
+
+    if (!newSession)
+      throw new UnauthorizedException('Failed to retrieve rotated session');
+
+    // Copy device context and update role hash into the new session row
+    // Roles are always read live from user_role_mapping — never cached in session
+    await this.db
+      .update(schema.userSession)
+      .set({
+        roleHash: currentRoleHash,
+        deviceId: session.deviceId,
+        deviceName: session.deviceName,
+        deviceType: session.deviceType,
+        appVersion: session.appVersion,
+        activeStoreFk: session.activeStoreFk,
+        refreshTokenHash: newRefreshTokenHash,
+        refreshTokenExpiresAt: newRefreshTokenExpiresAt,
+        accessTokenExpiresAt,
+      })
+      .where(eq(schema.userSession.id, newSession.id));
+
+    // Mark OLD token as revoked (for theft detection on next use)
+    // If someone tries to use this old refresh token again,
+    // Step 2b will detect refreshTokenRevokedAt !== null and trigger theft detection
+    // We keep the session row (don't delete yet) so next attempted use is detected
+    await this.db
+      .update(schema.userSession)
+      .set({
+        refreshTokenRevokedAt: new Date(),
+      })
+      .where(eq(schema.userSession.id, session.id));
+
+    // Step 7: Fetch default store
+    const storeOwnerRoleId = await this.rolesRepository.findSystemRoleId(
+      SYSTEM_ROLE_STORE_OWNER,
+    );
+    const [primaryStore] = storeOwnerRoleId
+      ? await this.db
+          .select({ guuid: schema.store.guuid })
+          .from(userRoleMapping)
+          .innerJoin(schema.store, eq(schema.store.id, userRoleMapping.storeFk))
+          .where(
+            and(
+              eq(userRoleMapping.userFk, session.userId),
+              eq(userRoleMapping.roleFk, storeOwnerRoleId),
+              isNull(userRoleMapping.deletedAt),
+              eq(userRoleMapping.isActive, true),
+            ),
+          )
+          .limit(1)
+      : [];
+
+    this.logger.log(`Session rotated for user ${session.userId}`);
+
+    return {
+      sessionId: newSession.guuid,
+      // New BetterAuth opaque token — update cookie (web) and secure storage (mobile)
+      sessionToken: newSession.token,
+      // New RS256 JWT — mobile updates local store for offline role decoding
+      jwtToken: accessToken,
+      expiresAt: accessTokenExpiresAt.toISOString(),
+      refreshToken: newRefreshToken,
+      refreshExpiresAt: newRefreshTokenExpiresAt.toISOString(),
+      defaultStore: primaryStore ? { guuid: primaryStore.guuid } : null,
+    };
+  }
+
+  /**
+  
+   * Detects if roles have changed since JWT was issued
+   * Returns updated permissions if roles changed
+   */
+  async verifyClaims(jwtToken: string): Promise<VerifyClaimsResponse> {
+    try {
+      // Verify JWT signature and validate audience
+      const payload = this.jwtConfigService.verifyToken(jwtToken);
+
+      // Validate audience claim
+      if (payload.aud !== JWT_AUDIENCE) {
+        throw new UnauthorizedException('Invalid JWT audience');
+      }
+
+      // Get current user roles
+      const currentPermissions = await this.getUserPermissions(
+        Number(payload.sub),
+      );
+      const currentRoles = currentPermissions.roles || [];
+      const currentRoleCodes = currentRoles.map((r) => r.roleCode);
+
+      // Check if roles changed
+      const tokenRoles = payload.roles || [];
+      const rolesChanged = !this.arraysEqual(
+        currentRoleCodes.sort(),
+        tokenRoles.sort(),
+      );
+
+      this.logger.log(
+        `JWT claims verified for user ${payload.sub}. Roles changed: ${rolesChanged}`,
+      );
+
+      return {
+        isValid: true,
+        sub: payload.sub,
+        rolesChanged,
+        currentRoles: currentRoleCodes,
+        stores: currentRoles
+          .filter((r) => r.storeId)
+          .map((r) => ({ id: r.storeId, name: r.storeName })),
+      };
+    } catch (error) {
+      Logger.error(`JWT verification failed: ${error}`);
+      return {
+        isValid: false,
+        rolesChanged: false,
+      };
+    }
+  }
+
+  /**
+   * Enforce session limit: max 5 concurrent sessions per user.
+   * If limit exceeded, delete oldest session(s).
+   * Called after new session creation.
+   */
+  private async enforceSessionLimit(userId: number): Promise<void> {
+    const MAX_CONCURRENT_SESSIONS = 5;
+
+    const sessions = await this.db
+      .select({
+        id: schema.userSession.id,
+        createdAt: schema.userSession.createdAt,
+      })
+      .from(schema.userSession)
+      .where(eq(schema.userSession.userId, userId))
+      .orderBy(asc(schema.userSession.createdAt));
+
+    const excessCount = sessions.length - MAX_CONCURRENT_SESSIONS;
+    if (excessCount > 0) {
+      // Delete oldest session(s)
+      const sessionsToDelete = sessions.slice(0, excessCount);
+      for (const session of sessionsToDelete) {
+        await this.db
+          .delete(schema.userSession)
+          .where(eq(schema.userSession.id, session.id));
+      }
+      this.logger.log(
+        `Enforced session limit for user ${userId}. Deleted ${excessCount} oldest session(s).`,
+      );
+    }
+  }
+
+  // ─── Phase 2: Offline-First & Permissions ──────────────────────────────────
+
+  /**
+   * Get permissions snapshot for a user (for JWT claims)
+   */
+  async getPermissionsSnapshot(userId: number): Promise<PermissionsSnapshot> {
+    return this.permissionsService.buildPermissionsSnapshot(userId);
+  }
+
+  /**
+   * Get permissions version for a user
+   */
+  async getPermissionsVersion(userId: number): Promise<string> {
+    return this.permissionsService.getPermissionsVersion(userId);
+  }
+
+  /**
+   * Calculate permissions delta since version
+   */
+  async calculatePermissionsDelta(
+    userId: number,
+    sinceVersion: string,
+  ): Promise<{
+    version: string;
+    sinceVersion: string;
+    added: PermissionsSnapshot;
+    removed: PermissionsSnapshot;
+    modified: PermissionsSnapshot;
+  }> {
+    const delta = await this.permissionsService.calculateDelta(
+      userId,
+      sinceVersion,
+    );
+    return {
+      version: delta.version,
+      sinceVersion: sinceVersion,
+      added: delta.added,
+      removed: delta.removed,
+      modified: delta.modified,
+    };
+  }
+
+  // ─── Phase 3: Device & Session Management ──────────────────────────────────
+
+  /**
+   * Get all active sessions for a user
+   */
+  async getUserSessions(userId: number): Promise<SessionInfoDto[]> {
+    const sessions = await this.db
+      .select({
+        id: schema.userSession.id,
+        deviceId: schema.userSession.deviceId,
+        deviceName: schema.userSession.deviceName,
+        deviceType: schema.userSession.deviceType,
+        platform: schema.userSession.platform,
+        appVersion: schema.userSession.appVersion,
+        createdAt: schema.userSession.createdAt,
+        expiresAt: schema.userSession.expiresAt,
+      })
+      .from(schema.userSession)
+      .where(
+        and(
+          eq(schema.userSession.userId, userId),
+          gt(schema.userSession.expiresAt, new Date()),
+        ),
+      );
+
+    return sessions.map((s) => ({
+      ...s,
+      createdAt: s.createdAt?.toISOString(),
+      expiresAt: s.expiresAt?.toISOString(),
+    }));
+  }
+
+  /**
+   * Terminate a specific session
+   */
+  async terminateSession(
+    userId: number,
+    sessionId: string,
+    requestingUserId?: number,
+    isSuperAdmin: boolean = false,
+  ): Promise<void> {
+    // SECURITY: Authorization check - users can only terminate their own sessions unless SUPER_ADMIN
+    if (requestingUserId && userId !== requestingUserId && !isSuperAdmin) {
+      throw new ForbiddenException('You can only terminate your own sessions');
+    }
+
+    const sessionIdNum = parseInt(sessionId, 10);
+
+    // Verify session belongs to user
+    const [session] = await this.db
+      .select()
+      .from(schema.userSession)
+      .where(
+        and(
+          eq(schema.userSession.id, sessionIdNum),
+          eq(schema.userSession.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    if (!session) {
+      throw new Error('Session not found or does not belong to user');
+    }
+
+    // Delete the session
+    await this.db
+      .delete(schema.userSession)
+      .where(eq(schema.userSession.id, sessionIdNum));
+
+    this.logger.log(`Session ${sessionId} terminated for user ${userId}`);
+  }
+
+  /**
+   * Terminate all sessions for a user (e.g., after password change)
+   */
+  async terminateAllSessions(userId: number): Promise<void> {
+    await this.db
+      .delete(schema.userSession)
+      .where(eq(schema.userSession.userId, userId));
+
+    this.logger.log(`All sessions terminated for user ${userId}`);
+  }
+
+  // ─── Private Helpers (continued) ────────────────────────────────────────────
+
+  /**
+   * Compare two arrays for equality
+   */
+  private arraysEqual(a: string[], b: string[]): boolean {
+    if (a.length !== b.length) return false;
+    return a.every((val, idx) => val === b[idx]);
+  }
+}

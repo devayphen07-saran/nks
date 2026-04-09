@@ -81,7 +81,7 @@ export async function seedTaxRateMaster(db: Db) {
 
   if (stores.length === 0) {
     // No stores seeded yet, return early
-    console.log('    ℹ️  No stores found. Skipping tax_rate_master seed.');
+    console.log('No stores found. Skipping tax_rate_master seed.');
     return { rowCount: 0 };
   }
 

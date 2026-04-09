@@ -1,1 +1,5 @@
-export * from './location.mapper';
+/**
+ * Location module mappers
+ */
+
+export { LocationMapper } from './location.mapper';

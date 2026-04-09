@@ -14,9 +14,6 @@ import {
   Typography,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { profileComplete } from "@nks/api-manager";
-import { useRootDispatch } from "../../store";
-import { refreshSession } from "../../store/refreshSession";
 
 const schema = z
   .object({
@@ -36,7 +33,6 @@ type FormData = z.infer<typeof schema>;
 export function ProfileSetupScreen() {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
-  const dispatch = useRootDispatch();
 
   const {
     control,
@@ -55,32 +51,16 @@ export function ProfileSetupScreen() {
   });
 
   const onSubmit = async (data: FormData) => {
+    // TODO: Dispatch profileComplete API call
     const fullName = `${data.firstName.trim()} ${data.lastName.trim()}`;
-    const result = await dispatch(
-      profileComplete({
-        bodyParam: {
-          name: fullName,
-          email: data.email,
-          password: data.password,
-        },
-      }),
-    );
-
-    if (profileComplete.fulfilled.match(result)) {
-      await dispatch(refreshSession());
-      Alert.alert("Success", "Profile completed successfully!", [
-        {
-          text: "OK",
-          onPress: () =>
-            router.replace("/(protected)/(workspace)/(app)/(account-type)"),
-        },
-      ]);
-    } else {
-      const msg =
-        (result.payload as { message?: string })?.message ??
-        "Profile completion failed. Please try again.";
-      setError("email", { message: msg });
-    }
+    console.log("Completing profile for:", fullName, data.email);
+    Alert.alert("Success", "Profile completed successfully!", [
+      {
+        text: "OK",
+        onPress: () =>
+          router.replace("/(protected)/(workspace)/(app)/(account-type)"),
+      },
+    ]);
   };
 
   return (

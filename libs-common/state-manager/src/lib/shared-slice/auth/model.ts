@@ -1,4 +1,4 @@
-import { AuthResponse } from "@nks/api-manager";
+import { AuthData } from "@nks/api-manager";
 import type { APIState } from "@nks/shared-types";
 
 export type AuthStatus =
@@ -9,7 +9,7 @@ export type AuthStatus =
 
 export interface AuthState {
   status: AuthStatus;
-  user: AuthResponse | null;
+  user: AuthData | null;
   error: string | null;
   /** Timestamp (Date.now()) of the last successful session fetch from the API. */
   fetchedAt: number;
@@ -23,10 +23,4 @@ export interface AuthState {
   // OTP Login flow states
   sendOtpState: APIState;
   verifyOtpState: APIState;
-
-  // Profile completion states
-  profileCompleteState: APIState;
-
-  // Store selection state
-  storeSelectState: APIState;
 }

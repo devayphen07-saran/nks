@@ -1,57 +1,98 @@
 import { Injectable } from '@nestjs/common';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { eq, and, isNull } from 'drizzle-orm';
 import { InjectDb } from '../../core/database/inject-db.decorator';
 import * as schema from '../../core/database/schema';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq } from 'drizzle-orm';
+
+type State = typeof schema.state.$inferSelect;
+type District = typeof schema.district.$inferSelect;
+type Pincode = typeof schema.pincode.$inferSelect;
 
 @Injectable()
 export class LocationRepository {
   constructor(@InjectDb() private readonly db: NodePgDatabase<typeof schema>) {}
 
-  findAllCountries() {
+  async getStates(): Promise<State[]> {
     return this.db
       .select()
-      .from(schema.country)
-      .where(eq(schema.country.isActive, true))
-      .orderBy(schema.country.countryName);
+      .from(schema.state)
+      .where(and(eq(schema.state.isActive, true), isNull(schema.state.deletedAt)))
+      .orderBy(schema.state.stateName);
   }
 
-  findStatesByCountry(countryId: number) {
-    return this.db
+  async getStateByCode(code: string): Promise<State | null> {
+    const [result] = await this.db
       .select()
-      .from(schema.stateRegionProvince)
-      .where(eq(schema.stateRegionProvince.countryFk, countryId))
-      .orderBy(schema.stateRegionProvince.stateName);
-  }
-
-  /**
-   * Finds unique city names within a state by joining postal_code and administrative divisions.
-   * Replaces the deleted flat 'city' table.
-   */
-  findCitiesByState(stateId: number) {
-    return this.db
-      .selectDistinct({ cityName: schema.postalCode.cityName })
-      .from(schema.postalCode)
-      .innerJoin(
-        schema.administrativeDivision,
-        eq(
-          schema.postalCode.administrativeDivisionFk,
-          schema.administrativeDivision.id,
+      .from(schema.state)
+      .where(
+        and(
+          eq(schema.state.stateCode, code),
+          eq(schema.state.isActive, true),
+          isNull(schema.state.deletedAt),
         ),
       )
-      .where(eq(schema.administrativeDivision.stateRegionProvinceFk, stateId))
-      .orderBy(schema.postalCode.cityName);
+      .limit(1);
+
+    return result ?? null;
   }
 
-  findPostalCodesByAdminDiv(adminDivId: number) {
+  async getStateById(stateId: number): Promise<State | null> {
+    const [result] = await this.db
+      .select()
+      .from(schema.state)
+      .where(
+        and(
+          eq(schema.state.id, stateId),
+          eq(schema.state.isActive, true),
+          isNull(schema.state.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    return result ?? null;
+  }
+
+  async getDistrictsByState(stateId: number): Promise<District[]> {
     return this.db
-      .select({
-        id: schema.postalCode.id,
-        code: schema.postalCode.code,
-        cityName: schema.postalCode.cityName,
-      })
-      .from(schema.postalCode)
-      .where(eq(schema.postalCode.administrativeDivisionFk, adminDivId))
-      .orderBy(schema.postalCode.cityName);
+      .select()
+      .from(schema.district)
+      .where(
+        and(
+          eq(schema.district.stateFk, stateId),
+          eq(schema.district.isActive, true),
+          isNull(schema.district.deletedAt),
+        ),
+      )
+      .orderBy(schema.district.districtName);
+  }
+
+  async getPincodesByDistrict(districtId: number): Promise<Pincode[]> {
+    return this.db
+      .select()
+      .from(schema.pincode)
+      .where(
+        and(
+          eq(schema.pincode.districtFk, districtId),
+          eq(schema.pincode.isActive, true),
+          isNull(schema.pincode.deletedAt),
+        ),
+      )
+      .orderBy(schema.pincode.code);
+  }
+
+  async getPincodeByCode(code: string): Promise<Pincode | null> {
+    const [result] = await this.db
+      .select()
+      .from(schema.pincode)
+      .where(
+        and(
+          eq(schema.pincode.code, code),
+          eq(schema.pincode.isActive, true),
+          isNull(schema.pincode.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    return result ?? null;
   }
 }

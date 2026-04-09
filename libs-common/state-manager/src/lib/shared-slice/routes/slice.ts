@@ -1,53 +1,35 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
-import {
-  fetchAdminRoutesAndPermissions,
-  fetchStoreRoutes,
-  fetchUserRoutes,
-  type Route,
-  type Permission,
-} from "@nks/api-manager";
+import { getAdminRoutes, getStoreRoutes } from "@nks/api-manager";
 import { defaultAPIState } from "@nks/shared-types";
-import { RoutesState } from "./model";
+import { Route, RouteUser, RoutesState } from "./model";
 import { routesCache } from "./cache";
 
 const initialState: RoutesState = {
+  user: null,
   routes: [],
-  permissions: [],
   isSynced: false,
   fetchedAt: 0,
   error: null,
   fetchState: { ...defaultAPIState },
-  permissionsLoaded: false, // Tracks if permissions have been loaded in this session
 };
 
 export const routesSlice = createSlice({
   name: "routes",
   initialState,
   reducers: {
-    /**
-     * Clear routes when user logs out
-     * Resets isSynced to false to allow re-fetching on next login
-     */
     clearRoutes(state) {
+      state.user = null;
       state.routes = [];
-      state.permissions = [];
       state.isSynced = false;
       state.fetchedAt = 0;
       state.error = null;
       state.fetchState = { ...defaultAPIState };
-      state.permissionsLoaded = false; // Reset on logout
       routesCache.clear();
     },
 
-    /**
-     * Manually set routes (fallback/emergency data)
-     */
-    setRoutes(
-      state,
-      action: PayloadAction<{ routes: Route[]; permissions: Permission[] }>,
-    ) {
+    setRoutes(state, action: PayloadAction<{ user: RouteUser; routes: Route[] }>) {
+      state.user = action.payload.user;
       state.routes = action.payload.routes;
-      state.permissions = action.payload.permissions;
       state.isSynced = true;
       state.fetchedAt = Date.now();
       state.error = null;
@@ -56,116 +38,64 @@ export const routesSlice = createSlice({
   },
 
   extraReducers: (builder) => {
-    /* ── User Routes ── */
-    builder.addCase(fetchUserRoutes.pending, (state) => {
+    /* ── Admin Routes (SUPER_ADMIN) ── */
+    builder.addCase(getAdminRoutes.pending, (state) => {
       state.fetchState.isLoading = true;
       state.fetchState.hasError = false;
       state.fetchState.errors = undefined;
     });
 
-    builder.addCase(fetchUserRoutes.fulfilled, (state, action) => {
+    builder.addCase(getAdminRoutes.fulfilled, (state, action) => {
       state.fetchState.isLoading = false;
-      // Response structure: ApiResponse<RoutesAndPermissionsData>
       const data = action.payload?.data;
-      state.routes = data?.routes || [];
-      state.permissions = data?.permissions || [];
+      state.user = data?.user ?? null;
+      state.routes = data?.routes ?? [];
       state.isSynced = true;
-      state.permissionsLoaded = true; // Mark permissions as loaded
       state.fetchedAt = Date.now();
       state.error = null;
-      // Cache routes for session persistence
       routesCache.save({
         routes: state.routes,
-        permissions: state.permissions,
         isSynced: true,
         fetchedAt: state.fetchedAt,
       });
     });
 
-    builder.addCase(fetchUserRoutes.rejected, (state, action) => {
+    builder.addCase(getAdminRoutes.rejected, (state, action) => {
       state.fetchState.isLoading = false;
       state.fetchState.hasError = true;
       state.fetchState.errors = action.payload;
-      state.error =
-        (action.payload as any)?.message || "Failed to fetch user routes";
+      state.error = (action.payload as any)?.message || "Failed to fetch admin routes";
       state.isSynced = false;
-      console.error("[Redux] Failed to sync user routes:", action.payload);
     });
-
-    /* ── Admin Routes & Permissions ── */
-    builder.addCase(fetchAdminRoutesAndPermissions.pending, (state) => {
-      state.fetchState.isLoading = true;
-      state.fetchState.hasError = false;
-      state.fetchState.errors = undefined;
-    });
-
-    builder.addCase(
-      fetchAdminRoutesAndPermissions.fulfilled,
-      (state, action) => {
-        state.fetchState.isLoading = false;
-        // Response structure: ApiResponse<RoutesAndPermissionsData>
-        const data = action.payload?.data;
-        state.routes = data?.routes || [];
-        state.permissions = data?.permissions || [];
-        state.isSynced = true;
-        state.fetchedAt = Date.now();
-        state.error = null;
-        // Cache routes for session persistence
-        routesCache.save({
-          routes: state.routes,
-          permissions: state.permissions,
-          isSynced: true,
-          fetchedAt: state.fetchedAt,
-        });
-      },
-    );
-
-    builder.addCase(
-      fetchAdminRoutesAndPermissions.rejected,
-      (state, action) => {
-        state.fetchState.isLoading = false;
-        state.fetchState.hasError = true;
-        state.fetchState.errors = action.payload;
-        state.error =
-          (action.payload as any)?.message || "Failed to fetch admin routes";
-        state.isSynced = false;
-        console.error("[Redux] Failed to sync admin routes:", action.payload);
-      },
-    );
 
     /* ── Store Routes ── */
-    builder.addCase(fetchStoreRoutes.pending, (state) => {
+    builder.addCase(getStoreRoutes.pending, (state) => {
       state.fetchState.isLoading = true;
       state.fetchState.hasError = false;
       state.fetchState.errors = undefined;
     });
 
-    builder.addCase(fetchStoreRoutes.fulfilled, (state, action) => {
+    builder.addCase(getStoreRoutes.fulfilled, (state, action) => {
       state.fetchState.isLoading = false;
-      // Response structure: ApiResponse<RoutesAndPermissionsData>
       const data = action.payload?.data;
-      state.routes = data?.routes || [];
-      state.permissions = data?.permissions || [];
+      state.user = data?.user ?? null;
+      state.routes = data?.routes ?? [];
       state.isSynced = true;
       state.fetchedAt = Date.now();
       state.error = null;
-      // Cache routes for session persistence
       routesCache.save({
         routes: state.routes,
-        permissions: state.permissions,
         isSynced: true,
         fetchedAt: state.fetchedAt,
       });
     });
 
-    builder.addCase(fetchStoreRoutes.rejected, (state, action) => {
+    builder.addCase(getStoreRoutes.rejected, (state, action) => {
       state.fetchState.isLoading = false;
       state.fetchState.hasError = true;
       state.fetchState.errors = action.payload;
-      state.error =
-        (action.payload as any)?.message || "Failed to fetch store routes";
+      state.error = (action.payload as any)?.message || "Failed to fetch store routes";
       state.isSynced = false;
-      console.error("[Redux] Failed to sync store routes:", action.payload);
     });
   },
 });

@@ -6,7 +6,7 @@ import {
   timestamp,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { users } from './users';
+import { users } from './auth/users';
 
 export const files = pgTable(
   'files',

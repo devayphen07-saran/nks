@@ -14,7 +14,7 @@ import {
   LoggingInterceptor,
 } from './common/interceptors';
 import { validateEnv } from './config/env.validation';
-import { CsrfMiddleware } from './common/middleware/csrf.middleware';
+import { CsrfMiddleware } from './common/middleware';
 
 // ─── Env Validation ──────────────────────────────────────────────────────────
 // Validate all required environment variables before anything else in the app.

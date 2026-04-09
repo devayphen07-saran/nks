@@ -6,14 +6,15 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { InjectDb } from '../../core/database/inject-db.decorator';
 import * as schema from '../../core/database/schema';
+import { userRoleMapping } from '../../core/database/schema/auth/user-role-mapping';
 import { UnauthorizedException } from '../exceptions';
 import { ErrorCode } from '../constants/error-codes.constants';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import type { Request } from 'express';
-import { SessionUser } from 'src/modules/auth/interfaces/session-user.interface';
+import { SessionUser, SessionUserRole } from 'src/modules/auth/interfaces/session-user.interface';
 import { fireAndForgetWithRetry } from '../utils/retry';
 
 /** Extend Express Request with strongly-typed user fields. */
@@ -24,6 +25,12 @@ export interface AuthenticatedRequest extends Request {
   userPermissions?: Set<string>;
   /** Cached per-request SUPER_ADMIN flag (populated by PermissionGuard). */
   isSuperAdmin?: boolean;
+}
+
+/** Type-safe Express Request cookies (from cookie-parser middleware) */
+interface ParsedCookies {
+  nks_session?: string;
+  [key: string]: string | undefined;
 }
 
 @Injectable()
@@ -59,7 +66,7 @@ export class AuthGuard implements CanActivate {
 
     // ✅ Try parsed cookies first (cookie-parser middleware)
     const nksSessionCookie =
-      (request.cookies as any)?.nks_session ||
+      (request.cookies as ParsedCookies)?.nks_session ||
       this.extractNksSessionCookie(request);
 
     const sessionToken = bearerToken || nksSessionCookie;
@@ -147,6 +154,37 @@ export class AuthGuard implements CanActivate {
     };
     const u = user as BetterAuthUser;
 
+    // Query roles directly from user_role_mapping — single source of truth
+    const roleRows = await this.db
+      .select({
+        roleCode: schema.roles.code,
+        storeFk: userRoleMapping.storeFk,
+        storeName: schema.store.storeName,
+        isPrimary: userRoleMapping.isPrimary,
+        assignedAt: userRoleMapping.assignedAt,
+      })
+      .from(userRoleMapping)
+      .innerJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
+      .leftJoin(schema.store, eq(userRoleMapping.storeFk, schema.store.id))
+      .where(
+        and(
+          eq(userRoleMapping.userFk, dbSession.userId),
+          eq(userRoleMapping.isActive, true),
+          isNull(userRoleMapping.deletedAt),
+        ),
+      );
+
+    const roles: SessionUserRole[] = roleRows.map((r) => ({
+      roleCode: r.roleCode,
+      storeId: r.storeFk ?? null,
+      storeName: r.storeName ?? null,
+      isPrimary: r.isPrimary,
+      assignedAt: r.assignedAt.toISOString(),
+      expiresAt: null,
+    }));
+    const primaryRole = roleRows.find((r) => r.isPrimary)?.roleCode ?? roleRows[0]?.roleCode ?? null;
+    const isSuperAdmin = roles.some((r) => r.roleCode === 'SUPER_ADMIN');
+
     (request as AuthenticatedRequest).user = {
       id: String(u.id),
       userId: Number(u.id),
@@ -163,24 +201,27 @@ export class AuthGuard implements CanActivate {
       isBlocked: u.isBlocked ?? false,
       blockedReason: u.blockedReason ?? null,
       loginCount: u.loginCount ?? 0,
+      lastLoginAt: u.lastLoginAt ?? null,
+      roles,
+      primaryRole,
+      isSuperAdmin,
+      activeStoreId: dbSession.activeStoreFk ?? null,
     };
 
     // 5. Check if account is blocked — invalidate session immediately
     if (u.isBlocked) {
-      // ✅ FIX: Delete sessions with error logging and retry logic
-      fireAndForgetWithRetry(
-        async () => {
-          await this.db
-            .delete(schema.userSession)
-            .where(eq(schema.userSession.userId, Number(u.id)));
-        },
-        {
-          maxRetries: 3,
-          initialDelayMs: 500,
-          logger: this.logger,
-          logLabel: `Delete sessions for blocked user ${u.id}`,
-        },
-      );
+      // CRITICAL: Delete sessions BEFORE throwing error (synchronous, not fire-and-forget)
+      try {
+        await this.db
+          .delete(schema.userSession)
+          .where(eq(schema.userSession.userId, Number(u.id)));
+        this.logger.warn(`Deleted all sessions for blocked user ${u.id}`);
+      } catch (err) {
+        this.logger.error(
+          `Failed to delete sessions for blocked user ${u.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        // Continue to throw auth error even if session deletion fails
+      }
 
       throw new UnauthorizedException({
         errorCode: ErrorCode.USER_BLOCKED,

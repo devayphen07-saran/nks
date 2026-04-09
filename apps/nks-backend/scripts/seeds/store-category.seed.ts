@@ -1,15 +1,22 @@
 import type { Db } from './types.js';
-import { storeCategory } from '../../src/core/database/schema';
+import { storeCategory } from '../../src/core/database/schema/lookups/store-category';
 
 const data = [
-  { categoryName: 'Grocery',      categoryCode: 'GROCERY',     sortOrder: 1, isSystem: true },
-  { categoryName: 'Pharmacy',     categoryCode: 'PHARMACY',    sortOrder: 2, isSystem: true },
-  { categoryName: 'Restaurant',   categoryCode: 'RESTAURANT',  sortOrder: 3, isSystem: true },
-  { categoryName: 'Electronics',  categoryCode: 'ELECTRONICS', sortOrder: 4, isSystem: true },
-  { categoryName: 'Clothing',     categoryCode: 'CLOTHING',    sortOrder: 5, isSystem: true },
-  { categoryName: 'Stationery',   categoryCode: 'STATIONERY',  sortOrder: 6, isSystem: true },
-  { categoryName: 'Hardware',     categoryCode: 'HARDWARE',    sortOrder: 7, isSystem: true },
-  { categoryName: 'Other',        categoryCode: 'OTHER',       sortOrder: 8, isSystem: true },
+  { code: 'GENERAL_STORE', label: 'General Store', description: 'Multi-product retail store' },
+  { code: 'GROCERY', label: 'Grocery', description: 'Supermarket / Grocery Store' },
+  { code: 'PHARMACY', label: 'Pharmacy', description: 'Medicine & Health Products' },
+  { code: 'APPAREL', label: 'Apparel', description: 'Clothing & Fashion' },
+  { code: 'FOOTWEAR', label: 'Footwear', description: 'Shoes & Footwear' },
+  { code: 'ELECTRONICS', label: 'Electronics', description: 'Electronics & Gadgets' },
+  { code: 'FURNITURE', label: 'Furniture', description: 'Home Furniture' },
+  { code: 'JEWELLERY', label: 'Jewellery', description: 'Gold & Silver Jewellery' },
+  { code: 'BEAUTY', label: 'Beauty & Cosmetics', description: 'Cosmetics & Beauty Products' },
+  { code: 'RESTAURANT', label: 'Restaurant', description: 'Food & Beverage' },
+  { code: 'CAFE', label: 'Cafe', description: 'Coffee Shop / Cafe' },
+  { code: 'BAKERY', label: 'Bakery', description: 'Bakery & Confectionery' },
+  { code: 'HARDWARE', label: 'Hardware', description: 'Tools & Hardware' },
+  { code: 'STATIONARY', label: 'Stationary', description: 'Books & Stationary' },
+  { code: 'SPORTS', label: 'Sports', description: 'Sports & Fitness' },
 ];
 
 export async function seedStoreCategories(db: Db) {

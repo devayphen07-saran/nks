@@ -1,72 +1,79 @@
 import { Injectable } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
-import * as schema from '../../core/database/schema';
-import { InjectDb } from '../../core/database/inject-db.decorator';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-
-type Tx = NodePgDatabase<typeof schema>;
+import * as schema from '../../core/database/schema';
+import { userRoleMapping } from '../../core/database/schema/auth/user-role-mapping';
+import { eq, and, or, ilike, isNull, count } from 'drizzle-orm';
+import { InjectDb } from '../../core/database/inject-db.decorator';
+import type { UserRow } from './dto';
 
 @Injectable()
 export class UsersRepository {
-  constructor(@InjectDb() private readonly db: Tx) {}
+  constructor(@InjectDb() private readonly db: NodePgDatabase<typeof schema>) {}
 
   /**
-   * Find a user by primary key (Internal).
-   * No tx? - Read only.
+   * List all users with optional search and pagination.
+   * Joins user_role_mapping to surface the primary role code.
    */
-  async findById(id: number) {
-    const [user] = await this.db
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.id, id))
-      .limit(1);
-    return user ?? null;
-  }
+  async findAll(opts: {
+    page:     number;
+    pageSize: number;
+    search?:  string;
+  }): Promise<{ rows: UserRow[]; total: number }> {
+    const { page, pageSize, search } = opts;
+    const offset = (page - 1) * pageSize;
 
-  /**
-   * Find an active user by email.
-   * No tx? - Read only.
-   */
-  async findByEmail(email: string) {
-    const [user] = await this.db
-      .select()
-      .from(schema.users)
-      .where(
-        and(eq(schema.users.email, email), eq(schema.users.isActive, true)),
-      )
-      .limit(1);
-    return user ?? null;
-  }
+    const searchFilter = search?.trim()
+      ? or(
+          ilike(schema.users.name,        `%${search}%`),
+          ilike(schema.users.email,       `%${search}%`),
+          ilike(schema.users.phoneNumber, `%${search}%`),
+        )
+      : undefined;
 
-  /**
-   * Find an active user by phone number.
-   * No tx? - Read only.
-   */
-  async findByPhone(phoneNumber: string) {
-    const [user] = await this.db
-      .select()
-      .from(schema.users)
-      .where(
-        and(
-          eq(schema.users.phoneNumber, phoneNumber),
-          eq(schema.users.isActive, true),
-        ),
-      )
-      .limit(1);
-    return user ?? null;
-  }
+    const where = and(isNull(schema.users.deletedAt), searchFilter);
 
-  /**
-   * Update an active user by ID. Returns the updated user.
-   * WITH tx? - Write operation.
-   */
-  async update(id: number, data: schema.UpdateUser, tx?: Tx) {
-    const client = tx ?? this.db;
-    const [updated] = await client
-      .update(schema.users)
-      .set(data)
-      .where(and(eq(schema.users.id, id), eq(schema.users.isActive, true)))
-      .returning();
-    return updated ?? null;
+    const [rows, [{ total }]] = await Promise.all([
+      this.db
+        .select({
+          guuid:               schema.users.guuid,
+          name:                schema.users.name,
+          email:               schema.users.email,
+          emailVerified:       schema.users.emailVerified,
+          phoneNumber:         schema.users.phoneNumber,
+          phoneNumberVerified: schema.users.phoneNumberVerified,
+          image:               schema.users.image,
+          isBlocked:           schema.users.isBlocked,
+          blockedReason:       schema.users.blockedReason,
+          primaryLoginMethod:  schema.users.primaryLoginMethod,
+          loginCount:          schema.users.loginCount,
+          lastLoginAt:         schema.users.lastLoginAt,
+          profileCompleted:    schema.users.profileCompleted,
+          isActive:            schema.users.isActive,
+          createdAt:           schema.users.createdAt,
+          primaryRole:         schema.roles.code,
+        })
+        .from(schema.users)
+        .leftJoin(
+          userRoleMapping,
+          and(
+            eq(userRoleMapping.userFk,   schema.users.id),
+            eq(userRoleMapping.isPrimary, true),
+            eq(userRoleMapping.isActive,  true),
+            isNull(userRoleMapping.deletedAt),
+          ),
+        )
+        .leftJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
+        .where(where)
+        .orderBy(schema.users.createdAt)
+        .limit(pageSize)
+        .offset(offset),
+
+      this.db
+        .select({ total: count() })
+        .from(schema.users)
+        .where(where),
+    ]);
+
+    return { rows, total };
   }
 }

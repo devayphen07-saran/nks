@@ -1,13 +1,14 @@
 import { Module } from '@nestjs/common';
 import { UsersController } from './users.controller';
-import { UserPreferencesController } from './user-preferences.controller';
 import { UsersService } from './users.service';
 import { UsersRepository } from './users.repository';
-import { UserPreferencesService } from '../../features/user-preferences/user-preferences.service';
+import { UserPreferencesRepository } from './repositories/user-preferences.repository';
+import { RolesModule } from '../roles/roles.module';
 
 @Module({
-  controllers: [UsersController, UserPreferencesController],
-  providers: [UsersService, UsersRepository, UserPreferencesService],
-  exports: [UsersService, UsersRepository, UserPreferencesService],
+  imports:     [RolesModule],
+  controllers: [UsersController],
+  providers:   [UsersService, UsersRepository, UserPreferencesRepository],
+  exports:     [UsersService, UsersRepository, UserPreferencesRepository],
 })
 export class UsersModule {}

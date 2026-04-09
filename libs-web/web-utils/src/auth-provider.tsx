@@ -8,20 +8,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { getSession, type AuthResponse } from "@nks/api-manager";
+import { type AuthData, signOut, getMe } from "@nks/api-manager";
 import { authSlice } from "@nks/state-manager";
-import {
-  clearAuthData,
-  setIamUserIdToken,
-  setSessionId,
-} from "./auth-storage";
+import { clearAuthData, getUser } from "./auth-storage";
 
 // ============================================
 // Context Types
 // ============================================
 
 export interface AuthContextType {
-  user: AuthResponse | null;
+  user: AuthData | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   iamUserId: string | null;
@@ -36,25 +32,28 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export interface AuthProviderProps {
   children: ReactNode;
-  dispatch: (action: unknown) => Promise<unknown>;
+  dispatch: (action: unknown) => unknown;
   authState: {
-    user: AuthResponse | null;
+    user: AuthData | null;
     status: "INITIALIZING" | "AUTHENTICATED" | "UNAUTHENTICATED" | "LOCKED";
   };
 }
 
 export function AuthProvider({
   children,
-
   dispatch,
   authState,
 }: AuthProviderProps) {
-  const { user: rawUser, status } = authState;
-  const user = (rawUser as any)?.data ?? rawUser;
+  const { user, status } = authState;
   const [isInitialized, setIsInitialized] = useState(false);
   const [iamUserId, setIamUserId] = useState<string | null>(null);
   const isAuthenticated = status === "AUTHENTICATED";
   const isLoading = status === "INITIALIZING" || !isInitialized;
+
+  // Sync iamUserId from user state
+  useEffect(() => {
+    if (user?.user?.id) setIamUserId(String(user.user.id));
+  }, [user]);
 
   // ============================================
   // Redirect to Auth with Return URL
@@ -62,91 +61,73 @@ export function AuthProvider({
 
   const redirectToAuth = useCallback(() => {
     const authUrl = process.env.NEXT_PUBLIC_AUTH_URL ?? "/login";
-
-    if (typeof window === "undefined") {
-      return;
-    }
-
+    if (typeof window === "undefined") return;
     const currentUrl = window.location.href;
-
-    // Prevent redirect loop if already on auth URL
-    if (currentUrl.includes("/login")) {
-      return;
-    }
-
-    const redirectUrl = `${authUrl}?redirect=${encodeURIComponent(currentUrl)}`;
-    window.location.href = redirectUrl;
+    if (currentUrl.includes("/login")) return;
+    window.location.href = `${authUrl}?redirect=${encodeURIComponent(currentUrl)}`;
   }, []);
 
+  // Single consolidated logout: clears storage, calls backend, then redirects.
+  // redirectToAuth() is deferred until signOut() resolves so the backend has
+  // cleared the nks_session httpOnly cookie before the next navigation.
   const logout = useCallback(() => {
     clearAuthData();
     setIamUserId(null);
-    dispatch(authSlice.actions.setUnauthenticated());
-    redirectToAuth();
+    (dispatch(signOut()) as Promise<unknown>).finally(() => {
+      redirectToAuth();
+    });
   }, [dispatch, redirectToAuth]);
+
+  // ============================================
+  // Session Restoration on Page Refresh
+  // ============================================
 
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // ✅ FIXED: Use httpOnly cookies, not localStorage
-        // Browser automatically sends nks_session cookie with requests
-        // No need to check for token in localStorage first
-
-        try {
-          // Validate session via httpOnly cookie
-          // Browser will automatically send nks_session cookie
-          const result = await dispatch(getSession({}));
-
-          if (getSession.fulfilled.match(result)) {
-            // Response structure: payload.data = ApiResponse wrapper, payload.data.data = AuthResponseDto
-            const authData = result.payload?.data?.data || result.payload?.data;
-
-            if (authData) {
-              // Extract and store iamUserId from auth response
-              const userId = authData?.data?.user?.id || authData?.user?.id;
-              if (userId) {
-                setIamUserId(String(userId));
-                setIamUserIdToken(String(userId));
-              }
-
-              // Extract and store sessionId from auth response
-              const sessionId = authData?.session?.sessionId;
-              if (sessionId) {
-                setSessionId(sessionId);
-              }
-
-              // Auth successful
-              dispatch(authSlice.actions.setAuthenticated(authData));
-            } else {
-              throw new Error("Invalid session response structure");
-            }
-          } else if (getSession.rejected.match(result)) {
-            console.warn("[Auth] Session validation failed");
-            clearAuthData();
-            redirectToAuth();
-          }
-        } catch (sessionErr) {
-          console.warn("[Auth] Session validation error:", sessionErr);
-          clearAuthData();
+        // 1. Restore from localStorage immediately for fast UI render
+        const storedSession = getUser<AuthData>();
+        if (storedSession?.session?.sessionToken) {
+          dispatch(authSlice.actions.setAuthenticated(storedSession));
+        } else {
           dispatch(authSlice.actions.setUnauthenticated());
-          redirectToAuth();
+          setIsInitialized(true);
+          return;
         }
+
+        // 2. Verify the session is still valid on the backend (cookie may be
+        //    expired or revoked since the last page visit)
+        await (dispatch(getMe()) as Promise<unknown>)
+          .then((result: unknown) => {
+            const action = result as { payload?: unknown; error?: unknown };
+            if (action.error) {
+              if (action.payload) {
+                // Server responded with an auth error (e.g. 401) — session truly invalid.
+                clearAuthData();
+                dispatch(authSlice.actions.setUnauthenticated());
+              }
+              // payload is undefined = network error (backend temporarily down).
+              // Keep the existing session so the user isn't logged out.
+            }
+          })
+          .catch(() => {
+            // Synchronous error — keep session intact.
+          });
       } catch (error) {
+        // Unexpected synchronous error during init — keep session intact.
         console.error("[Auth] Initialization error:", error);
-        clearAuthData();
-        dispatch(authSlice.actions.setUnauthenticated());
       } finally {
         setIsInitialized(true);
       }
     };
 
     initAuth();
-  }, [dispatch, redirectToAuth]);
+  }, [dispatch]);
 
   return (
     <AuthContext.Provider
       value={{
-        user: user as AuthContextType["user"],
+        user,
         isLoading,
         isAuthenticated,
         iamUserId,

@@ -5,15 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1774859797058,
-      "tag": "0000_init_pos_schema_v2",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1774865260372,
-      "tag": "0001_multi_country_tax_v2",
+      "when": 1775650469085,
+      "tag": "0000_tiresome_komodo",
       "breakpoints": true
     }
   ]

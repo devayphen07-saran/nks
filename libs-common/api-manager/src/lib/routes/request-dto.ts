@@ -1,46 +1,39 @@
-import type { ApiResponse } from "@nks/shared-types";
+// ─── Route Response ────────────────────────────────────────────────────────
 
-// ── Request DTOs ──────────────────────────────────────────────────────────────
-
-export interface FetchRoutesRequest {
-  // GET request - no body needed
-}
-
-// ── Response DTOs ─────────────────────────────────────────────────────────────
-
-export interface Route {
+export interface RouteResponse {
   id: number;
   routePath: string;
   routeName: string;
-  description: string | null;
-  iconName: string | null;
-  routeType: "screen" | "sidebar" | "tab" | "modal";
-  appCode: string | null;
+  description?: string | null;
+  iconName?: string | null;
+  routeType: "sidebar" | "tab" | "screen" | "modal";
+  routeScope: "admin" | "store";
   isPublic: boolean;
+  isHidden: boolean;
+  parentRouteFk?: number | null;
   fullPath: string;
   sortOrder: number;
-  parentRouteFk: number | null;
-  hasAccess: boolean;
   canView: boolean;
   canCreate: boolean;
   canEdit: boolean;
   canDelete: boolean;
   canExport: boolean;
-  children: Route[];
+  children: RouteResponse[];
 }
 
-export interface Permission {
-  id: number;
-  code: string;
+export interface RouteUserSummary {
+  guuid: string;
   name: string;
-  resource: string;
-  action: string;
-  description?: string | null;
+  email: string;
+  primaryRole: string | null;
 }
 
-export interface RoutesAndPermissionsData {
-  routes: Route[];
-  permissions: Permission[];
+export interface AdminRoutesResponse {
+  user: RouteUserSummary;
+  routes: RouteResponse[];
 }
 
-export type RoutesAndPermissionsResponse = ApiResponse<RoutesAndPermissionsData>;
+export interface StoreRoutesResponse {
+  user: RouteUserSummary;
+  routes: RouteResponse[];
+}

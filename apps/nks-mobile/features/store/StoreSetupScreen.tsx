@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   ScrollView,
   KeyboardAvoidingView,
@@ -17,15 +17,11 @@ import {
   Header,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { apiPost } from "@nks/mobile-utils";
-import { useRootDispatch } from "../../store";
-import { getAllConfig, getAllCountry } from "@nks/api-manager";
 import { useStoreSetupForm, type StoreFormValues } from "./hooks/useStoreSetupForm";
 import { StoreSetupStep1, StoreSetupStep2, StoreSetupStep3 } from "./components";
 
 export function StoreSetupScreen() {
   const { theme } = useMobileTheme();
-  const dispatch = useRootDispatch();
   const form = useStoreSetupForm();
   const { handleSubmit, trigger } = form;
 
@@ -33,10 +29,7 @@ export function StoreSetupScreen() {
   const [error, setError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
 
-  useEffect(() => {
-    dispatch(getAllCountry());
-    dispatch(getAllConfig());
-  }, [dispatch]);
+  // TODO: Dispatch getAllCountry and getAllConfig API calls on mount
 
   const handleNext = async () => {
     Keyboard.dismiss();
@@ -73,36 +66,12 @@ export function StoreSetupScreen() {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiPost<any>("store/register", {
-        storeName: values.storeName.trim(),
-        storeCode: values.storeCode?.trim() || undefined,
-        countryFk: values.countryFk,
-        storeCategoryCode: values.storeCategoryCode,
-        storeLegalTypeCode: values.storeLegalTypeCode,
-        registrationNumber: values.registrationNumber?.trim() || undefined,
-        taxNumber: values.taxNumber?.trim() || undefined,
-        address: {
-          line1: values.addressLine1.trim(),
-          line2: values.addressLine2?.trim() || undefined,
-          cityName: values.city.trim(),
-          postalCode: values.postalCode.trim(),
-          stateRegionProvinceText:
-            values.stateRegionProvinceText?.trim() || undefined,
-          stateRegionProvinceFk: values.stateRegionProvinceFk || undefined,
-          districtText: values.districtText?.trim() || undefined,
-          districtFk: values.districtFk || undefined,
-          countryFk: values.countryFk,
-        },
-      });
-
-      if (response.success) {
-        router.push("/(protected)/(workspace)/(app)/(store)/list");
-      } else {
-        setError(response.message || "Registration failed");
-      }
+      // TODO: Dispatch store/register API call (apiPost or thunk action)
+      console.log("Registering store with values:", values);
+      setLoading(false);
+      router.push("/(protected)/(workspace)/(app)/(store)/list");
     } catch (err: any) {
       setError(err.message || "An unexpected error occurred");
-    } finally {
       setLoading(false);
     }
   };

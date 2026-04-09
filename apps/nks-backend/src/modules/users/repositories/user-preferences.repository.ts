@@ -1,0 +1,71 @@
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { eq, and, isNull } from 'drizzle-orm';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { InjectDb } from '../../../core/database/inject-db.decorator';
+import * as schema from '../../../core/database/schema';
+import type {
+  UserPreferences,
+  NewUserPreferences,
+} from '../../../core/database/schema/user-preferences';
+
+type Db = NodePgDatabase<typeof schema>;
+
+@Injectable()
+export class UserPreferencesRepository {
+  constructor(@InjectDb() private readonly db: Db) {}
+
+  async findByUserId(userId: number): Promise<UserPreferences | null> {
+    const [prefs] = await this.db
+      .select()
+      .from(schema.userPreferences)
+      .where(
+        and(
+          eq(schema.userPreferences.userFk, userId),
+          isNull(schema.userPreferences.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    return prefs ?? null;
+  }
+
+  async create(data: NewUserPreferences): Promise<UserPreferences> {
+    const [prefs] = await this.db
+      .insert(schema.userPreferences)
+      .values(data)
+      .returning();
+
+    if (!prefs) {
+      throw new InternalServerErrorException('Failed to create user preferences');
+    }
+
+    return prefs;
+  }
+
+  async update(
+    userId: number,
+    data: Partial<
+      Omit<UserPreferences, 'id' | 'userFk' | 'createdAt' | 'createdBy'>
+    >,
+  ): Promise<UserPreferences | null> {
+    const [prefs] = await this.db
+      .update(schema.userPreferences)
+      .set({
+        ...data,
+      })
+      .where(eq(schema.userPreferences.userFk, userId))
+      .returning();
+
+    return prefs ?? null;
+  }
+
+  async softDelete(userId: number, deletedBy: number): Promise<void> {
+    await this.db
+      .update(schema.userPreferences)
+      .set({
+        deletedAt: new Date(),
+        deletedBy,
+      })
+      .where(eq(schema.userPreferences.userFk, userId));
+  }
+}

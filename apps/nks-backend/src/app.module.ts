@@ -1,34 +1,31 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
-import { RequestIdMiddleware } from './common/middlewares';
+import { RequestIdMiddleware } from './common/middleware';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './core/database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { UsersModule } from './modules/users/users.module';
-import { StoreModule } from './modules/store/store.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { RoutesModule } from './modules/routes/routes.module';
-import { LookupModule } from './modules/lookup/lookup.module';
 import { LocationModule } from './modules/location/location.module';
+import { LookupsModule } from './modules/lookups/lookups.module';
+import { CodesModule } from './modules/codes/codes.module';
+import { UsersModule } from './modules/users/users.module';
+import { StatusModule } from './modules/status/status.module';
+import { EntityStatusModule } from './modules/entity-status/entity-status.module';
 import { LoggerModule } from './core/logger/logger.module';
-import { StaffInviteModule } from './modules/staff-invite/staff-invite.module';
-import { AdminModule } from './modules/admin/admin.module';
-import { TaxModule } from './modules/tax/tax.module';
-
 @Module({
   imports: [
     ConfigModule,
     DatabaseModule,
+    LoggerModule,
     AuthModule,
-    UsersModule,
-    StoreModule,
     RolesModule,
     RoutesModule,
-    LookupModule,
     LocationModule,
-    LoggerModule,
-    StaffInviteModule,
-    AdminModule,
-    TaxModule,
+    LookupsModule,
+    CodesModule,
+    UsersModule,
+    StatusModule,
+    EntityStatusModule,
   ],
   controllers: [],
   providers: [],

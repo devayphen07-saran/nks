@@ -1,6 +1,10 @@
 import { configureStore } from "@reduxjs/toolkit";
 import { useDispatch, useSelector } from "react-redux";
-import { userProfileSlice, storeSlice, userPreferencesSlice } from "@nks/state-manager";
+import {
+  userProfileSlice,
+  storeSlice,
+  userPreferencesSlice,
+} from "@nks/state-manager";
 import { tokenManager } from "@nks/mobile-utils";
 import {
   authReducer,
@@ -10,13 +14,11 @@ import {
   selectAccess,
   selectAuthContext,
   selectFeatureFlags,
-} from "../slice/authSlice";
-import { authListenerMiddleware } from "../slice/middleware";
-import { setUnauthenticated } from "../slice/authSlice";
+} from "./authSlice";
+import { setUnauthenticated } from "./authSlice";
 import { refreshSession } from "./refreshSession";
 import { configMasterSlice } from "@nks/state-manager";
-import { setupAxiosInterceptors } from "../utils/axios-interceptors";
-import { tokenRefreshManager } from "./TokenRefreshManager";
+import { setupAxiosInterceptors } from "../lib/axios-interceptors";
 
 export const store = configureStore({
   reducer: {
@@ -26,8 +28,7 @@ export const store = configureStore({
     store: storeSlice.reducer,
     config: configMasterSlice.reducer,
   },
-  middleware: (getDefaultMiddleware) =>
-    getDefaultMiddleware().concat(authListenerMiddleware.middleware),
+  middleware: (getDefaultMiddleware) => getDefaultMiddleware(),
 });
 
 export type RootState = ReturnType<typeof store.getState>;

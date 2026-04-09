@@ -3,12 +3,12 @@ import {
   ConfigSelectItem,
   Typography,
 } from "@nks/mobile-ui-components";
-import { useConfig } from "../../store";
+import { useStoreLegalTypes } from "@nks/api-manager";
 
 interface StoreLegalType {
   id: number;
   code: string;
-  name: string;
+  title: string;
 }
 
 interface Props {
@@ -26,12 +26,8 @@ export const StoreLegalTypeSelect = ({
   required,
   errorMessage,
 }: Props) => {
-  const {
-    config: { response: configData, isLoading: loading },
-  } = useConfig();
-
-  // Extract from global config
-  const items: StoreLegalType[] = configData?.storeLegalTypes || [];
+  const { data, isLoading } = useStoreLegalTypes();
+  const items: StoreLegalType[] = data?.data?.data ?? [];
 
   return (
     <SelectGeneric<StoreLegalType>
@@ -41,17 +37,17 @@ export const StoreLegalTypeSelect = ({
       value={value}
       valueKey="code"
       onChange={(item) => onChange(item?.code)}
-      loading={loading}
+      loading={isLoading}
       noDataMessage="No legal types found"
       errorMessage={errorMessage}
       displayRenderer={(selected) => (
         <Typography.Body>
-          {selected ? selected.name : "Select Legal Type..."}
+          {selected ? selected.title : "Select Legal Type..."}
         </Typography.Body>
       )}
       renderItem={(item, onSelect, isSelected) => (
         <ConfigSelectItem
-          title={item.name}
+          title={item.title}
           isSelected={isSelected}
           disabled={false}
           onPress={() => onSelect(item)}

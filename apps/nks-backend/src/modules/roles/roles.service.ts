@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RolesRepository } from './roles.repository';
-import { CreateRoleDto, UpdateRoleDto, CreatePermissionDto } from './dto';
+import { RoleEntityPermissionRepository } from './role-entity-permission.repository';
+import { CreateRoleDto, UpdateRoleDto } from './dto';
+import type { EntityPermission } from './dto/role-response.dto';
 import {
-  ConflictException,
   NotFoundException,
   ForbiddenException,
 } from '../../common/exceptions';
@@ -12,16 +13,25 @@ import { ErrorCode } from '../../common/constants/error-codes.constants';
 export class RolesService {
   private readonly logger = new Logger(RolesService.name);
 
-  constructor(private readonly rolesRepository: RolesRepository) {}
+  constructor(
+    private readonly rolesRepository: RolesRepository,
+    private readonly roleEntityPermissionRepository: RoleEntityPermissionRepository,
+  ) {}
 
   // ─── Roles ────────────────────────────────────────────────────────────────
 
+  /**
+   * List all roles with optional filtering and pagination.
+   */
   async listRoles(
     opts: { search?: string; page?: number; pageSize?: number } = {},
   ) {
     return this.rolesRepository.findAll(opts);
   }
 
+  /**
+   * Get a role by numeric ID.
+   */
   async getRole(id: number) {
     const role = await this.rolesRepository.findById(id);
     if (!role)
@@ -32,26 +42,138 @@ export class RolesService {
     return role;
   }
 
-  async createRole(dto: CreateRoleDto, createdBy: number) {
-    const existing = await this.rolesRepository.findByCode(dto.code);
-    if (existing) {
-      throw new ConflictException({
-        errorCode: ErrorCode.ROLE_ALREADY_EXISTS,
-        message: `Role code '${dto.code}' already exists`,
+  /**
+   * Get a role by GUUID (public-safe identifier).
+   */
+  async getRoleByGuuid(guuid: string) {
+    const role = await this.rolesRepository.findByGuuid(guuid);
+    if (!role)
+      throw new NotFoundException({
+        errorCode: ErrorCode.ROLE_NOT_FOUND,
+        message: 'Role not found',
+      });
+    return role;
+  }
+
+  /**
+   * Get role details with all permissions (entity + route).
+   * Includes record-level security check to verify user owns the store.
+   *
+   * @param guuid - Role GUUID
+   * @param userId - User ID for store ownership verification
+   * @returns Complete role detail with entity and route permissions
+   * @throws ForbiddenException if user does not own the store
+   */
+  async getRoleWithPermissions(
+    guuid: string,
+    userId: number,
+  ): Promise<
+    Awaited<ReturnType<typeof this.rolesRepository.findByGuuid>> & {
+      entityPermissions: Record<string, EntityPermission>;
+      routePermissions: Array<{
+        routeId: number;
+        routePath: string;
+        routeName: string;
+        routeScope: string | null;
+        canView: boolean;
+        canCreate: boolean;
+        canEdit: boolean;
+        canDelete: boolean;
+        canExport: boolean;
+      }>;
+    }
+  > {
+    const role = await this.getRoleByGuuid(guuid);
+
+    // Record-Level Security: Verify user owns the store this role belongs to
+    if (role.storeFk) {
+      const isOwner = await this.rolesRepository.isStoreOwner(userId, role.storeFk);
+      if (!isOwner) {
+        throw new ForbiddenException({
+          errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+          message: 'You do not have access to this role.',
+        });
+      }
+    }
+
+    // Fetch entity permissions
+    const entityPerms = await this.roleEntityPermissionRepository.findByRoleId(
+      role.id,
+    );
+
+    const entityPermissions = entityPerms.reduce(
+      (acc, perm) => {
+        acc[perm.entityCode] = {
+          canView: perm.canView,
+          canCreate: perm.canCreate,
+          canEdit: perm.canEdit,
+          canDelete: perm.canDelete,
+        };
+        return acc;
+      },
+      {} as Record<string, EntityPermission>,
+    );
+
+    const routePermissions = await this.rolesRepository.findRoutePermissionsByRoleId(
+      role.id,
+    );
+
+    return {
+      ...role,
+      entityPermissions,
+      routePermissions,
+    } as any;
+  }
+
+  /**
+   * Create a new custom role for a specific store.
+   * Only store owners can create roles in their stores.
+   */
+  async createRole(userId: number, dto: CreateRoleDto) {
+    // Verify user owns the store
+    const isOwner = await this.rolesRepository.isStoreOwner(userId, dto.storeId);
+    if (!isOwner) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+        message: 'You do not own this store. Only store owners can create roles.',
       });
     }
+
     const created = await this.rolesRepository.create({
       roleName: dto.name,
       code: dto.code,
       description: dto.description,
       sortOrder: dto.sortOrder,
-      isSystem: dto.isSystem,
-      createdBy,
+      storeFk: dto.storeId,
+      createdBy: userId,
     });
-    this.logger.log(`Created role: ${dto.code} by user ${createdBy}`);
+    this.logger.log(`Created role: ${dto.code} for store ${dto.storeId} by user ${userId}`);
     return created;
   }
 
+  /**
+   * Update role by GUUID with store ownership verification.
+   */
+  async updateRoleByGuuid(guuid: string, dto: UpdateRoleDto, userId: number) {
+    const role = await this.getRoleByGuuid(guuid);
+
+    // Verify user owns the store
+    if (role.storeFk) {
+      const isOwner = await this.rolesRepository.isStoreOwner(userId, role.storeFk);
+      if (!isOwner) {
+        throw new ForbiddenException({
+          errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+          message: 'You do not have access to this role.',
+        });
+      }
+    }
+
+    return this.updateRole(role.id, dto, userId);
+  }
+
+  /**
+   * Update a role by ID.
+   */
   async updateRole(id: number, dto: UpdateRoleDto, modifiedBy: number) {
     const role = await this.rolesRepository.findById(id);
     if (!role)
@@ -80,6 +202,38 @@ export class RolesService {
     return updated;
   }
 
+  /**
+   * Update entity permissions for a role.
+   * Replaces existing permissions with new ones for the given entity codes.
+   *
+   * @param roleId - Role ID
+   * @param entityPermissions - Map of entity code to permission flags
+   */
+  async updateEntityPermissions(
+    roleId: number,
+    entityPermissions: Record<string, Partial<EntityPermission>>,
+  ): Promise<void> {
+    for (const [entityCode, perms] of Object.entries(entityPermissions)) {
+      // Delete existing permission for this entity
+      await this.roleEntityPermissionRepository.deleteByRoleAndEntity(
+        roleId,
+        entityCode,
+      );
+
+      // Create new permission
+      await this.roleEntityPermissionRepository.create(roleId, entityCode, {
+        canView: perms.canView ?? false,
+        canCreate: perms.canCreate ?? false,
+        canEdit: perms.canEdit ?? false,
+        canDelete: perms.canDelete ?? false,
+      });
+    }
+    this.logger.debug(`Updated entity permissions for role ${roleId}`);
+  }
+
+  /**
+   * Delete a role by ID.
+   */
   async deleteRole(id: number, deletedBy: number) {
     const role = await this.rolesRepository.findById(id);
     if (!role)
@@ -95,131 +249,5 @@ export class RolesService {
     }
     await this.rolesRepository.softDelete(id, deletedBy);
     this.logger.log(`Deleted role ${id} by user ${deletedBy}`);
-  }
-
-  // ─── Permissions ──────────────────────────────────────────────────────────
-
-  async listPermissions(resource?: string) {
-    return this.rolesRepository.findAllPermissions(resource);
-  }
-
-  async createPermission(dto: CreatePermissionDto) {
-    return this.rolesRepository.createPermission({
-      name: dto.name,
-      code: dto.code,
-      resource: dto.resource,
-      action: dto.action,
-      description: dto.description,
-    });
-  }
-
-  async getRolePermissions(roleId: number) {
-    await this.getRole(roleId); // ensures role exists
-    return this.rolesRepository.findRolePermissions(roleId);
-  }
-
-  async assignPermissionToRole(
-    roleId: number,
-    permissionId: number,
-    assignedBy: number,
-  ) {
-    const [role, perm] = await Promise.all([
-      this.rolesRepository.findById(roleId),
-      this.rolesRepository.findPermissionById(permissionId),
-    ]);
-    if (!role)
-      throw new NotFoundException({
-        errorCode: ErrorCode.ROLE_NOT_FOUND,
-        message: 'Role not found',
-      });
-    if (!perm)
-      throw new NotFoundException({
-        errorCode: ErrorCode.PERMISSION_NOT_FOUND,
-        message: 'Permission not found',
-      });
-    await this.rolesRepository.assignPermissionToRole(
-      roleId,
-      permissionId,
-      assignedBy,
-    );
-  }
-
-  async revokePermissionFromRole(roleId: number, permissionId: number) {
-    await this.getRole(roleId);
-    await this.rolesRepository.revokePermissionFromRole(roleId, permissionId);
-  }
-
-  // ─── User ↔ Role Assignment ───────────────────────────────────────────────
-
-  async assignRoleToUser(userId: number, roleId: number, assignedBy: number) {
-    const role = await this.rolesRepository.findById(roleId);
-    if (!role)
-      throw new NotFoundException({
-        errorCode: ErrorCode.ROLE_NOT_FOUND,
-        message: 'Role not found',
-      });
-    await this.rolesRepository.assignRoleToUser(userId, roleId, assignedBy);
-  }
-
-  /** Temporarily suspend a user's role (isActive=false). Keeps audit trail intact. */
-  async suspendUserRole(userId: number, roleId: number) {
-    return this.rolesRepository.setUserRoleMappingActive(userId, roleId, false);
-  }
-
-  /** Re-enable a previously suspended user role. */
-  async restoreUserRole(userId: number, roleId: number) {
-    return this.rolesRepository.setUserRoleMappingActive(userId, roleId, true);
-  }
-
-  async revokeRoleFromUser(userId: number, roleId: number, assignedBy: number) {
-    const role = await this.rolesRepository.findById(roleId);
-    if (!role)
-      throw new NotFoundException({
-        errorCode: ErrorCode.ROLE_NOT_FOUND,
-        message: 'Role not found',
-      });
-    // Guard: cannot revoke SUPER_ADMIN from yourself
-    if (role.code === 'SUPER_ADMIN' && userId === assignedBy) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.ROLE_CANNOT_DELETE_SYSTEM,
-        message: 'Cannot revoke SUPER_ADMIN from yourself',
-      });
-    }
-    await this.rolesRepository.revokeRoleFromUser(userId, roleId);
-  }
-
-  // ─── Permission Checking ──────────────────────────────────────────────────
-
-  /**
-   * Check if a user has a specific permission
-   * @param userId - The user ID
-   * @param resource - Resource name (e.g., 'customers')
-   * @param action - Action name (e.g., 'view', 'create', 'edit', 'delete')
-   * @returns true if user has the permission, false otherwise
-   */
-  async checkUserPermission(
-    userId: number,
-    resource: string,
-    action: string,
-  ): Promise<boolean> {
-    return this.rolesRepository.checkUserPermission(userId, resource, action);
-  }
-
-  /**
-   * Get all permissions for a user (across all their roles)
-   * @param userId - The user ID
-   * @returns List of permissions
-   */
-  async getUserPermissions(userId: number) {
-    return this.rolesRepository.getUserPermissions(userId);
-  }
-
-  /**
-   * Check if user has SUPER_ADMIN role
-   * @param userId - The user ID
-   * @returns true if user is super admin
-   */
-  async isSuperAdmin(userId: number): Promise<boolean> {
-    return this.rolesRepository.isSuperAdmin(userId);
   }
 }

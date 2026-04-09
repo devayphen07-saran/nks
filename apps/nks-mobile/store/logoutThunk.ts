@@ -1,7 +1,7 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import { signOut } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
-import { logout as logoutAction } from "../slice/authSlice";
+import { logout as logoutAction } from "./authSlice";
 import type { AppDispatch } from "./index";
 
 export const logoutThunk = createAsyncThunk<

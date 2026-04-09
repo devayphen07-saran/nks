@@ -7,12 +7,12 @@ export interface Route {
   description: string | null;
   iconName: string | null;
   routeType: "screen" | "sidebar" | "tab" | "modal";
-  appCode: string | null;
+  routeScope: "admin" | "store";
   isPublic: boolean;
+  isHidden: boolean;
   fullPath: string;
   sortOrder: number;
   parentRouteFk: number | null;
-  hasAccess: boolean;
   canView: boolean;
   canCreate: boolean;
   canEdit: boolean;
@@ -21,21 +21,18 @@ export interface Route {
   children: Route[];
 }
 
-export interface Permission {
-  id: number;
-  code: string;
+export interface RouteUser {
+  guuid: string;
   name: string;
-  resource: string;
-  action: string;
-  description?: string | null;
+  email: string;
+  primaryRole: string | null;
 }
 
 export interface RoutesState {
+  user: RouteUser | null;
   routes: Route[];
-  permissions: Permission[];
   isSynced: boolean;
   fetchedAt: number;
   error: string | null;
   fetchState: APIState;
-  permissionsLoaded: boolean; // Flag to prevent re-fetching on page refresh
 }

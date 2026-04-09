@@ -1,6 +1,6 @@
 import { relations } from 'drizzle-orm';
 import { auditLogs } from './audit-log.table';
-import { users } from '../users';
+import { users } from '../auth/users';
 
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   user: one(users, {

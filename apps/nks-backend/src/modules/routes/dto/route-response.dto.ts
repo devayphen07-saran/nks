@@ -11,14 +11,12 @@ const RouteBaseSchema = z.object({
   routeType: z
     .enum(['screen', 'sidebar', 'modal', 'tab'])
     .describe('Route type'),
-  appCode: z.string().nullable().describe('App code (null = store routes)'),
+  routeScope: z.enum(['admin', 'store']).describe('Route scope'),
   isPublic: z.boolean().describe('Is public route (no auth required)'),
+  isHidden: z.boolean().describe('Hidden from navigation menus but still accessible'),
   parentRouteFk: z.number().nullable().describe('Parent route ID for nesting'),
   fullPath: z.string().describe('Full path including parent paths'),
   sortOrder: z.number().describe('Display order'),
-  hasAccess: z
-    .boolean()
-    .describe('Whether the current user/role can access this route'),
   canView: z.boolean().describe('Can view this route'),
   canCreate: z.boolean().describe('Can create within this route'),
   canEdit: z.boolean().describe('Can edit within this route'),
@@ -35,46 +33,30 @@ const RouteTreeSchema: z.ZodType<RouteTreeSchemaType> = RouteBaseSchema.extend({
   children: z.lazy(() => z.array(RouteTreeSchema)),
 });
 
-const AdminRoutesPermissionsResponseSchema = z.object({
+const UserSummarySchema = z.object({
+  guuid: z.string().describe('Public-safe user identifier'),
+  name: z.string().describe('User display name'),
+  email: z.string().describe('User email'),
+  primaryRole: z.string().nullable().describe('Primary role code (e.g. SUPER_ADMIN, USER)'),
+});
+
+const UserRoutesResponseSchema = z.object({
+  user: UserSummarySchema.describe('Authenticated user summary'),
   routes: z
     .array(RouteTreeSchema)
-    .describe('All routes as a tree with hasAccess per node'),
-  permissions: z
-    .array(
-      z.object({
-        id: z.number().describe('Permission ID'),
-        code: z.string().describe('Permission code (e.g., users.view)'),
-        name: z.string().describe('Permission name'),
-        resource: z.string().describe('Resource (e.g., users)'),
-        action: z.string().describe('Action (e.g., view)'),
-        description: z.string().nullable().describe('Permission description'),
-      }),
-    )
-    .describe('List of permissions'),
+    .describe('Routes the user has access to, as a tree'),
 });
 
 const StoreRoutesResponseSchema = z.object({
+  user: UserSummarySchema.describe('Authenticated user summary'),
   routes: z
     .array(RouteTreeSchema)
-    .describe('All store routes as a tree with hasAccess per node'),
-  permissions: z
-    .array(
-      z.object({
-        id: z.number().describe('Permission ID'),
-        code: z.string().describe('Permission code'),
-        name: z.string().describe('Permission name'),
-        resource: z.string().describe('Resource'),
-        action: z.string().describe('Action'),
-        description: z.string().nullable(),
-      }),
-    )
-    .describe('Permission codes granted to this user in the active store'),
+    .describe('Store routes the user has access to, as a tree'),
 });
 
 export type RouteTreeDto = RouteTreeSchemaType;
-export class AdminRoutesPermissionsResponseDto extends createZodDto(
-  AdminRoutesPermissionsResponseSchema,
-) {}
-export class StoreRoutesResponseDto extends createZodDto(
-  StoreRoutesResponseSchema,
-) {}
+export class UserRoutesResponseDto extends createZodDto(UserRoutesResponseSchema) {}
+export class StoreRoutesResponseDto extends createZodDto(StoreRoutesResponseSchema) {}
+
+// Keep old name as alias so other imports don't break during transition
+export { UserRoutesResponseDto as AdminRoutesPermissionsResponseDto };

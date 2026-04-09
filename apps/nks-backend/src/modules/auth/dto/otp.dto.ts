@@ -23,7 +23,7 @@ export const VerifyOtpSchema = z
   .object({
     phone: phoneField.optional(),
     mobile: phoneField.optional(),
-    otp: z.string().length(4, 'OTP must be 4 digits'),
+    otp: z.string().min(4, 'OTP must be at least 4 digits').max(6, 'OTP must be at most 6 digits'),
     reqId: z.string().min(1, 'reqId is required'),
   })
   .transform((data, ctx) => {
@@ -35,5 +35,13 @@ export const VerifyOtpSchema = z
     return { phone, otp: data.otp, reqId: data.reqId };
   });
 
+export const ResendOtpSchema = z.object({
+  reqId: z
+    .string()
+    .min(1, 'reqId is required')
+    .describe('MSG91 request ID from original send'),
+});
+
 export class SendOtpDto extends createZodDto(SendOtpSchema) {}
 export class VerifyOtpDto extends createZodDto(VerifyOtpSchema) {}
+export class ResendOtpDto extends createZodDto(ResendOtpSchema) {}

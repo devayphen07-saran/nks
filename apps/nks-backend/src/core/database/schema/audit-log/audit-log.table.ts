@@ -9,9 +9,9 @@ import {
   index,
 } from 'drizzle-orm/pg-core';
 import { auditActionTypeEnum, sessionDeviceTypeEnum } from '../enums/enums';
-import { users } from '../users';
-import { store } from '../store';
-import { userSession } from '../user-session';
+import { users } from '../auth/users';
+import { store } from '../store/store';
+import { userSession } from '../auth/user-session';
 import { appendOnlyEntity } from '../base.entity';
 
 export const auditLogs = pgTable(

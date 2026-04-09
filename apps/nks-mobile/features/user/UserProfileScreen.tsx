@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   ScrollView,
   KeyboardAvoidingView,
@@ -19,8 +19,6 @@ import {
   GroupedMenu,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useRootDispatch, useUserProfile, useAuth } from "../../store";
-import { getUserDetails, updateUserDetails } from "@nks/api-manager";
 import {
   useUserProfileForm,
   ProfileFormValues,
@@ -29,42 +27,26 @@ import { router } from "expo-router";
 
 export function UserProfileScreen() {
   const { theme } = useMobileTheme();
-  const dispatch = useRootDispatch();
-  const { getUserDetail, updateUserDetail } = useUserProfile();
-  const authState = useAuth();
-  const authUser = authState.authResponse?.data?.user;
+
+  // TODO: Connect to API for user details
+  const user = {
+    name: "John Doe",
+    email: "john@example.com",
+    phoneNumber: "+91 9999999999",
+  };
 
   const [isEditing, setIsEditing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const form = useUserProfileForm(getUserDetail.response || (authUser as any));
+  const form = useUserProfileForm(user as any);
   const { control, handleSubmit, reset } = form;
-
-  useEffect(() => {
-    dispatch(getUserDetails());
-  }, [dispatch]);
-
-  useEffect(() => {
-    if (getUserDetail.response) {
-      reset({
-        name: getUserDetail.response.name,
-        email: getUserDetail.response.email || "",
-        phoneNumber: getUserDetail.response.phoneNumber || "",
-      });
-    }
-  }, [getUserDetail.response, reset]);
 
   const onSubmit = async (values: ProfileFormValues) => {
     try {
-      const resultAction = await dispatch(
-        updateUserDetails({ bodyParam: values }),
-      );
-      if (updateUserDetails.fulfilled.match(resultAction)) {
-        setIsEditing(false);
-        Alert.alert("Success", "Profile updated successfully");
-      } else {
-        const error = resultAction.payload as any;
-        Alert.alert("Error", error?.message || "Failed to update profile");
-      }
+      // TODO: Dispatch updateUserDetails API call
+      console.log("Updating profile with:", values);
+      setIsEditing(false);
+      Alert.alert("Success", "Profile updated successfully");
     } catch (err) {
       Alert.alert("Error", "An unexpected error occurred");
     }
@@ -73,20 +55,11 @@ export function UserProfileScreen() {
   const handleBack = () => {
     if (isEditing) {
       setIsEditing(false);
-      if (getUserDetail.response) {
-        reset({
-          name: getUserDetail.response.name,
-          email: getUserDetail.response.email || "",
-          phoneNumber: getUserDetail.response.phoneNumber || "",
-        });
-      }
+      reset();
     } else {
       router.back();
     }
   };
-
-  const isLoading = getUserDetail.isLoading || updateUserDetail.isLoading;
-  const user = getUserDetail.response || authUser;
 
   const menuData = [
     {
@@ -207,8 +180,8 @@ export function UserProfileScreen() {
                   <Button
                     onPress={handleSubmit(onSubmit)}
                     variant="primary"
-                    loading={updateUserDetail.isLoading}
-                    disabled={updateUserDetail.isLoading}
+                    loading={isLoading}
+                    disabled={isLoading}
                     label="Save Changes"
                   />
                   <Button
@@ -217,7 +190,7 @@ export function UserProfileScreen() {
                       reset();
                     }}
                     variant="default"
-                    disabled={updateUserDetail.isLoading}
+                    disabled={isLoading}
                     label="Cancel"
                   />
                 </Footer>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import {
   ListRenderItem,
   TouchableOpacity,
@@ -19,11 +19,7 @@ import {
   Column,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useAuth, useRootDispatch } from "../../store";
-import { useSelector } from "react-redux";
-import { getMyStores, getInvitedStores, storeSelect } from "@nks/api-manager";
-import { refreshSession } from "../../store/refreshSession";
-import type { RootState } from "../../store";
+import { useAuth } from "../../store";
 
 interface Store {
   id: number;
@@ -39,13 +35,12 @@ export function StoreListScreen() {
   const authState = useAuth();
   const user = authState.authResponse?.data?.user;
   const navigation = useNavigation();
-  const dispatch = useRootDispatch();
 
-  const storeState = useSelector((state: RootState) => state.store);
-  const myStores = storeState.myStoresState.response ?? [];
-  const invitedStores = storeState.invitedStoresState.response ?? [];
-  const myStoresLoading = storeState.myStoresState.isLoading;
-  const invitedStoresLoading = storeState.invitedStoresState.isLoading;
+  // TODO: Connect to store state from Redux or API
+  const myStores: Store[] = [];
+  const invitedStores: Store[] = [];
+  const myStoresLoading = false;
+  const invitedStoresLoading = false;
 
   const [filter, setFilter] = useState<"all" | "own" | "invited">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -54,10 +49,7 @@ export function StoreListScreen() {
     navigation.dispatch(DrawerActions.openDrawer());
   }, [navigation]);
 
-  useEffect(() => {
-    dispatch(getMyStores());
-    dispatch(getInvitedStores());
-  }, [dispatch]);
+  // TODO: Dispatch getMyStores and getInvitedStores API calls on mount
 
   const displayStores =
     filter === "all"
@@ -75,16 +67,11 @@ export function StoreListScreen() {
 
   const handleSelectStore = useCallback(
     async (store: Store) => {
-      const result = await dispatch(
-        storeSelect({ bodyParam: { storeId: store.id } }),
-      );
-
-      if (result.meta.requestStatus === "fulfilled") {
-        await dispatch(refreshSession());
-        router.replace("/(protected)/(workspace)/(app)/(store)/store");
-      }
+      // TODO: Dispatch storeSelect API call
+      console.log("Selecting store:", store.id);
+      router.replace("/(protected)/(workspace)/(app)/(store)/store");
     },
-    [dispatch],
+    [],
   );
 
   const handleCreateStore = useCallback(() => {
@@ -202,8 +189,8 @@ export function StoreListScreen() {
         renderItem={renderItem}
         listProps={{
           refetch: () => {
-            dispatch(getMyStores());
-            dispatch(getInvitedStores());
+            // TODO: Dispatch getMyStores and getInvitedStores API calls
+            console.log("Refetching stores...");
           },
           addNew: handleCreateStore,
         }}

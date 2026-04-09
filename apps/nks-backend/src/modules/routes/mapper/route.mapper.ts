@@ -1,34 +1,6 @@
-import type { RouteTreeDto } from '../dto/route-response.dto';
-
-type PartialRoute = {
-  id: number;
-  routePath: string;
-  routeName: string;
-  description: string | null;
-  iconName: string | null;
-  routeType: 'sidebar' | 'tab' | 'screen' | 'modal';
-  appCode: string | null;
-  isPublic: boolean;
-  parentRouteFk: number | null;
-  fullPath: string;
-  sortOrder: number | null;
-  // Optional — Drizzle sql<boolean> aliases are not inferred in return types
-  hasAccess?: boolean;
-  canView?: boolean;
-  canCreate?: boolean;
-  canEdit?: boolean;
-  canDelete?: boolean;
-  canExport?: boolean;
-};
-
-type PartialPermission = {
-  id: number;
-  code: string;
-  name: string;
-  resource: string;
-  action: string;
-  description: string | null;
-};
+import type { RouteTreeDto, UserRoutesResponseDto, StoreRoutesResponseDto } from '../dto/route-response.dto';
+import type { PartialRoute } from '../routes.types';
+import type { SessionUser } from '../../auth/interfaces/session-user.interface';
 
 export class RouteMapper {
   static toRouteTreeNode(route: PartialRoute): RouteTreeDto {
@@ -39,12 +11,12 @@ export class RouteMapper {
       description: route.description ?? null,
       iconName: route.iconName ?? null,
       routeType: route.routeType,
-      appCode: route.appCode ?? null,
+      routeScope: route.routeScope,
       isPublic: route.isPublic,
+      isHidden: route.isHidden,
       parentRouteFk: route.parentRouteFk ?? null,
       fullPath: route.fullPath,
       sortOrder: route.sortOrder ?? 0,
-      hasAccess: route.hasAccess ?? false,
       canView: route.canView ?? false,
       canCreate: route.canCreate ?? false,
       canEdit: route.canEdit ?? false,
@@ -54,10 +26,6 @@ export class RouteMapper {
     };
   }
 
-  /**
-   * Converts a flat list of routes into a recursive tree using parentRouteFk.
-   * Nodes with no matching parent are placed at the root level.
-   */
   static buildTree(routes: PartialRoute[]): RouteTreeDto[] {
     const nodeMap = new Map<number, RouteTreeDto>();
     const roots: RouteTreeDto[] = [];
@@ -75,66 +43,41 @@ export class RouteMapper {
       }
     }
 
-    // Sort children by sortOrder at every level (mirrors Java buildRouteHierarchy)
     for (const node of nodeMap.values()) {
       node.children.sort((a, b) => a.sortOrder - b.sortOrder);
     }
     roots.sort((a, b) => a.sortOrder - b.sortOrder);
 
-    // Cascade hasAccess=false from parent to children.
-    // If a parent route is inaccessible, its children are orphaned in the UI
-    // regardless of their own access flag — mark them false for consistency.
-    this.cascadeNoAccess(roots);
-
     return roots;
   }
 
-  /**
-   * Recursively propagates hasAccess=false from parent to all descendants.
-   * A child that has its own access but whose parent is inaccessible would
-   * be orphaned in the UI — mark it false for consistency.
-   */
-  private static cascadeNoAccess(nodes: RouteTreeDto[]): void {
-    for (const node of nodes) {
-      if (!node.hasAccess) {
-        this.setNoAccessRecursive(node.children);
-      } else {
-        this.cascadeNoAccess(node.children);
-      }
-    }
-  }
-
-  private static setNoAccessRecursive(nodes: RouteTreeDto[]): void {
-    for (const node of nodes) {
-      node.hasAccess = false;
-      node.canView = false;
-      node.canCreate = false;
-      node.canEdit = false;
-      node.canDelete = false;
-      node.canExport = false;
-      this.setNoAccessRecursive(node.children);
-    }
-  }
-
-  /** @deprecated Use buildTree() instead */
-  static toResponseDtos(routes: PartialRoute[]): RouteTreeDto[] {
-    return this.buildTree(routes);
-  }
-}
-
-export class PermissionMapper {
-  static toResponseObject(permission: PartialPermission) {
+  static toUserRoutesResponse(
+    user: SessionUser,
+    routes: RouteTreeDto[],
+  ): UserRoutesResponseDto {
     return {
-      id: permission.id,
-      code: permission.code,
-      name: permission.name,
-      resource: permission.resource,
-      action: permission.action,
-      description: permission.description ?? null,
+      user: {
+        guuid: user.guuid,
+        name: user.name,
+        email: user.email,
+        primaryRole: user.primaryRole,
+      },
+      routes,
     };
   }
 
-  static toResponseObjects(permissions: PartialPermission[]) {
-    return permissions.map((p) => this.toResponseObject(p));
+  static toStoreRoutesResponse(
+    user: SessionUser,
+    routes: RouteTreeDto[],
+  ): StoreRoutesResponseDto {
+    return {
+      user: {
+        guuid: user.guuid,
+        name: user.name,
+        email: user.email,
+        primaryRole: user.primaryRole,
+      },
+      routes,
+    };
   }
 }

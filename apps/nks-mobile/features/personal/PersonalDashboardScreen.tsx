@@ -15,7 +15,7 @@ import {
   IconButton,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useAuth, useRootDispatch } from "../../store";
+import { useAuth } from "../../store";
 
 interface Expense {
   id: number;
@@ -29,7 +29,6 @@ export function PersonalDashboardScreen() {
   const { theme } = useMobileTheme();
   const user = useAuth().authResponse?.data?.user;
   const navigation = useNavigation();
-  const dispatch = useRootDispatch();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "food" | "transport">("all");

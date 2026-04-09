@@ -1,8 +1,13 @@
-import { saveSecureItem, getSecureItem, deleteSecureItem } from "./secure-store";
+import {
+  saveSecureItem,
+  getSecureItem,
+  deleteSecureItem,
+} from "./secure-store";
 
 let _token: string | null = null;
 let _onExpired: (() => void) | null = null;
 let _onRefresh: (() => void) | null = null;
+let _expiredFired = false;
 
 const SESSION_KEY = "nks_session";
 
@@ -27,6 +32,7 @@ export const tokenManager = {
   /** Stores the access token in memory only. Never written to disk. */
   set(token: string): void {
     _token = token;
+    _expiredFired = false;
   },
 
   /** Clears the in-memory access token. Call on logout initiation. */
@@ -42,8 +48,10 @@ export const tokenManager = {
     _onExpired = cb;
   },
 
-  /** Called by the Axios interceptor when a 401 response is received. */
+  /** Called by the Axios interceptor when a 401 response is received. Fires once until reset. */
   notifyExpired(): void {
+    if (_expiredFired) return;
+    _expiredFired = true;
     _onExpired?.();
   },
 
@@ -76,7 +84,10 @@ export const tokenManager = {
 
     // Payload too large — strip arrays and force re-fetch on next boot
     const slim: SessionEnvelope<any> = {
-      data: { ...data, access: { ...(data.access ?? {}), permissions: [], roles: [] } },
+      data: {
+        ...data,
+        access: { ...(data.access ?? {}), permissions: [], roles: [] },
+      },
       fetchedAt: 0,
     };
     await saveSecureItem(SESSION_KEY, JSON.stringify(slim));

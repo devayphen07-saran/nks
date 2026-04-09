@@ -1,2 +1,4 @@
-export * from './communication.table';
-export * from './communication.relations';
+export * from './communication';
+export * from './contact-person';
+export * from './notes';
+export * from './staff-invite';

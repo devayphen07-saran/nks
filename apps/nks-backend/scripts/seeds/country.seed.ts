@@ -1,6 +1,13 @@
 import type { Db } from './types';
 import { country } from '../../src/core/database/schema';
 
+/**
+ * Single-Country Configuration: India Only
+ * This system is designed for India operations exclusively.
+ * All location data (states, districts, postal codes) and tax configuration (GST)
+ * are scoped to India. To support other countries, remove this configuration
+ * and restore the multi-country seed data.
+ */
 const data = [
   {
     countryName: 'India',
@@ -12,83 +19,7 @@ const data = [
     isActive: true,
     isSystem: true,
     sortOrder: 1,
-  },
-  {
-    countryName: 'United States',
-    isoCode2: 'US',
-    dialCode: '+1',
-    currencyCode: 'USD',
-    currencySymbol: '$',
-    timezone: 'America/New_York',
-    isActive: false,
-    isSystem: true,
-    sortOrder: 2,
-  },
-  {
-    countryName: 'United Kingdom',
-    isoCode2: 'GB',
-    dialCode: '+44',
-    currencyCode: 'GBP',
-    currencySymbol: '£',
-    timezone: 'Europe/London',
-    isActive: false,
-    isSystem: true,
-    sortOrder: 3,
-  },
-  {
-    countryName: 'Canada',
-    isoCode2: 'CA',
-    dialCode: '+1',
-    currencyCode: 'CAD',
-    currencySymbol: 'C$',
-    timezone: 'America/Toronto',
-    isActive: false,
-    isSystem: true,
-    sortOrder: 4,
-  },
-  {
-    countryName: 'Australia',
-    isoCode2: 'AU',
-    dialCode: '+61',
-    currencyCode: 'AUD',
-    currencySymbol: 'A$',
-    timezone: 'Australia/Sydney',
-    isActive: false,
-    isSystem: true,
-    sortOrder: 5,
-  },
-  {
-    countryName: 'Singapore',
-    isoCode2: 'SG',
-    dialCode: '+65',
-    currencyCode: 'SGD',
-    currencySymbol: 'S$',
-    timezone: 'Asia/Singapore',
-    isActive: false,
-    isSystem: true,
-    sortOrder: 6,
-  },
-  {
-    countryName: 'Germany',
-    isoCode2: 'DE',
-    dialCode: '+49',
-    currencyCode: 'EUR',
-    currencySymbol: '€',
-    timezone: 'Europe/Berlin',
-    isActive: false,
-    isSystem: true,
-    sortOrder: 7,
-  },
-  {
-    countryName: 'France',
-    isoCode2: 'FR',
-    dialCode: '+33',
-    currencyCode: 'EUR',
-    currencySymbol: '€',
-    timezone: 'Europe/Paris',
-    isActive: false,
-    isSystem: true,
-    sortOrder: 8,
+    updatedAt: new Date(),
   },
 ];
 

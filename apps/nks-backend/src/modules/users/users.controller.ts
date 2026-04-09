@@ -1,61 +1,46 @@
-import { Controller, Get, Patch, Body, UseGuards } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiBearerAuth,
-  ApiResponse as SwaggerResponse,
-} from '@nestjs/swagger';
+import { Controller, Get, UseGuards, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import { UpdateProfileDto, UserResponseDto } from './dto';
-import { UserMapper } from './mapper';
 import { AuthGuard } from '../../common/guards/auth.guard';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RBACGuard } from '../../common/guards/rbac.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { ApiResponse } from '../../common/utils/api-response';
+import { ListUsersQueryDto, ListUsersQuerySchema, type UserResponseDto } from './dto';
 
 @ApiTags('Users')
-@ApiBearerAuth()
 @Controller('users')
+@UseGuards(AuthGuard, RBACGuard)
+@ApiBearerAuth()
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   /**
-   * GET /api/users/me
+   * GET /users
+   * List all users. SUPER_ADMIN only.
+   * Supports optional search (name, email, phone) and pagination.
    */
-  @Get('me')
-  @UseGuards(AuthGuard)
-  @ApiOperation({ summary: 'Get current user profile' })
-  @SwaggerResponse({
-    type: UserResponseDto,
-    status: 200,
-    description: 'Profile retrieved successfully',
+  @Get()
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({
+    summary: 'List all users',
+    description:
+      'Returns a paginated list of all users. Supports search by name, email, or phone number.',
   })
-  async getProfile(@CurrentUser('userId') userId: number) {
-    const profile = await this.usersService.getProfile(userId);
-    return ApiResponse.ok(
-      UserMapper.toResponseDto(profile),
-      'Profile retrieved successfully',
-    );
-  }
-
-  /**
-   * PATCH /api/users/me
-   */
-  @Patch('me')
-  @UseGuards(AuthGuard)
-  @ApiOperation({ summary: 'Update current user profile' })
-  @SwaggerResponse({
-    type: UserResponseDto,
-    status: 200,
-    description: 'Profile updated successfully',
-  })
-  async updateProfile(
-    @CurrentUser('userId') userId: number,
-    @Body() dto: UpdateProfileDto,
-  ) {
-    const updated = await this.usersService.updateProfile(userId, dto);
-    return ApiResponse.ok(
-      UserMapper.toResponseDto(updated),
-      'Profile updated successfully',
+  async listUsers(
+    @Query(new ZodValidationPipe(ListUsersQuerySchema)) query: ListUsersQueryDto,
+  ): Promise<ApiResponse<{ items: UserResponseDto[] }>> {
+    const { rows, total } = await this.usersService.listUsers({
+      page: query.page,
+      pageSize: query.pageSize,
+      search: query.search,
+    });
+    return ApiResponse.paginated(
+      rows,
+      query.page,
+      query.pageSize,
+      total,
+      'Users retrieved successfully',
     );
   }
 }

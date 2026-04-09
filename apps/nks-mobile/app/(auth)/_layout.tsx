@@ -1,5 +1,5 @@
 import { Redirect, Stack } from "expo-router";
-import { useAuthGuard } from "../../utils/auth-provider";
+import { useAuthGuard } from "../../lib/auth-provider";
 
 export default function AuthLayout() {
   const { isLoggedIn, isLoading } = useAuthGuard();

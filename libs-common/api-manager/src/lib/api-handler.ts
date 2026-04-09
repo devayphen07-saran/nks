@@ -1,7 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
-import { API } from ".";
+import type {
+  UseQueryOptions,
+  UseMutationOptions,
+  QueryKey,
+} from "@tanstack/react-query";
+import { API } from "./axios-instances";
 
 export enum APIMethod {
   POST = "post",
@@ -20,7 +25,10 @@ type PossibleTypeId =
   | "categoryId"
   | "userId"
   | "outboxEventId"
+  | "storeId"
+  | "storeGuuid"
   | "guuid"
+  | "code"
   | "id";
 
 type PathRecord = Partial<Record<PossibleTypeId, string | undefined>>;
@@ -134,6 +142,50 @@ export class APIData {
         }
       },
     );
+  }
+
+  // ============================================
+  // TanStack Query Support
+  // ============================================
+
+  public queryOptions<TResponse>(
+    params?: RequestParams<any>
+  ): Omit<UseQueryOptions<TResponse>, "enabled"> {
+    return {
+      queryKey: [this.path, params?.pathParam, params?.queryParam].filter(
+        Boolean
+      ) as QueryKey,
+      queryFn: async () => {
+        try {
+          const response = await this.routeMethod<any>(params);
+          return response.data as TResponse;
+        } catch (error) {
+          const err = error as AxiosError;
+          throw err.response?.data ?? error;
+        }
+      },
+    };
+  }
+
+  public mutationOptions<TResponse, TBody = unknown>(
+    config?: Partial<
+      Omit<UseMutationOptions<TResponse, Error, TBody>, "mutationFn">
+    >
+  ): UseMutationOptions<TResponse, Error, TBody> {
+    return {
+      mutationFn: async (data: TBody) => {
+        try {
+          const response = await this.routeMethod<TBody>({
+            bodyParam: data,
+          });
+          return response.data as TResponse;
+        } catch (error) {
+          const err = error as AxiosError;
+          throw err.response?.data ?? error;
+        }
+      },
+      ...config,
+    };
   }
 }
 

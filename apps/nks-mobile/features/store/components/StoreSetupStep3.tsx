@@ -1,8 +1,7 @@
-import { Controller, UseFormReturn } from "react-hook-form";
+import { UseFormReturn } from "react-hook-form";
 import { Column, Input, Row } from "@nks/mobile-ui-components";
 import { View } from "react-native";
 import styled from "styled-components/native";
-import { CountrySelect } from "../../../components/selects";
 import type { StoreFormValues } from "../hooks/useStoreSetupForm";
 
 interface Props {
@@ -10,24 +9,11 @@ interface Props {
 }
 
 export function StoreSetupStep3({ form }: Props) {
-  const { control, formState: { errors } } = form;
+  const { control } = form;
 
   return (
     <FormCard>
       <Column gap="large">
-        <Controller
-          name="countryFk"
-          control={control}
-          render={({ field: { onChange, value } }) => (
-            <CountrySelect
-              required
-              value={value}
-              onChange={onChange}
-              errorMessage={errors.countryFk?.message}
-            />
-          )}
-        />
-
         <Input
           name="addressLine1"
           control={control}
@@ -36,56 +22,40 @@ export function StoreSetupStep3({ form }: Props) {
           required
         />
 
-        <Row gap="medium">
-          <View style={{ flex: 1 }}>
-            <Input
-              name="addressLine2"
-              control={control}
-              label="Address Line 2 (Optional)"
-              placeholder="Apartment, suite, etc."
-            />
-          </View>
-        </Row>
+        <Input
+          name="addressLine2"
+          control={control}
+          label="Address Line 2 (Optional)"
+          placeholder="Apartment, suite, etc."
+        />
 
         <Row gap="medium">
           <View style={{ flex: 1 }}>
             <Input
               name="city"
               control={control}
-              label="City"
+              label="City / Town"
               placeholder="Your city"
               required
             />
           </View>
           <View style={{ flex: 1 }}>
             <Input
-              name="postalCode"
+              name="pincode"
               control={control}
-              label="Postal Code"
-              placeholder="ZIP"
+              label="Pincode"
+              placeholder="6-digit PIN"
+              keyboardType="number-pad"
+              maxLength={6}
               required
             />
           </View>
         </Row>
 
-        <Row gap="medium">
-          <View style={{ flex: 1 }}>
-            <Input
-              name="stateRegionProvinceText"
-              control={control}
-              label="State/Region (Optional)"
-              placeholder="State name"
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Input
-              name="districtText"
-              control={control}
-              label="District (Optional)"
-              placeholder="District"
-            />
-          </View>
-        </Row>
+        {/* TODO: Replace with State/District select dropdowns
+            using backend location API:
+            GET /location/states/list → state picker
+            GET /location/states/:stateId/districts → district picker */}
       </Column>
     </FormCard>
   );

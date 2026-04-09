@@ -1,5 +1,4 @@
 import { ScrollView } from "react-native";
-import { useRouter } from "expo-router";
 import styled from "styled-components/native";
 import {
   Column,
@@ -17,7 +16,6 @@ import { WelcomeBanner, ExpenseRow } from "./components";
 import type { ExpenseItem } from "./components/ExpenseRow";
 
 export function PersonalScreen() {
-  const router = useRouter();
   const { theme } = useMobileTheme();
   const user = useAuth().authResponse?.data?.user;
   const { logout } = useLogout();
@@ -111,20 +109,6 @@ export function PersonalScreen() {
             </Row>
           </Section>
 
-          {/* Debug Button (Dev Only) */}
-          {__DEV__ && (
-            <Section gap="medium">
-              <ActionButton
-                flex={1}
-                onPress={() => router.push("/(protected)/(workspace)/(app)/(debug)/database")}
-              >
-                <LucideIcon name="Database" size={24} color={theme.colorWarning} />
-                <Typography.Caption weight="semiBold" style={{ marginTop: 4, color: theme.colorWarning }}>
-                  🔧 Database Debug
-                </Typography.Caption>
-              </ActionButton>
-            </Section>
-          )}
         </Column>
       </ScrollArea>
     </ScreenContainer>
@@ -142,21 +126,6 @@ const ScrollArea = styled(ScrollView)`
 
 const TouchableOpacity = styled.TouchableOpacity``;
 
-const WelcomeCard = styled.View`
-  background-color: ${({ theme }) => theme.colorPrimary};
-  border-radius: ${({ theme }) => theme.borderRadius.large}px;
-  padding: ${({ theme }) => theme.sizing.xLarge}px;
-`;
-
-const AvatarCircle = styled.View`
-  width: 56px;
-  height: 56px;
-  border-radius: 28px;
-  background-color: ${({ theme }) => theme.colorWhite};
-  align-items: center;
-  justify-content: center;
-`;
-
 const Section = styled(Column)``;
 
 const SectionHeader = styled(Row)``;
@@ -167,19 +136,6 @@ const Table = styled.View`
   overflow: hidden;
   border-width: 1px;
   border-color: ${({ theme }) => theme.colorBorderSecondary};
-`;
-
-const TableRow = styled(Row)`
-  padding: ${({ theme }) => theme.sizing.large}px;
-`;
-
-const IconBox = styled.View`
-  width: 40px;
-  height: 40px;
-  border-radius: 20px;
-  background-color: ${({ theme }) => theme.colorBgLayout};
-  align-items: center;
-  justify-content: center;
 `;
 
 const ActionButton = styled.TouchableOpacity<{ flex: number }>`

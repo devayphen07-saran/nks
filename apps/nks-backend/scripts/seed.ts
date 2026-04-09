@@ -9,74 +9,119 @@ import fs from 'fs';
 import path from 'path';
 
 import {
-  seedSalutations,
   seedCountries,
-  seedStates,
-  seedAdministrativeDivisions,
-  seedPincodes,
-  seedAddressTypes,
+  seedStateTable,
+  seedDistrictTable,
+  seedPincodeTable,
   seedCommunicationTypes,
   seedNotesTypes,
   seedContactPersonTypes,
-  seedDesignations,
-  seedStoreLegalTypes,
-  seedStoreCategories,
   seedVolumes,
   seedEntities,
-  seedRoles,
-  seedPermissions,
+  seedSystemRoles,
   seedRoutes,
-  seedRolePermissionMappings,
   seedRoleRouteMappings,
+  seedRoleEntityPermissions,
   seedTaxAgencies,
   seedTaxNames,
   seedTaxLevels,
   seedTaxLevelMappings,
   seedCommodityCodes,
   seedTaxRateMaster,
+  // Subscription System
+  seedLookupValues,
+  seedCurrencies,
+  seedSubscriptionStatus,
+  // Master Code Table
+  seedCodeTable,
+  // New Lookup Tables
+  seedStoreLegalTypes,
+  seedStoreCategories,
+  seedAddressTypes,
+  seedSalutationTypes,
+  seedDesignationTypes,
+  seedBillingFrequencies,
+  seedNotificationStatuses,
+  seedStaffInviteStatuses,
+  seedTaxRegistrationTypes,
+  seedTaxFilingFrequencies,
+  seedPlanTypes,
+  seedTaxLineStatuses,
+  seedEntityTypes,
 } from './seeds';
 
 const INIT = process.env.INIT === 'true';
 if (!INIT) {
-  console.log('⏭️  Skipping seed — set INIT=true to seed initial data.');
+  console.log('Skipping seed — set INIT=true to seed initial data.');
   process.exit(0);
 }
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool, { schema });
 
+// Location tables are now created by Drizzle migration — no cleanup needed
+
 /**
  * Run SQL migrations from the migrations directory
  */
 async function runMigrations(client: any) {
-  const migrationsDir = path.join(__dirname, '..', 'src', 'core', 'database', 'migrations');
+  const migrationsDir = path.join(
+    __dirname,
+    '..',
+    'src',
+    'core',
+    'database',
+    'migrations',
+  );
 
   if (!fs.existsSync(migrationsDir)) {
     return;
   }
 
-  const migrationFiles = fs.readdirSync(migrationsDir)
-    .filter(file => file.endsWith('.sql'))
+  const migrationFiles = fs
+    .readdirSync(migrationsDir)
+    .filter((file) => file.endsWith('.sql'))
     .sort();
 
   if (migrationFiles.length === 0) {
     return;
   }
 
-  console.log('🔄 Running database migrations...\n');
+  console.log('Running database migrations...\n');
 
   for (const fileName of migrationFiles) {
     const filePath = path.join(migrationsDir, fileName);
     try {
       const sql = fs.readFileSync(filePath, 'utf-8');
-      await client.query(sql);
-      console.log(`  ✅ ${fileName}`);
+      // Split by Drizzle's statement-breakpoint marker and run each statement individually
+      const statements = sql.split('--> statement-breakpoint').map((s: string) => s.trim()).filter(Boolean);
+      for (const stmt of statements) {
+        try {
+          await client.query(stmt);
+        } catch (stmtErr: any) {
+          // Skip "already exists" errors for individual statements
+          if (
+            stmtErr.message.includes('already exists') ||
+            stmtErr.code === '42P07' ||
+            stmtErr.code === '42701'
+          ) {
+            // Silently skip
+          } else {
+            throw stmtErr;
+          }
+        }
+      }
+      console.log(`  ${fileName}`);
     } catch (err: any) {
       // Skip "already exists" errors
-      if (err.message.includes('already exists') || err.code === '42P07' || err.code === '42701') {
-        console.log(`  ⏭️  ${fileName} (already applied)`);
+      if (
+        err.message.includes('already exists') ||
+        err.code === '42P07' ||
+        err.code === '42701'
+      ) {
+        console.log(`  ${fileName} (already applied)`);
       } else {
-        console.warn(`  ⚠️  ${fileName}: ${err.message}`);
+        console.warn(`  ${fileName}: ${err.message}`);
       }
     }
   }
@@ -85,33 +130,47 @@ async function runMigrations(client: any) {
 }
 
 const seeds = [
-  { name: 'salutation',              fn: seedSalutations },
-  { name: 'country',                 fn: seedCountries },
-  { name: 'state',                   fn: seedStates },
-  { name: 'administrative_division', fn: seedAdministrativeDivisions },
-  { name: 'postal_code',             fn: seedPincodes },
-  { name: 'address_type',            fn: seedAddressTypes },
-  { name: 'communication_type',      fn: seedCommunicationTypes },
-  { name: 'notes_type',              fn: seedNotesTypes },
-  { name: 'contact_person_type',     fn: seedContactPersonTypes },
-  { name: 'designation',             fn: seedDesignations },
-  { name: 'store_legal_type',        fn: seedStoreLegalTypes },
-  { name: 'store_category',          fn: seedStoreCategories },
-  { name: 'volumes',                 fn: seedVolumes },
-  { name: 'entity',                  fn: seedEntities },
-  { name: 'roles',                   fn: seedRoles },
-  { name: 'permissions',             fn: seedPermissions },
-  { name: 'routes',                  fn: seedRoutes },
-  { name: 'role_permission_mapping', fn: seedRolePermissionMappings },
-  { name: 'role_route_mapping',      fn: seedRoleRouteMappings },      // ← SUPER_ADMIN admin routes
+  { name: 'country', fn: seedCountries },
+  { name: 'state', fn: seedStateTable },
+  { name: 'district', fn: seedDistrictTable },
+  { name: 'pincode', fn: seedPincodeTable },
+  { name: 'communication_type', fn: seedCommunicationTypes },
+  { name: 'notes_type', fn: seedNotesTypes },
+  { name: 'contact_person_type', fn: seedContactPersonTypes },
+  { name: 'volumes', fn: seedVolumes },
+  { name: 'entity', fn: seedEntities },
+  { name: 'system_roles', fn: seedSystemRoles },
+  { name: 'routes', fn: seedRoutes },
+  { name: 'role_route_mapping', fn: seedRoleRouteMappings }, // ← SUPER_ADMIN admin routes
+  { name: 'role_entity_permission', fn: seedRoleEntityPermissions }, // ← Entity permissions for STAFF, STORE_MANAGER, CASHIER, DELIVERY
+  // New Lookup Tables
+  { name: 'store_legal_type', fn: seedStoreLegalTypes },
+  { name: 'store_category', fn: seedStoreCategories },
+  { name: 'address_type', fn: seedAddressTypes },
+  { name: 'salutation_type', fn: seedSalutationTypes },
+  { name: 'designation_type', fn: seedDesignationTypes },
+  { name: 'billing_frequency', fn: seedBillingFrequencies },
+  { name: 'notification_status', fn: seedNotificationStatuses },
+  { name: 'staff_invite_status', fn: seedStaffInviteStatuses },
+  { name: 'tax_registration_type', fn: seedTaxRegistrationTypes },
+  { name: 'tax_filing_frequency', fn: seedTaxFilingFrequencies },
+  { name: 'plan_type', fn: seedPlanTypes },
+  { name: 'tax_line_status', fn: seedTaxLineStatuses },
+  { name: 'entity_type', fn: seedEntityTypes },
+  // Subscription System
+  { name: 'lookup_values', fn: seedLookupValues }, // ← plan types and frequencies
+  { name: 'currencies', fn: seedCurrencies },
+  { name: 'subscription_status', fn: seedSubscriptionStatus },
   // Tax Engine (runs after country — tax_agencies references country)
-  { name: 'tax_agencies',            fn: seedTaxAgencies },
-  { name: 'tax_names',               fn: seedTaxNames },
-  { name: 'tax_levels',              fn: seedTaxLevels },
-  { name: 'tax_level_mapping',       fn: seedTaxLevelMappings },
+  { name: 'tax_agencies', fn: seedTaxAgencies },
+  { name: 'tax_names', fn: seedTaxNames },
+  { name: 'tax_levels', fn: seedTaxLevels },
+  { name: 'tax_level_mapping', fn: seedTaxLevelMappings },
   // Tax Master Data (commodity codes and rates for multi-country support)
-  { name: 'commodity_codes',         fn: seedCommodityCodes },
-  { name: 'tax_rate_master',         fn: seedTaxRateMaster },
+  { name: 'commodity_codes', fn: seedCommodityCodes },
+  { name: 'tax_rate_master', fn: seedTaxRateMaster },
+  // Master Code Table
+  { name: 'code_table', fn: seedCodeTable },
 ];
 
 async function seed() {
@@ -122,26 +181,28 @@ async function seed() {
 
   client.release();
 
-  console.log('🌱 Starting simplified seed...\n');
+  console.log('Starting seed...\n');
   let success = 0;
   let failed = 0;
 
   for (const { name, fn } of seeds) {
     try {
       const result = await fn(db);
-      const inserted = result.rowCount ?? 0;
-      console.log(`  ✅ ${name}: ${inserted} inserted`);
+      const inserted = (result as any)?.rowCount ?? 0;
+      console.log(`  ${name}: ${inserted} inserted`);
       success++;
     } catch (err: any) {
-      console.error(`  ❌ ${name}: ${err.message}`);
+      console.error(`  ${name}: ${err.message}`);
       failed++;
     }
   }
 
-  console.log(`\n${failed === 0 ? '✅' : '⚠️'}  Seed complete — ${success} succeeded, ${failed} failed`);
+  console.log(`\nSeed complete — ${success} succeeded, ${failed} failed`);
 }
 
-seed().catch(err => {
-  console.error('Seed failed:', err);
-  process.exit(1);
-}).finally(() => pool.end());
+seed()
+  .catch((err) => {
+    console.error('Seed failed:', err);
+    process.exit(1);
+  })
+  .finally(() => pool.end());

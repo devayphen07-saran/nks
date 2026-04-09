@@ -1,6 +1,6 @@
 import type { Db } from './types.js';
-import { administrativeDivision, stateRegionProvince } from '../../src/core/database/schema';
-import { sql } from 'drizzle-orm';
+import { district, state } from '../../src/core/database/schema/index.js';
+import { eq } from 'drizzle-orm';
 
 const DISTRICTS_BY_STATE: Record<string, string[]> = {
   // ─── States ──────────────────────────────────────────────────────────────
@@ -43,64 +43,39 @@ const DISTRICTS_BY_STATE: Record<string, string[]> = {
   'Puducherry': ['Karaikal', 'Mahe', 'Puducherry', 'Yanam'],
 };
 
-export async function seedAdministrativeDivisions(db: Db) {
-  // Ensure table exists
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS administrative_division (
-        id BIGSERIAL PRIMARY KEY,
-        guuid UUID NOT NULL DEFAULT gen_random_uuid(),
-        is_active BOOLEAN NOT NULL DEFAULT true,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        deleted_at TIMESTAMP,
-        sort_order INTEGER DEFAULT 0,
-        is_hidden BOOLEAN NOT NULL DEFAULT false,
-        is_system BOOLEAN NOT NULL DEFAULT false,
-        division_name VARCHAR(100) NOT NULL,
-        division_code VARCHAR(20),
-        division_type VARCHAR(50) NOT NULL DEFAULT 'DISTRICT',
-        description VARCHAR(255),
-        state_region_province_fk BIGINT REFERENCES state_region_province(id) ON DELETE RESTRICT,
-        country_fk BIGINT NOT NULL REFERENCES country(id) ON DELETE RESTRICT,
-        created_by BIGINT,
-        modified_by BIGINT,
-        deleted_by BIGINT
-      )
-    `);
-  } catch (err) {
-    // Table already exists, continue
-  }
-
+/**
+ * Seed the India-specific district table
+ */
+export async function seedDistrictTable(db: Db) {
   // Check if data already exists
-  const count = await db.select({ id: administrativeDivision.id })
-    .from(administrativeDivision)
+  const count = await db.select({ id: district.id })
+    .from(district)
     .limit(1);
 
   if (count.length > 0) {
-    // Data already seeded
     return { rowCount: 0 };
   }
 
+  // Get all states from the new state table
   const stateRows = await db.select({
-    id: stateRegionProvince.id,
-    stateName: stateRegionProvince.stateName,
-    countryFk: stateRegionProvince.countryFk
-  }).from(stateRegionProvince);
+    id: state.id,
+    stateName: state.stateName,
+  }).from(state);
+
   const data: any[] = [];
 
+  // Map districts to state FKs
   for (const stateName in DISTRICTS_BY_STATE) {
-    const state = stateRows.find(s => s.stateName === stateName);
-    if (!state) continue;
+    const stateRow = stateRows.find(s => s.stateName === stateName);
+    if (!stateRow) continue;
 
-    const divisions = DISTRICTS_BY_STATE[stateName];
-    divisions.forEach(divName => {
+    const districts = DISTRICTS_BY_STATE[stateName];
+    districts.forEach(districtName => {
       data.push({
-        divisionName: divName,
-        divisionType: 'DISTRICT', // India uses districts
-        stateRegionProvinceFk: state.id,
-        countryFk: state.countryFk, // India = ID 1
+        districtName: districtName,
+        stateFk: stateRow.id,
         isSystem: true,
+        updatedAt: new Date(),
       });
     });
   }
@@ -112,10 +87,10 @@ export async function seedAdministrativeDivisions(db: Db) {
   for (let i = 0; i < data.length; i += 10) {
     const batch = data.slice(i, i + 10);
     try {
-      const result = await db.insert(administrativeDivision).values(batch).onConflictDoNothing();
+      const result = await db.insert(district).values(batch).onConflictDoNothing();
       totalInserted += result.rowCount ?? 0;
     } catch (err) {
-      // Silently skip batch on error
+      console.error(`Failed to insert district batch at index ${i}:`, err);
     }
   }
 

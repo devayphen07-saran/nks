@@ -1,0 +1,20 @@
+import type { Db } from './types.js';
+import { salutationType } from '../../src/core/database/schema/lookups/salutation-type';
+
+const data = [
+  { code: 'MR', label: 'Mr.', description: 'Mister' },
+  { code: 'MRS', label: 'Mrs.', description: 'Missus' },
+  { code: 'MS', label: 'Ms.', description: 'Miss/Ms' },
+  { code: 'DR', label: 'Dr.', description: 'Doctor' },
+  { code: 'PROF', label: 'Prof.', description: 'Professor' },
+  { code: 'HON', label: 'Hon.', description: 'Honourable' },
+  { code: 'REV', label: 'Rev.', description: 'Reverend' },
+  { code: 'IMAM', label: 'Imam', description: 'Islamic Religious Leader' },
+  { code: 'SRI', label: 'Sri.', description: 'Sri (South Indian)' },
+  { code: 'SHRI', label: 'Shri.', description: 'Shri (Hindi)' },
+  { code: 'SRIMATI', label: 'Srimati', description: 'Srimati (Hindi - Female)' },
+];
+
+export async function seedSalutationTypes(db: Db) {
+  return db.insert(salutationType).values(data).onConflictDoNothing();
+}

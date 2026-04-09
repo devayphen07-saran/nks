@@ -3,12 +3,12 @@ import {
   ConfigSelectItem,
   Typography,
 } from "@nks/mobile-ui-components";
-import { useConfig } from "../../store";
+import { useStoreCategories } from "@nks/api-manager";
 
 interface StoreCategory {
   id: number;
   code: string;
-  name: string;
+  title: string;
 }
 
 interface Props {
@@ -26,12 +26,8 @@ export const StoreCategorySelect = ({
   required,
   errorMessage,
 }: Props) => {
-  const {
-    config: { response: configData, isLoading: loading },
-  } = useConfig();
-
-  // Categorize data from global config
-  const items: StoreCategory[] = configData?.storeCategories || [];
+  const { data, isLoading } = useStoreCategories();
+  const items: StoreCategory[] = data?.data?.data ?? [];
 
   return (
     <SelectGeneric<StoreCategory>
@@ -41,17 +37,17 @@ export const StoreCategorySelect = ({
       value={value}
       valueKey="code"
       onChange={(item) => onChange(item?.code)}
-      loading={loading}
+      loading={isLoading}
       noDataMessage="No categories found"
       errorMessage={errorMessage}
       displayRenderer={(selected) => (
         <Typography.Body>
-          {selected ? selected.name : "Select Category..."}
+          {selected ? selected.title : "Select Category..."}
         </Typography.Body>
       )}
       renderItem={(item, onSelect, isSelected) => (
         <ConfigSelectItem
-          title={item.name}
+          title={item.title}
           isSelected={isSelected}
           disabled={false}
           onPress={() => onSelect(item)}

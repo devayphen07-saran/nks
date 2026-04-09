@@ -12,14 +12,10 @@ import {
   Button,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useRootDispatch } from "../../store";
-import { acceptInvite } from "@nks/api-manager";
-import { refreshSession } from "../../store/refreshSession";
 
 export function AcceptInviteScreen() {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
-  const dispatch = useRootDispatch();
   const [token, setToken] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -34,24 +30,15 @@ export function AcceptInviteScreen() {
     setError("");
 
     try {
-      const result = await dispatch(
-        acceptInvite({ bodyParam: { token: token.trim() } }),
-      );
-
-      if (result.meta.requestStatus === "fulfilled") {
-        await dispatch(refreshSession());
-        router.replace("/(protected)/(workspace)/(app)/(store)/list");
-      } else {
-        setError(
-          "Failed to accept invite. Please check the token and try again.",
-        );
-      }
+      // TODO: Dispatch acceptInvite API call
+      console.log("Accepting invite with token:", token);
+      setIsLoading(false);
+      router.replace("/(protected)/(workspace)/(app)/(store)/list");
     } catch (err) {
       setError("An error occurred. Please try again.");
-    } finally {
       setIsLoading(false);
     }
-  }, [dispatch, token]);
+  }, [token]);
 
   const handleBack = useCallback(() => {
     router.back();

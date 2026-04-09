@@ -1,5 +1,5 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
-import { AuthResponse, login, register, sendOtp, verifyOtp, profileComplete, storeSelect } from "@nks/api-manager";
+import { AuthData, login, register, sendOtp, verifyOtp, signOut, getMe } from "@nks/api-manager";
 import { defaultAPIState } from "@nks/shared-types";
 import { AuthState } from "./model";
 
@@ -12,8 +12,6 @@ const initialState: AuthState = {
   registerState: { ...defaultAPIState },
   sendOtpState: { ...defaultAPIState },
   verifyOtpState: { ...defaultAPIState },
-  profileCompleteState: { ...defaultAPIState },
-  storeSelectState: { ...defaultAPIState },
 };
 
 export const authSlice = createSlice({
@@ -21,7 +19,7 @@ export const authSlice = createSlice({
   initialState,
   reducers: {
     /** Called after a successful login or session restore. */
-    setAuthenticated(state, action: PayloadAction<AuthResponse>) {
+    setAuthenticated(state, action: PayloadAction<AuthData>) {
       state.status = "AUTHENTICATED";
       state.user = action.payload;
       state.error = null;
@@ -52,7 +50,7 @@ export const authSlice = createSlice({
     });
     builder.addCase(login.fulfilled, (state, action) => {
       state.loginState.isLoading = false;
-      const data = action.payload?.data?.data as AuthResponse | undefined;
+      const data = action.payload?.data?.data as AuthData | undefined;
       state.user = data || null;
       state.status = data ? "AUTHENTICATED" : "UNAUTHENTICATED";
       state.loginState.response = data;
@@ -75,7 +73,7 @@ export const authSlice = createSlice({
     });
     builder.addCase(register.fulfilled, (state, action) => {
       state.registerState.isLoading = false;
-      const data = action.payload?.data?.data as AuthResponse | undefined;
+      const data = action.payload?.data?.data as AuthData | undefined;
       state.user = data || null;
       state.status = data ? "AUTHENTICATED" : "UNAUTHENTICATED";
       state.registerState.response = data;
@@ -114,7 +112,7 @@ export const authSlice = createSlice({
     });
     builder.addCase(verifyOtp.fulfilled, (state, action) => {
       state.verifyOtpState.isLoading = false;
-      const data = action.payload?.data?.data as AuthResponse | undefined;
+      const data = action.payload?.data?.data as AuthData | undefined;
       state.user = data || null;
       state.status = data ? "AUTHENTICATED" : "UNAUTHENTICATED";
       state.verifyOtpState.response = data;
@@ -129,41 +127,40 @@ export const authSlice = createSlice({
       state.error = action.error.message ?? "OTP Verification failed";
     });
 
-    /* Profile Complete */
-    builder.addCase(profileComplete.pending, (state) => {
-      state.profileCompleteState.isLoading = true;
-      state.profileCompleteState.hasError = false;
-      state.profileCompleteState.errors = undefined;
+    /* Get Me — refresh user data after session restore */
+    builder.addCase(getMe.fulfilled, (state, action) => {
+      const me = action.payload?.data as Record<string, unknown> | undefined;
+      if (state.user && me) {
+        state.user.user.name = (me.name as string) ?? state.user.user.name;
+        state.user.user.email = (me.email as string) ?? state.user.user.email;
+        state.user.user.emailVerified = (me.emailVerified as boolean) ?? state.user.user.emailVerified;
+        state.user.user.phoneNumber = (me.phoneNumber as string | null) ?? state.user.user.phoneNumber;
+        state.user.user.image = (me.image as string | null) ?? state.user.user.image;
+        if (me.roles) state.user.access.roles = me.roles as typeof state.user.access.roles;
+        if (me.isSuperAdmin !== undefined) state.user.access.isSuperAdmin = me.isSuperAdmin as boolean;
+        if (me.guuid) state.user.user.guuid = me.guuid as string;
+      }
+      state.status = "AUTHENTICATED";
+      state.fetchedAt = Date.now();
     });
-    builder.addCase(profileComplete.fulfilled, (state, action) => {
-      state.profileCompleteState.isLoading = false;
-      state.profileCompleteState.response = action.payload?.data;
-      // If profile update returns a user object, we could sync it here.
-    });
-    builder.addCase(profileComplete.rejected, (state, action) => {
-      state.profileCompleteState.isLoading = false;
-      state.profileCompleteState.hasError = true;
-      state.profileCompleteState.errors = action.payload;
+    builder.addCase(getMe.rejected, (state) => {
+      state.status = "UNAUTHENTICATED";
+      state.user = null;
+      state.fetchedAt = 0;
     });
 
-    /* Store Select */
-    builder.addCase(storeSelect.pending, (state) => {
-      state.storeSelectState.isLoading = true;
-      state.storeSelectState.hasError = false;
-      state.storeSelectState.errors = undefined;
+    /* Sign Out — clear auth state regardless of API result */
+    builder.addCase(signOut.fulfilled, (state) => {
+      state.status = "UNAUTHENTICATED";
+      state.user = null;
+      state.error = null;
+      state.fetchedAt = 0;
     });
-    builder.addCase(storeSelect.fulfilled, (state, action) => {
-      state.storeSelectState.isLoading = false;
-      const access = action.payload?.data?.data?.access;
-      if (state.user && access) {
-        state.user.data.access = access;
-      }
-      state.storeSelectState.response = action.payload?.data;
-    });
-    builder.addCase(storeSelect.rejected, (state, action) => {
-      state.storeSelectState.isLoading = false;
-      state.storeSelectState.hasError = true;
-      state.storeSelectState.errors = action.payload;
+    builder.addCase(signOut.rejected, (state) => {
+      state.status = "UNAUTHENTICATED";
+      state.user = null;
+      state.error = null;
+      state.fetchedAt = 0;
     });
   },
 });

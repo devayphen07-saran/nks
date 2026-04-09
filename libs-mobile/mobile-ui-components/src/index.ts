@@ -19,6 +19,7 @@ export * from "./lib/divider";
 export * from "./lib/password-input";
 export * from "./lib/flat-list-scaffold/FlatListLoading";
 export { default as SelectGeneric } from "./lib/Select/select-generic";
+export { ConfigSelectItem } from "./lib/Select/components/config-select-item";
 export * from "./lib/flat-list-scaffold/FlatListScaffold";
 export * from "./lib/flat-list-scaffold/NoDataContainer";
 export * from "./lib/flat-list-scaffold/ThemedFlatList";

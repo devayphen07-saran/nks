@@ -20,12 +20,17 @@ export class CsrfMiddleware implements NestMiddleware {
 
   // Endpoints that bypass CSRF check (login, register)
   private readonly CSRF_EXEMPT_ROUTES = [
-    '/api/v1/auth/login',
-    '/api/v1/auth/register',
-    '/api/v1/auth/refresh-token',
+    '/api/v1/auth/',
   ];
 
   use(req: Request, res: Response, next: NextFunction) {
+    // Bearer token requests (mobile/API clients) are immune to CSRF by design —
+    // CSRF is a cookie-based attack. Skip validation for these clients entirely.
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      return next();
+    }
+
     // Generate or get existing CSRF token
     const csrfToken = this.getOrCreateCsrfToken(req, res);
 

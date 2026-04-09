@@ -1,13 +1,14 @@
-import { addressType } from '../../src/core/database/schema';
 import type { Db } from './types.js';
+import { addressType } from '../../src/core/database/schema/location/address-type';
 
 const data = [
-  { addressTypeName: 'Home',      addressTypeCode: 'HOME',      sortOrder: 1, isSystem: true },
-  { addressTypeName: 'Office',    addressTypeCode: 'OFFICE',    sortOrder: 2, isSystem: true },
-  { addressTypeName: 'Shipping',  addressTypeCode: 'SHIPPING',  sortOrder: 3, isSystem: true },
-  { addressTypeName: 'Billing',   addressTypeCode: 'BILLING',   sortOrder: 4, isSystem: true },
-  { addressTypeName: 'Store',     addressTypeCode: 'STORE',     sortOrder: 5, isSystem: true },
-  { addressTypeName: 'Warehouse', addressTypeCode: 'WAREHOUSE', sortOrder: 6, isSystem: true },
+  { code: 'HOME', label: 'Home', description: 'Residential Address', isShippingApplicable: true },
+  { code: 'OFFICE', label: 'Office', description: 'Business/Office Address', isShippingApplicable: true },
+  { code: 'BILLING', label: 'Billing', description: 'Billing Address', isShippingApplicable: false },
+  { code: 'SHIPPING', label: 'Shipping', description: 'Shipping Address', isShippingApplicable: true },
+  { code: 'WAREHOUSE', label: 'Warehouse', description: 'Warehouse/Storage', isShippingApplicable: true },
+  { code: 'FACTORY', label: 'Factory', description: 'Manufacturing Facility', isShippingApplicable: false },
+  { code: 'OTHER', label: 'Other', description: 'Other Address Type', isShippingApplicable: true },
 ];
 
 export async function seedAddressTypes(db: Db) {

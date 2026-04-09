@@ -1,64 +1,97 @@
-import { Controller, Get, Param, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiBearerAuth,
-  ApiParam,
-  ApiResponse as SwaggerResponse,
-} from '@nestjs/swagger';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { LocationService } from './location.service';
+import { ApiResponse } from '../../common/utils/api-response';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
-import { ParseIdPipe } from '../../common/pipes/parse-id.pipe';
-import { ApiResponse } from '../../common/utils/api-response';
-import { CountryResponseDto, StateResponseDto, CityResponseDto } from './dto';
-import { LocationMapper } from './mapper';
+import {
+  StateListResponse,
+  DistrictListResponse,
+  PincodeListResponse,
+  PincodeResponse,
+  StateResponse,
+} from './dto/location-response.dto';
 
 @ApiTags('Location')
-@ApiBearerAuth()
-@UseGuards(AuthGuard)
 @Controller('location')
+@UseGuards(AuthGuard)
 export class LocationController {
   constructor(private readonly locationService: LocationService) {}
 
+  /**
+   * GET /location/states/list
+   * Get all states
+   * Public endpoint — no authentication required
+   */
+  @Get('states/list')
   @Public()
-  @Get('countries')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'List all active countries' })
-  @SwaggerResponse({ type: [CountryResponseDto] })
-  async countries() {
-    const data = await this.locationService.getCountries();
-    const mapped = data.map((d) => LocationMapper.toCountryResponseDto(d));
-    return ApiResponse.ok(mapped);
+  @ApiOperation({ summary: 'List all states' })
+  async getStates(): Promise<ApiResponse<StateListResponse>> {
+    const result = await this.locationService.getStates();
+    return ApiResponse.ok(result, 'States retrieved successfully');
   }
 
-  @Get('countries/:countryId/states')
-  @HttpCode(HttpStatus.OK)
-  @ApiParam({
-    name: 'countryId',
-    type: Number,
-    description: 'Country primary key',
-  })
-  @ApiOperation({ summary: 'List all states/provinces for a country' })
-  @SwaggerResponse({ type: [StateResponseDto] })
-  async states(@Param('countryId', ParseIdPipe) countryId: number) {
-    const data = await this.locationService.getStatesByCountry(countryId);
-    const mapped = data.map((d) => LocationMapper.toStateResponseDto(d));
-    return ApiResponse.ok(mapped);
+  /**
+   * GET /location/states/code/:code
+   * Get state by state code (e.g., 'KA' for Karnataka, 'MH' for Maharashtra)
+   * Public endpoint — no authentication required
+   */
+  @Get('states/code/:code')
+  @Public()
+  @ApiOperation({ summary: 'Get state by code' })
+  async getStateByCode(
+    @Param('code') code: string,
+  ): Promise<ApiResponse<StateResponse>> {
+    const result = await this.locationService.getStateByCode(code);
+    return ApiResponse.ok(result, 'State retrieved successfully');
   }
 
-  @Get('states/:stateId/cities')
-  @HttpCode(HttpStatus.OK)
-  @ApiParam({
-    name: 'stateId',
-    type: Number,
-    description: 'State/province primary key',
-  })
-  @ApiOperation({ summary: 'List all cities for a state/province' })
-  @SwaggerResponse({ type: [CityResponseDto] })
-  async cities(@Param('stateId', ParseIdPipe) stateId: number) {
-    const data = await this.locationService.getCitiesByState(stateId);
-    const mapped = data.map((d) => LocationMapper.toCityResponseDto(d));
-    return ApiResponse.ok(mapped);
+  /**
+   * GET /location/states/:stateId/districts
+   * Get all districts for a state
+   * Public endpoint — no authentication required
+   */
+  @Get('states/:stateId/districts')
+  @Public()
+  @ApiOperation({ summary: 'Get districts for a state' })
+  async getDistrictsByState(
+    @Param('stateId') stateId: string,
+  ): Promise<ApiResponse<DistrictListResponse>> {
+    const result = await this.locationService.getDistrictsByState(
+      Number(stateId),
+    );
+    return ApiResponse.ok(result, 'Districts retrieved successfully');
+  }
+
+  /**
+   * GET /location/districts/:districtId/pincodes
+   * Get all pincodes for a district
+   * Public endpoint — no authentication required
+   */
+  @Get('districts/:districtId/pincodes')
+  @Public()
+  @ApiOperation({ summary: 'Get pincodes for a district' })
+  async getPincodesByDistrict(
+    @Param('districtId') districtId: string,
+  ): Promise<ApiResponse<PincodeListResponse>> {
+    const result = await this.locationService.getPincodesByDistrict(
+      Number(districtId),
+    );
+    return ApiResponse.ok(result, 'Pincodes retrieved successfully');
+  }
+
+  /**
+   * GET /location/pincodes/:code
+   * Get pincode details by 6-digit code
+   * Public endpoint — no authentication required
+   */
+  @Get('pincodes/:code')
+  @Public()
+  @ApiOperation({ summary: 'Get pincode by code' })
+  async getPincodeByCode(
+    @Param('code') code: string,
+  ): Promise<ApiResponse<PincodeResponse>> {
+    const result = await this.locationService.getPincodeByCode(code);
+    return ApiResponse.ok(result, 'Pincode retrieved successfully');
   }
 }

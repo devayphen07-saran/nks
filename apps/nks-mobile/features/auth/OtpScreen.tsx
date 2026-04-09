@@ -1,15 +1,8 @@
 import { Platform, KeyboardAvoidingView, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router, useLocalSearchParams } from "expo-router";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { router } from "expo-router";
+import { useEffect, useRef } from "react";
 import styled from "styled-components/native";
-import {
-  sendOtp,
-  verifyOtp,
-  type RequestParams,
-  type SendOtpRequest,
-  type VerifyOtpRequest,
-} from "@nks/api-manager";
 import {
   Button,
   Column,
@@ -18,11 +11,7 @@ import {
   Typography,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useRootDispatch } from "../../store";
-import { persistLogin } from "../../store/persistLogin";
-
-const OTP_LENGTH = 4;
-const RESEND_COOLDOWN = 30;
+import { useOtpVerify } from "./hooks/useOtpVerify";
 
 const CARD_SHADOW = {
   shadowColor: "#000000",
@@ -92,130 +81,49 @@ function maskPhone(phone: string): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function OtpScreen() {
-  const dispatch = useRootDispatch();
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
-  const { phone, reqId: initialReqId } = useLocalSearchParams<{
-    phone: string;
-    reqId: string;
-  }>();
-  const [reqId, setReqId] = useState(initialReqId ?? "");
-
   const inputRefs = useRef<(TextInput | null)[]>([]);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(""));
-  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [isResending, setIsResending] = useState(false);
-  const [countdown, setCountdown] = useState(RESEND_COOLDOWN);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // ✅ Use hook for OTP verification logic
+  const {
+    digits,
+    focusedIndex,
+    countdown,
+    errorMessage,
+    canVerify,
+    isVerifying,
+    isResending,
+    handleDigitChange: hookHandleDigitChange,
+    handleKeyPress: hookHandleKeyPress,
+    handleVerify: hookHandleVerify,
+    handleResend,
+    setFocusedIndex,
+    phone,
+    OTP_LENGTH,
+  } = useOtpVerify();
 
-  useEffect(() => {
-    startCountdown();
-    setTimeout(() => inputRefs.current[0]?.focus(), 300);
-    return () => clearTimer();
-  }, []);
-
-  const clearTimer = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-  };
-
-  const startCountdown = () => {
-    clearTimer();
-    setCountdown(RESEND_COOLDOWN);
-    timerRef.current = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearTimer();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
-  const handleVerify = useCallback(
-    async (otpValue: string) => {
-      if (isVerifying) return;
-      setErrorMessage(null);
-      setIsVerifying(true);
-      try {
-        const verifyParams: RequestParams<VerifyOtpRequest> = {
-          bodyParam: { phone: phone ?? "", otp: otpValue, reqId },
-        };
-        const result = await dispatch(verifyOtp(verifyParams));
-        if (verifyOtp.fulfilled.match(result)) {
-          await persistLogin(result.payload.data, dispatch);
-          router.replace("/(protected)/(workspace)/(onboarding)/account-type");
-        } else {
-          setErrorMessage(
-            (result.payload as any)?.message ??
-              "Invalid OTP. Please try again.",
-          );
-          setDigits(Array(OTP_LENGTH).fill(""));
-          setTimeout(() => inputRefs.current[0]?.focus(), 100);
-        }
-      } catch {
-        setErrorMessage("Verification failed. Please try again.");
-        setDigits(Array(OTP_LENGTH).fill(""));
-        setTimeout(() => inputRefs.current[0]?.focus(), 100);
-      } finally {
-        setIsVerifying(false);
-      }
-    },
-    [dispatch, isVerifying, phone, reqId],
-  );
-
+  // Handle digit change with ref focus management
   const handleDigitChange = (text: string, index: number) => {
+    hookHandleDigitChange(text, index);
     const digit = text.replace(/[^0-9]/g, "").slice(-1);
-    const newDigits = [...digits];
-    newDigits[index] = digit;
-    setDigits(newDigits);
-    setErrorMessage(null);
-
     if (digit && index < OTP_LENGTH - 1) {
       inputRefs.current[index + 1]?.focus();
     }
-
-    if (newDigits.every((d) => d !== "")) {
-      handleVerify(newDigits.join(""));
-    }
   };
 
-  const handleKeyPress = (
-    e: { nativeEvent: { key: string } },
-    index: number,
-  ) => {
+  // Handle key press with ref focus management
+  const handleKeyPress = (e: { nativeEvent: { key: string } }, index: number) => {
+    hookHandleKeyPress(e, index);
     if (e.nativeEvent.key === "Backspace" && !digits[index] && index > 0) {
       inputRefs.current[index - 1]?.focus();
     }
   };
 
-  const handleResend = async () => {
-    if (isResending || countdown > 0) return;
-    setIsResending(true);
-    setErrorMessage(null);
-    setDigits(Array(OTP_LENGTH).fill(""));
-    try {
-      const resendParams: RequestParams<SendOtpRequest> = {
-        bodyParam: { phone: phone ?? "" },
-      };
-      const result = await dispatch(sendOtp(resendParams));
-      if (sendOtp.fulfilled.match(result)) {
-        setReqId(result.payload?.data?.message ?? "");
-        startCountdown();
-      } else {
-        setErrorMessage("Failed to resend OTP. Please try again.");
-      }
-    } catch {
-      setErrorMessage("Failed to resend OTP. Please try again.");
-    } finally {
-      setIsResending(false);
-    }
-  };
-
-  const canVerify = digits.every((d) => d !== "") && !isVerifying;
+  // Auto-focus first input on mount
+  useEffect(() => {
+    setTimeout(() => inputRefs.current[0]?.focus(), 300);
+  }, []);
 
   return (
     <Container>
@@ -343,7 +251,7 @@ export function OtpScreen() {
                 label="Verify & Continue"
                 size="xlg"
                 variant="primary"
-                onPress={() => canVerify && handleVerify(digits.join(""))}
+                onPress={() => canVerify && hookHandleVerify(digits.join(""))}
                 loading={isVerifying}
                 disabled={!canVerify}
                 style={{ borderRadius: 14 }}

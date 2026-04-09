@@ -7,6 +7,12 @@
  */
 
 // ============================================================================
+// DATABASE CONFIGURATION
+// ============================================================================
+
+export const DATABASE_CONNECTION = 'DATABASE_CONNECTION';
+
+// ============================================================================
 // AUTH & SESSION CONFIGURATION
 // ============================================================================
 
@@ -125,16 +131,13 @@ export const OTP_CONSTANTS = {
 // ============================================================================
 
 export const STORE_CONSTANTS = {
-  // Staff Roles (available for assignment)
+  // Staff Roles (custom roles available for assignment to STAFF members)
   STAFF_ROLES: ['STORE_MANAGER', 'CASHIER', 'DELIVERY'] as const,
 
-  // Owner Role
   OWNER_ROLE: 'STORE_OWNER' as const,
-
-  // Admin Role
   ADMIN_ROLE: 'SUPER_ADMIN' as const,
 
-  // Customer Role
+  // Customer Role (non-authenticated access)
   CUSTOMER_ROLE: 'CUSTOMER' as const,
 
   // Staff Invite

@@ -2,7 +2,8 @@ import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { bearer } from 'better-auth/plugins';
 import * as schema from '../../../core/database/schema';
-import { eq } from 'drizzle-orm';
+import { userRoleMapping } from '../../../core/database/schema/auth/user-role-mapping';
+import { eq, and, isNull } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Logger } from '@nestjs/common';
 
@@ -15,7 +16,7 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
       database: { generateId: false },
     },
 
-    // ✅ Bearer token plugin for mobile Bearer auth
+    // Bearer token plugin for mobile Bearer auth
     plugins: [bearer()],
 
     database: drizzleAdapter(db, {
@@ -57,7 +58,7 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
     session: {
       hashSessionToken: true,
       additionalFields: {
-        // ✅ ISSUE #5 FIX: Device tracking fields
+        // Device tracking fields
         deviceId: { type: 'string', required: false },
         deviceName: { type: 'string', required: false },
         deviceType: { type: 'string', required: false },
@@ -93,28 +94,36 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
               const userId = Number(user.id);
               if (isNaN(userId)) return;
 
+              // Check if any SUPER_ADMIN exists in user_role_mapping
               const [existingSuperAdmin] = await db
-                .select({ id: schema.userRoleMapping.id })
-                .from(schema.userRoleMapping)
-                .innerJoin(
-                  schema.roles,
-                  eq(schema.roles.id, schema.userRoleMapping.roleFk),
+                .select({ id: userRoleMapping.id })
+                .from(userRoleMapping)
+                .innerJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
+                .where(
+                  and(
+                    eq(schema.roles.code, 'SUPER_ADMIN'),
+                    isNull(userRoleMapping.storeFk),
+                    isNull(userRoleMapping.deletedAt),
+                    eq(userRoleMapping.isActive, true),
+                  ),
                 )
-                .where(eq(schema.roles.code, 'SUPER_ADMIN'))
                 .limit(1);
 
               if (!existingSuperAdmin) {
+                // Assign SUPER_ADMIN role to first user
                 const [superAdminRole] = await db
                   .select({ id: schema.roles.id })
                   .from(schema.roles)
-                  .where(eq(schema.roles.code, 'SUPER_ADMIN'))
+                  .where(and(eq(schema.roles.code, 'SUPER_ADMIN'), isNull(schema.roles.storeFk)))
                   .limit(1);
 
                 if (superAdminRole) {
-                  await db.insert(schema.userRoleMapping).values({
+                  await db.insert(userRoleMapping).values({
                     userFk: userId,
                     roleFk: superAdminRole.id,
-                    assignedBy: userId,
+                    isPrimary: true,
+                    isActive: true,
+                    assignedAt: new Date(),
                   });
                   Logger.log(
                     `First user (ID: ${userId}) assigned SUPER_ADMIN`,

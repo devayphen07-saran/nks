@@ -1,44 +1,25 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { UsersRepository } from './users.repository';
-import { UpdateProfileDto } from './dto';
-import * as schema from '../../core/database/schema';
-
-type User = typeof schema.users.$inferSelect;
+import { UserMapper } from './mapper/user.mapper';
+import type { UserResponseDto } from './dto';
+import { PaginationValidator } from './validators';
 
 @Injectable()
 export class UsersService {
   constructor(private readonly usersRepository: UsersRepository) {}
 
-  /**
-   * Get user profile by ID.
-   * Returns raw internal User. The Controller is responsible for stripping sensitive info.
-   */
-  async getProfile(userId: number): Promise<User> {
-    const user = await this.usersRepository.findById(userId);
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
+  async listUsers(opts: {
+    page: number;
+    pageSize: number;
+    search?: string;
+  }): Promise<{ rows: UserResponseDto[]; total: number }> {
+    // SECURITY: Validate pagination using PaginationValidator
+    PaginationValidator.validatePagination(opts.page, opts.pageSize);
 
-    return user;
-  }
-
-  /**
-   * Update the authenticated user's profile.
-   * Only allows safe, user-editable fields.
-   */
-  async updateProfile(userId: number, dto: UpdateProfileDto): Promise<User> {
-    const user = await this.usersRepository.findById(userId);
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    const updated = await this.usersRepository.update(userId, {
-      name: dto.name,
-      languagePreference: dto.languagePreference,
-      whatsappOptedIn: dto.whatsappOptedIn,
-      image: dto.image,
-    });
-
-    return updated;
+    const { rows, total } = await this.usersRepository.findAll(opts);
+    return {
+      rows: rows.map(UserMapper.toDto),
+      total,
+    };
   }
 }

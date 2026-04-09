@@ -59,6 +59,13 @@ export function Header({ config, className }: HeaderProps) {
           </>
         )}
 
+        {/* Page Title */}
+        {config.pageTitle && (
+          <div className="hidden lg:flex min-w-0">
+            <h1 className="text-lg font-semibold truncate">{config.pageTitle}</h1>
+          </div>
+        )}
+
         {/* Search */}
         {config.showSearch && (
           <div className="hidden md:flex">

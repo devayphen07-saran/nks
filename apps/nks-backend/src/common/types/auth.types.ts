@@ -60,29 +60,6 @@ export interface UserRoleWithStore extends RoleInfo {
   storeName: string;
 }
 
-export interface PermissionInfo {
-  id: number;
-  code: string;
-  name: string;
-  description?: string;
-  category?: string;
-  resource?: string;
-}
-
-export interface RolePermissions {
-  roleId: number;
-  roleCode: string;
-  permissions: PermissionInfo[];
-}
-
-export interface UserPermissionContext {
-  userId: number;
-  roles: RoleInfo[];
-  permissions: Record<number, PermissionInfo[]>; // storeId -> permissions
-  directPermissions: Record<number, PermissionInfo[]>; // storeId -> direct permissions
-  primaryRole: string | null;
-  activeStore?: number;
-}
 
 // ============================================================================
 // DEVICE TRACKING TYPES
@@ -150,8 +127,6 @@ export interface AccessControl {
   isSuperAdmin: boolean;
   activeStoreId: number | null;
   roles: RoleInfo[];
-  initialRoute: string;
-  permissions?: PermissionInfo[];
 }
 
 // ============================================================================

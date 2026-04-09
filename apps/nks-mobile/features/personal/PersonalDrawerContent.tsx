@@ -11,8 +11,7 @@ import {
   Column,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { RootState, useRootDispatch, useUserProfile } from "../../store";
-import { logoutThunk } from "../../store/logoutThunk";
+import { useUserProfile } from "../../store";
 import type { DrawerContentComponentProps } from "@react-navigation/drawer";
 import { router } from "expo-router";
 
@@ -27,7 +26,6 @@ interface MenuCategory {
 
 export function PersonalDrawerContent(props: DrawerContentComponentProps) {
   const { navigation } = props;
-  const dispatch = useRootDispatch();
   const { theme } = useMobileTheme();
 
   const {
@@ -64,8 +62,9 @@ export function PersonalDrawerContent(props: DrawerContentComponentProps) {
 
   const handleLogout = useCallback(() => {
     navigation.closeDrawer();
-    dispatch(logoutThunk());
-  }, [dispatch, navigation]);
+    // TODO: Integrate logout API call here
+    router.replace("/(auth)/phone");
+  }, [navigation]);
 
   const handleNavigate = useCallback(
     (route: string) => {

@@ -20,20 +20,15 @@ export const notificationChannelEnum = pgEnum('notification_channel', [
   'BOTH',
 ]);
 
-export const notificationStatusEnum = pgEnum('notification_status', [
-  'PENDING',
-  'SENT',
-  'DELIVERED',
-  'FAILED',
-  'READ',
-]);
+// notificationStatusEnum intentionally removed — notification_status is now a lookup table
+// for extensibility (isTerminal, isError, isRetryable flags). See notification-status.table.ts
 
-export const staffInviteStatusEnum = pgEnum('staff_invite_status', [
-  'PENDING',
-  'ACCEPTED',
-  'REVOKED',
-  'EXPIRED',
-]);
+// staffInviteStatusEnum intentionally removed — staff_invite_status is now a lookup table
+// for extensibility (isTerminal flag). See staff-invite-status.table.ts
+
+// admin = platform/dashboard routes (SUPER_ADMIN, USER)
+// store = store management routes (STORE_OWNER, STAFF)
+export const routeScopeEnum = pgEnum('route_scope', ['admin', 'store']);
 
 // sidebar = desktop nav item, tab = mobile bottom tab, screen = navigable page (no icon required),
 // modal  = overlay/sheet — typically no nav icon
@@ -126,22 +121,6 @@ export const authMethodEnum = pgEnum('auth_method', [
   'GOOGLE',
 ]);
 
-export const loginStatusEnum = pgEnum('login_status', [
-  'SUCCESS', // Successful login
-  'FAILED', // Failed login attempt (invalid credentials)
-  'BLOCKED', // Account locked after failed attempts
-]);
+// Role types are now handled via roles.roleType column (PLATFORM | STORE_SYSTEM | STORE_CUSTOM)
+// and user_role_mapping table — no PostgreSQL enums needed for roles.
 
-// administrative_division: type of administrative subdivision
-// Supports all countries' division types (not India-specific)
-export const divisionTypeEnum = pgEnum('division_type', [
-  'DISTRICT', // India
-  'COUNTY', // USA, UK, Canada
-  'LANDKREIS', // Germany
-  'PREFECTURE', // Japan
-  'DEPARTMENT', // France, Colombia
-  'MUNICIPALITY', // Canada, Brazil
-  'BOROUGH', // UK (London)
-  'REGION', // Generic fallback
-  'PROVINCE', // Generic fallback
-]);

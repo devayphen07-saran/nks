@@ -1,18 +1,37 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
+/**
+ * NAMING CONVENTION:
+ * - DTOs and services use: storeId (semantic, user-facing)
+ * - Database schema uses: storeFk (indicates foreign key relationship)
+ * - Repository handles conversion between naming conventions
+ */
+
 // ─── Create Role ─────────────────────────────────────────────────────────────
+// Custom roles are store-scoped. Roles table now ONLY contains store-scoped roles.
+// System roles (SUPER_ADMIN, USER, STORE_OWNER, STAFF) are defined as enums, not here.
 export const CreateRoleSchema = z.object({
+  storeId: z.number().int().positive('Store ID is required for all custom roles'),
   name: z.string().min(2).max(100),
   code: z.string().min(2).max(30).toUpperCase(),
   description: z.string().max(255).optional(),
   sortOrder: z.number().int().optional(),
-  isSystem: z.boolean().optional().default(false),
 });
 export class CreateRoleDto extends createZodDto(CreateRoleSchema) {}
 
 // ─── Update Role ─────────────────────────────────────────────────────────────
-export const UpdateRoleSchema = CreateRoleSchema.partial().omit({ code: true });
+export const UpdateRoleSchema = CreateRoleSchema.partial().omit({ code: true }).extend({
+  entityPermissions: z.record(z.string(), z.record(z.string(), z.boolean())).optional(),
+  routePermissions: z.array(z.object({
+    routeId: z.number(),
+    canView: z.boolean().optional(),
+    canCreate: z.boolean().optional(),
+    canEdit: z.boolean().optional(),
+    canDelete: z.boolean().optional(),
+    canExport: z.boolean().optional(),
+  })).optional(),
+});
 export class UpdateRoleDto extends createZodDto(UpdateRoleSchema) {}
 
 // ─── Assign Role to User ─────────────────────────────────────────────────────
@@ -21,19 +40,3 @@ export const AssignRoleSchema = z.object({
   roleId: z.number().int().positive(),
 });
 export class AssignRoleDto extends createZodDto(AssignRoleSchema) {}
-
-// ─── Assign Permission to Role ────────────────────────────────────────────────
-export const AssignPermissionSchema = z.object({
-  permissionId: z.number().int().positive(),
-});
-export class AssignPermissionDto extends createZodDto(AssignPermissionSchema) {}
-
-// ─── Create Permission ───────────────────────────────────────────────────────
-export const CreatePermissionSchema = z.object({
-  name: z.string().min(2).max(100),
-  code: z.string().min(2).max(100), // e.g. 'users:read', 'company:write'
-  resource: z.string().max(50), // e.g. 'users', 'company', 'roles'
-  action: z.string().max(20), // e.g. 'read', 'write', 'delete'
-  description: z.string().max(255).optional(),
-});
-export class CreatePermissionDto extends createZodDto(CreatePermissionSchema) {}

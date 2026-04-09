@@ -1,24 +1,24 @@
-import { UserResponseDto } from '../dto';
-import type { User } from '../../../core/database/schema';
+import type { UserResponseDto, UserRow } from '../dto';
 
 export class UserMapper {
-  static toResponseDto(entity: User): UserResponseDto {
+  static toDto(row: UserRow): UserResponseDto {
     return {
-      id: entity.id,
-      guuid: entity.guuid,
-      name: entity.name,
-      email: entity.email,
-      emailVerified: entity.emailVerified,
-      image: entity.image,
-      phoneNumber: entity.phoneNumber,
-      phoneNumberVerified: entity.phoneNumberVerified,
-      kycLevel: String(entity.kycLevel),
-      languagePreference: entity.languagePreference,
-      whatsappOptedIn: entity.whatsappOptedIn,
-      loginCount: entity.loginCount,
-      isBlocked: entity.isBlocked,
-      createdAt: entity.createdAt?.toISOString() ?? null,
-      updatedAt: entity.updatedAt?.toISOString() ?? null,
+      guuid: row.guuid,
+      name: row.name,
+      email: row.email,
+      emailVerified: row.emailVerified,
+      phoneNumber: row.phoneNumber,
+      phoneNumberVerified: row.phoneNumberVerified,
+      image: row.image,
+      isBlocked: row.isBlocked,
+      blockedReason: row.blockedReason,
+      primaryLoginMethod: row.primaryLoginMethod,
+      loginCount: row.loginCount,
+      lastLoginAt: row.lastLoginAt?.toISOString() ?? null,
+      profileCompleted: row.profileCompleted,
+      isActive: row.isActive,
+      createdAt: row.createdAt.toISOString(),
+      primaryRole: row.primaryRole,
     };
   }
 }

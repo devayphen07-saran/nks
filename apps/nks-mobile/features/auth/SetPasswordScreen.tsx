@@ -1,7 +1,5 @@
 import { Platform, KeyboardAvoidingView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
-import { useState } from "react";
 import styled from "styled-components/native";
 import {
   Button,
@@ -11,8 +9,7 @@ import {
   Typography,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { profileComplete } from "@nks/api-manager";
-import { useRootDispatch, useAuth } from "../../store";
+import { useSetPassword } from "./hooks/useSetPassword";
 
 const CARD_SHADOW = {
   shadowColor: "#000000",
@@ -23,49 +20,24 @@ const CARD_SHADOW = {
 } as const;
 
 export function SetPasswordScreen() {
-  const dispatch = useRootDispatch();
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
-  const authState = useAuth();
 
-  const [password, setPasswordValue] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const handleSubmit = async () => {
-    if (isLoading) return;
-    if (password.length < 8) {
-      setErrorMessage("Password must be at least 8 characters");
-      return;
-    }
-    if (password !== confirm) {
-      setErrorMessage("Passwords do not match");
-      return;
-    }
-    setErrorMessage(null);
-    setIsLoading(true);
-    try {
-      const userName = authState.authResponse?.data?.user?.name || "User";
-      const result = await dispatch(
-        profileComplete({ bodyParam: { name: userName, password } }),
-      );
-      if (profileComplete.fulfilled.match(result)) {
-        router.replace("/(protected)/(workspace)");
-      } else {
-        setErrorMessage(
-          (result.payload as any)?.message ??
-            "Failed to set password. Please try again.",
-        );
-      }
-    } catch {
-      setErrorMessage("Failed to set password. Please try again.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // ✅ Use hook for password setup logic
+  const {
+    password,
+    setPassword,
+    confirm,
+    setConfirm,
+    showPassword,
+    setShowPassword,
+    showConfirm,
+    setShowConfirm,
+    isLoading,
+    errorMessage,
+    handleSubmit,
+    handleSkip,
+  } = useSetPassword();
 
   return (
     <Container>
@@ -112,10 +84,7 @@ export function SetPasswordScreen() {
                   <PasswordRow>
                     <PasswordInput
                       value={password}
-                      onChangeText={(t) => {
-                        setErrorMessage(null);
-                        setPasswordValue(t);
-                      }}
+                      onChangeText={setPassword}
                       placeholder="Min. 8 characters"
                       placeholderTextColor={theme.colorTextTertiary}
                       secureTextEntry={!showPassword}
@@ -137,10 +106,7 @@ export function SetPasswordScreen() {
                   <PasswordRow>
                     <PasswordInput
                       value={confirm}
-                      onChangeText={(t) => {
-                        setErrorMessage(null);
-                        setConfirm(t);
-                      }}
+                      onChangeText={setConfirm}
                       placeholder="Re-enter password"
                       placeholderTextColor={theme.colorTextTertiary}
                       secureTextEntry={!showConfirm}
@@ -177,9 +143,7 @@ export function SetPasswordScreen() {
                   onPress={handleSubmit}
                   loading={isLoading}
                 />
-                <SkipButton
-                  onPress={() => router.replace("/(protected)/(workspace)")}
-                >
+                <SkipButton onPress={handleSkip}>
                   <Typography.Body
                     weight="semiBold"
                     color={theme.colorTextSecondary}

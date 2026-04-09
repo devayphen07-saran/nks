@@ -1,97 +1,118 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
-const PublicUserSchema = z.object({
-  id: z.string().describe('User ID'),
-  name: z.string().nullable().describe('User name'),
-  email: z.string().nullable().describe('User email'),
-  emailVerified: z.boolean().describe('Is email verified'),
-  phoneNumber: z.string().nullable().describe('User phone number'),
-  phoneNumberVerified: z.boolean().describe('Is phone verified'),
-  image: z.string().nullable().describe('User profile image'),
-  lastLoginAt: z.string().nullable().describe('Last login timestamp'),
-  lastLoginIp: z.string().nullable().describe('Last login IP address'),
+// ─── User Response Schema ──────────────────────────────────────────────────
+
+const AuthUserSchema = z.object({
+  id: z.string(),
+  guuid: z.string(),
+  name: z.string().nullable(),
+  email: z.string().nullable(),
+  emailVerified: z.boolean(),
+  phoneNumber: z.string().nullable(),
+  phoneNumberVerified: z.boolean(),
+  image: z.string().nullable(),
+  lastLoginAt: z.string().nullable(),
+  lastLoginIp: z.string().nullable(),
 });
 
-const SessionMetadataSchema = z.object({
-  sessionId: z.string().describe('Unique session ID'),
-  tokenType: z.string().default('Bearer').describe('Token type'),
-  accessToken: z.string().describe('JWT access token'),
-  issuedAt: z.string().describe('Token issued timestamp'),
-  expiresAt: z.string().describe('Token expiration timestamp'),
-  refreshToken: z.string().describe('Refresh token for renewing access'),
-  refreshExpiresAt: z.string().describe('Refresh token expiration'),
-  mechanism: z
-    .enum(['password', 'otp', 'oauth', 'token'])
-    .describe('Authentication mechanism used'),
-  absoluteExpiry: z.string().describe('Absolute session expiry'),
+// ─── Session Response Schema ───────────────────────────────────────────────
+
+const AuthSessionSchema = z.object({
+  sessionId: z.string(),
+  tokenType: z.string(),
+  sessionToken: z
+    .string()
+    .describe(
+      'BetterAuth opaque session token. Usage: (1) WEB: automatically sent via httpOnly cookie for ONLINE API calls; (2) MOBILE: send via Authorization: Bearer header for ONLINE API calls only. Do NOT use for offline JWT verification.',
+    ),
+  issuedAt: z.string(),
+  expiresAt: z.string(),
+  refreshToken: z
+    .string()
+    .describe(
+      'Opaque refresh token (30 days). Usage: WEB sends via httpOnly cookie, MOBILE keeps in secure storage and sends in request body for POST /auth/refresh-token.',
+    ),
+  refreshExpiresAt: z.string(),
+  mechanism: z.enum(['password', 'otp', 'oauth', 'token']),
+  absoluteExpiry: z.string(),
+  defaultStore: z
+    .object({
+      guuid: z.string(),
+    })
+    .nullable(),
+  jwtToken: z
+    .string()
+    .optional()
+    .describe(
+      'RS256 JWT (1-hour expiry). MOBILE ONLY: for OFFLINE JWT verification with JWKS public keys. Contains embedded roles + stores for offline permission checks. Do NOT send this to API as Authorization header.',
+    ),
 });
+
+// ─── Auth Context Response Schema ──────────────────────────────────────────
 
 const AuthContextSchema = z.object({
-  method: z
-    .enum(['password', 'otp', 'oauth'])
-    .describe('Authentication method'),
-  mfaVerified: z.boolean().describe('Is MFA verified'),
-  mfaRequired: z.boolean().describe('Is MFA required'),
-  trustLevel: z
-    .enum(['standard', 'high', 'unverified'])
-    .describe('Device/session trust level'),
-  stepUpRequired: z.boolean().describe('Does step-up authentication required'),
+  method: z.enum(['password', 'otp', 'oauth']),
+  mfaVerified: z.boolean(),
+  mfaRequired: z.boolean(),
+  trustLevel: z.enum(['standard', 'high', 'unverified']),
+  stepUpRequired: z.boolean(),
 });
 
-const UserRoleEntrySchema = z.object({
-  roleCode: z
-    .enum([
-      'SUPER_ADMIN',
-      'STORE_OWNER',
-      'STAFF',
-      'STORE_MANAGER',
-      'CASHIER',
-      'DELIVERY',
-      'CUSTOMER',
-    ])
-    .describe('Role code'),
-  storeId: z.number().nullable().describe('Store ID if applicable'),
-  storeName: z.string().nullable().describe('Store name'),
-  isPrimary: z.boolean().describe('Is this the primary role'),
-  assignedAt: z.string().describe('When role was assigned'),
-  expiresAt: z.string().nullable().describe('Role expiration date'),
+// ─── Access Response Schema ───────────────────────────────────────────────
+
+const AuthAccessSchema = z.object({
+  isSuperAdmin: z.boolean(),
+  activeStoreId: z.number().nullable(),
+  roles: z.array(
+    z.object({
+      roleCode: z.string(),
+      storeId: z.number().nullable(),
+      storeName: z.string().nullable(),
+      isPrimary: z.boolean(),
+      assignedAt: z.string(),
+      expiresAt: z.string().nullable(),
+    }),
+  ),
 });
 
-const AccessControlSchema = z.object({
-  isSuperAdmin: z
-    .boolean()
-    .describe('Whether the user has absolute administrative privileges'),
-  activeStoreId: z.number().nullable().describe('Currently active store ID'),
-  roles: z.array(UserRoleEntrySchema).describe('All roles assigned to user'),
-  initialRoute: z
-    .string()
-    .describe('Initial route to redirect user to after login'),
-});
+// ─── Feature Flags Response Schema ────────────────────────────────────────
 
 const FeatureFlagsSchema = z.record(z.string(), z.boolean());
 
-export class AccessControlDto extends createZodDto(AccessControlSchema) {}
-export class AuthContextDto extends createZodDto(AuthContextSchema) {}
+// ─── Auth Data Schema (unified response) ──────────────────────────────────
 
-export const AuthDataSchema = z.object({
-  user: PublicUserSchema,
-  session: SessionMetadataSchema,
+const AuthDataSchema = z.object({
+  user: AuthUserSchema,
+  session: AuthSessionSchema,
   authContext: AuthContextSchema,
-  access: AccessControlSchema,
+  access: AuthAccessSchema,
   flags: FeatureFlagsSchema,
 });
 
-export const ApiMetadataSchema = z.object({
-  requestId: z.string().describe('Unique request identifier'),
-  traceId: z.string().describe('Trace ID for distributed tracing'),
-  apiVersion: z.string().describe('API version'),
-  status: z.enum(['success', 'error', 'partial']).describe('Response status'),
-  timestamp: z.string().describe('Response timestamp'),
-});
+// ─── Exported DTOs ────────────────────────────────────────────────────────
+// Note: These are the data payloads that go inside ApiResponse<T>.data
+// ApiResponse wraps these with { status, message, data: T }
 
-export const AuthResponseSchema = ApiMetadataSchema.extend({
-  data: AuthDataSchema,
-});
+export class AuthResponseDto extends createZodDto(AuthDataSchema) {}
+export class MeResponseDto extends createZodDto(AuthUserSchema) {}
+export class RefreshTokenResponseDto extends createZodDto(AuthSessionSchema) {}
 
-export class AuthResponseDto extends createZodDto(AuthResponseSchema) {}
+/**
+ * Full auth response envelope returned by the mapper.
+ * Includes metadata (requestId, traceId) + nested AuthData.
+ * This is the shape that goes into ApiResponse.ok(result).
+ */
+export interface AuthResponseEnvelope {
+  requestId: string;
+  traceId: string;
+  apiVersion: string;
+  timestamp: string;
+  data: {
+    user: z.infer<typeof AuthUserSchema>;
+    session: z.infer<typeof AuthSessionSchema>;
+    authContext: z.infer<typeof AuthContextSchema>;
+    access: z.infer<typeof AuthAccessSchema>;
+    flags?: Record<string, boolean>;
+  };
+}

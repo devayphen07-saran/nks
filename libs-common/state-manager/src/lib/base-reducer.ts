@@ -4,12 +4,11 @@ import { authSlice } from "./shared-slice/auth/slice";
 import { storeSlice } from "./shared-slice/company/slice";
 import { routesSlice } from "./shared-slice/routes/slice";
 import { configMasterSlice } from "./slices/config-slice";
-
 /* ── Reducer ─────────────────────────────────────────────────────────────── */
 
 export const baseReducer = {
-  auth: authSlice.reducer,
-  store: storeSlice.reducer,
+  auth:   authSlice.reducer,
+  store:  storeSlice.reducer,
   routes: routesSlice.reducer,
   config: configMasterSlice.reducer,
 };
@@ -24,14 +23,10 @@ export const baseStore = configureStore({
         ignoredActions: [
           "auth/login/fulfilled",
           "auth/register/fulfilled",
-          "auth/getSession/fulfilled",
-          "auth/refreshToken/fulfilled",
-          "routes/fetchUserRoutes/fulfilled",
-          "routes/fetchAdminRoutesAndPermissions/fulfilled",
-          "routes/fetchStoreRoutes/fulfilled",
-          "lookup/countries/fulfilled",
-          "lookup/currencies/fulfilled",
-          "lookup/config/fulfilled",
+          "auth/sendOtp/fulfilled",
+          "auth/verifyOtp/fulfilled",
+          "routes/getAdminRoutes/fulfilled",
+          "routes/getStoreRoutes/fulfilled",
         ],
       },
     }),

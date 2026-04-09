@@ -1,47 +1,47 @@
 import { router } from "expo-router";
-import { Platform, KeyboardAvoidingView } from "react-native";
+import { Platform, KeyboardAvoidingView, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCallback } from "react";
 import styled from "styled-components/native";
 import {
-  Alert,
   Column,
   LucideIcon,
   Row,
   Typography,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useRootDispatch } from "../../store";
-import { logoutThunk } from "../../store/logoutThunk";
-import { setupPersonal } from "@nks/api-manager";
-import { refreshSession } from "../../store/refreshSession";
 
 export function AccountTypeScreen() {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
-  const dispatch = useRootDispatch();
 
   const handleStore = useCallback(() => {
     router.push("/(protected)/(workspace)/(app)/(store)/list");
   }, []);
 
   const handlePersonal = useCallback(() => {
-    dispatch(setupPersonal({})).then(() => {
-      dispatch(refreshSession()).then(() => {
-        router.push("/(protected)/(workspace)/(app)/(personal)/dashboard");
-      });
-    });
-  }, [dispatch]);
+    // TODO: Dispatch setupPersonal API call
+    console.log("Setting up personal account...");
+    router.push("/(protected)/(workspace)/(app)/(personal)/dashboard");
+  }, []);
 
   const handleLogout = useCallback(() => {
-    Alert.confirm(
+    Alert.alert(
       "Logout",
       "Are you sure you want to log out?",
-      () => dispatch(logoutThunk()),
-      "Logout",
-      "destructive",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Logout",
+          onPress: () => {
+            // TODO: Dispatch logoutThunk API call
+            console.log("Logging out...");
+          },
+          style: "destructive",
+        },
+      ]
     );
-  }, [dispatch]);
+  }, []);
 
   return (
     <Container>

@@ -1,5 +1,6 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { PasswordValidator } from './validators';
 
 /**
  * Password Service
@@ -10,44 +11,10 @@ export class PasswordService {
   private readonly BCRYPT_ROUNDS = 12;
 
   /**
-   * Validate password strength.
-   * Requirements:
-   * - At least 12 characters
-   * - At least one uppercase letter
-   * - At least one lowercase letter
-   * - At least one number
-   * - At least one special character
+   * Validate password strength using PasswordValidator.
    */
   validateStrength(password: string): void {
-    if (password.length < 12) {
-      throw new BadRequestException(
-        'Password must be at least 12 characters long',
-      );
-    }
-
-    if (!/[A-Z]/.test(password)) {
-      throw new BadRequestException(
-        'Password must contain at least one uppercase letter',
-      );
-    }
-
-    if (!/[a-z]/.test(password)) {
-      throw new BadRequestException(
-        'Password must contain at least one lowercase letter',
-      );
-    }
-
-    if (!/[0-9]/.test(password)) {
-      throw new BadRequestException(
-        'Password must contain at least one number',
-      );
-    }
-
-    if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)) {
-      throw new BadRequestException(
-        'Password must contain at least one special character (!@#$%^&*)',
-      );
-    }
+    PasswordValidator.validateStrength(password);
   }
 
   /**

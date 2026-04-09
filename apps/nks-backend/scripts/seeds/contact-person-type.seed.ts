@@ -2,11 +2,11 @@ import type { Db } from './types.js';
 import { contactPersonType } from '../../src/core/database/schema';
 
 const data = [
-  { contactPersonTypeName: 'Owner',      contactPersonTypeCode: 'OWNER',      canReceiveAlerts: true,  isSystem: true },
-  { contactPersonTypeName: 'Manager',    contactPersonTypeCode: 'MANAGER',    canReceiveAlerts: true,  isSystem: true },
-  { contactPersonTypeName: 'Accountant', contactPersonTypeCode: 'ACCOUNTANT', canReceiveAlerts: true,  isSystem: true },
-  { contactPersonTypeName: 'Staff',      contactPersonTypeCode: 'STAFF',      canReceiveAlerts: false, isSystem: true },
-  { contactPersonTypeName: 'Other',      contactPersonTypeCode: 'OTHER',      canReceiveAlerts: false, isSystem: true },
+  { code: 'OWNER',      label: 'Owner',      isSystem: true },
+  { code: 'MANAGER',    label: 'Manager',    isSystem: true },
+  { code: 'ACCOUNTANT', label: 'Accountant', isSystem: true },
+  { code: 'STAFF',      label: 'Staff',      isSystem: true },
+  { code: 'OTHER',      label: 'Other',      isSystem: true },
 ];
 
 export async function seedContactPersonTypes(db: Db) {

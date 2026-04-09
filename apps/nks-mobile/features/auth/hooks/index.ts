@@ -1,3 +1,3 @@
-// Auth hooks
-// e.g. usePhoneAuth, useOtpVerify, useSetPassword
-export {};
+export { usePhoneAuth } from "./usePhoneAuth";
+export { useOtpVerify } from "./useOtpVerify";
+export { useSetPassword } from "./useSetPassword";
