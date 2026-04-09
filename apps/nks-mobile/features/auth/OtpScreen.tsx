@@ -76,9 +76,9 @@ function maskPhone(phone: string): string {
   if (phone.length < 5) return phone;
 
   // Keep country code (+91) and last 4 digits visible
-  const countryCode = phone.startsWith('+') ? phone.slice(0, 3) : ''; // +91
+  const countryCode = phone.startsWith("+") ? phone.slice(0, 3) : ""; // +91
   const visibleDigits = phone.slice(-4); // 3606
-  const hiddenDigits = phone.slice(countryCode.length, -4).replace(/\d/g, '*');
+  const hiddenDigits = phone.slice(countryCode.length, -4).replace(/\d/g, "*");
 
   return countryCode + hiddenDigits + visibleDigits;
 }
@@ -118,7 +118,10 @@ export function OtpScreen() {
   };
 
   // Handle key press with ref focus management
-  const handleKeyPress = (e: { nativeEvent: { key: string } }, index: number) => {
+  const handleKeyPress = (
+    e: { nativeEvent: { key: string } },
+    index: number,
+  ) => {
     hookHandleKeyPress(e, index);
     if (e.nativeEvent.key === "Backspace" && !digits[index] && index > 0) {
       inputRefs.current[index - 1]?.focus();
@@ -178,7 +181,7 @@ export function OtpScreen() {
                 color={theme.colorWhite}
                 style={{ opacity: 0.9, maxWidth: "80%" }}
               >
-                {`We've sent a code to +${maskPhone(phone ?? "")}`}
+                {`We've sent a code to ${maskPhone(phone ?? "")}`}
               </Typography.Body>
             </HeroText>
           </BrandHero>
@@ -386,10 +389,10 @@ const FormContent = styled(Column)``;
 
 const OtpBoxRow = styled.View`
   flex-direction: row;
-  gap: 12px;
+  gap: ${({ theme }) => theme.sizing.xxSmall}px;
   justify-content: center;
-  padding-left: ${({ theme }) => theme.sizing.medium}px;
-  padding-right: ${({ theme }) => theme.sizing.medium}px;
+  padding-left: ${({ theme }) => theme.sizing.xxSmall}px;
+  padding-right: ${({ theme }) => theme.sizing.xxSmall}px;
 `;
 
 const OtpBox = styled.View<{
@@ -405,13 +408,13 @@ const OtpBox = styled.View<{
     if ($hasError) return theme.colorError;
     if ($isFocused) return theme.colorPrimary;
     if ($filled) return theme.colorPrimary;
-    return '#E5E5E5';
+    return "#E5E5E5";
   }};
   background-color: ${({ theme, $filled, $isFocused, $hasError }) => {
-    if ($hasError) return '#FFF1F1';
-    if ($isFocused) return '#F5F7FF';
-    if ($filled) return '#F5F7FF';
-    return '#FFFFFF';
+    if ($hasError) return "#FFF1F1";
+    if ($isFocused) return "#F5F7FF";
+    if ($filled) return "#F5F7FF";
+    return "#FFFFFF";
   }};
   align-items: center;
   justify-content: center;

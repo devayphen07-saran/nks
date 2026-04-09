@@ -82,7 +82,7 @@ export function PhoneScreen() {
                 color={theme.colorWhite}
                 style={{ opacity: 0.9, maxWidth: "80%" }}
               >
-                Enter your mobile number to receive a 4-digit code.
+                Enter your mobile number to receive a 6-digit code.
               </Typography.Body>
             </HeroText>
           </BrandHero>
@@ -167,7 +167,9 @@ export function PhoneScreen() {
                 <Typography.Caption
                   weight="semiBold"
                   color={theme.colorPrimary}
-                  onPress={() => {}}
+                  onPress={() => {
+                    // TODO: Navigate to terms of service page
+                  }}
                 >
                   Terms of Service
                 </Typography.Caption>
