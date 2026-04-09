@@ -386,10 +386,10 @@ const FormContent = styled(Column)``;
 
 const OtpBoxRow = styled.View`
   flex-direction: row;
-  gap: ${({ theme }) => theme.sizing.medium}px;
+  gap: 12px;
   justify-content: center;
-  padding-left: ${({ theme }) => theme.sizing.large}px;
-  padding-right: ${({ theme }) => theme.sizing.large}px;
+  padding-left: ${({ theme }) => theme.sizing.medium}px;
+  padding-right: ${({ theme }) => theme.sizing.medium}px;
 `;
 
 const OtpBox = styled.View<{
@@ -397,20 +397,21 @@ const OtpBox = styled.View<{
   $isFocused: boolean;
   $hasError: boolean;
 }>`
-  width: 60px;
-  aspect-ratio: 1;
-  border-radius: ${({ theme }) => theme.borderRadius.large}px;
-  border-width: 1.5px;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  border-width: 2px;
   border-color: ${({ theme, $filled, $isFocused, $hasError }) => {
     if ($hasError) return theme.colorError;
     if ($isFocused) return theme.colorPrimary;
     if ($filled) return theme.colorPrimary;
-    return theme.colorBorder;
+    return '#E5E5E5';
   }};
   background-color: ${({ theme, $filled, $isFocused, $hasError }) => {
-    if ($hasError) return theme.colorErrorBg;
-    if ($isFocused || $filled) return theme.colorBgLayout;
-    return theme.colorBgLayout; // Subtle background for empty slots
+    if ($hasError) return '#FFF1F1';
+    if ($isFocused) return '#F5F7FF';
+    if ($filled) return '#F5F7FF';
+    return '#FFFFFF';
   }};
   align-items: center;
   justify-content: center;
