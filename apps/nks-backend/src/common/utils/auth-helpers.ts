@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import type { AuthResponseEnvelope } from '../../modules/auth/dto';
+import { DeviceValidator } from '../validators';
 
 /**
  * Shared utilities for auth controllers
@@ -8,13 +9,23 @@ import type { AuthResponseEnvelope } from '../../modules/auth/dto';
 export class AuthControllerHelpers {
   /**
    * Extract device identification headers from request
+   * Validates device type against User-Agent to prevent spoofing
    * Used for device tracking and security (device binding)
    */
   static extractDeviceInfo(req: Request) {
+    const deviceTypeHeader = (req.headers['x-device-type'] as string) || undefined;
+    const userAgent = (req.headers['user-agent'] as string) || undefined;
+
+    // Validate and normalize device type against User-Agent
+    const validatedDeviceType = DeviceValidator.validateAndNormalize(
+      deviceTypeHeader,
+      userAgent,
+    );
+
     return {
       deviceId: (req.headers['x-device-id'] as string) || undefined,
       deviceName: (req.headers['x-device-name'] as string) || undefined,
-      deviceType: (req.headers['x-device-type'] as string) || undefined,
+      deviceType: validatedDeviceType || undefined,
       appVersion: (req.headers['x-app-version'] as string) || undefined,
     };
   }
