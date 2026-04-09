@@ -5,7 +5,7 @@ import { verifyOtp, otpResend } from "@nks/api-manager";
 import { useRootDispatch } from "../../../store";
 import { persistLogin } from "../../../store/persistLogin";
 
-const OTP_LENGTH = 4;
+const OTP_LENGTH = 6;
 const RESEND_COOLDOWN = 30;
 
 export function useOtpVerify() {
