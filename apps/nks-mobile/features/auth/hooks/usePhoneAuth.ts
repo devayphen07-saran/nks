@@ -4,7 +4,7 @@ import { phoneSchema } from "../schema/phone";
 import { sendOtp } from "@nks/api-manager";
 import { useRootDispatch } from "../../../store";
 
-const DIAL_CODE = "91";
+const DIAL_CODE = "+91";
 
 export function usePhoneAuth() {
   const dispatch = useRootDispatch();
@@ -59,7 +59,7 @@ export function usePhoneAuth() {
   return {
     phone,
     setPhone: handlePhoneChange,
-    dialCode: `+${DIAL_CODE}`,
+    dialCode: DIAL_CODE,
     isFocused,
     setIsFocused,
     isLoading,
