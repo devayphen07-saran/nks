@@ -72,10 +72,15 @@ function OtpDigitCell({
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function maskPhone(phone: string): string {
+  // Format: +919025863606 → +91****3606
   if (phone.length < 5) return phone;
-  const visible = phone.slice(-4);
-  const masked = phone.slice(0, phone.length - 4).replace(/\d/g, "*");
-  return masked + visible;
+
+  // Keep country code (+91) and last 4 digits visible
+  const countryCode = phone.startsWith('+') ? phone.slice(0, 3) : ''; // +91
+  const visibleDigits = phone.slice(-4); // 3606
+  const hiddenDigits = phone.slice(countryCode.length, -4).replace(/\d/g, '*');
+
+  return countryCode + hiddenDigits + visibleDigits;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
