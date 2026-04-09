@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { eq, and, gt, isNull, lt, sql } from 'drizzle-orm';
+import { eq, and, gt, lt, asc, count } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
 import * as schema from '../../../core/database/schema';
@@ -24,14 +24,13 @@ export class SessionsRepository {
   /**
    * Create a new user session
    */
-  async create(data: NewUserSession): Promise<UserSession> {
+  async create(data: NewUserSession): Promise<UserSession | null> {
     const [session] = await this.db
       .insert(schema.userSession)
       .values(data)
       .returning();
 
-    if (!session) throw new InternalServerErrorException('Failed to create session');
-    return session;
+    return session ?? null;
   }
 
   /**
@@ -90,15 +89,14 @@ export class SessionsRepository {
   /**
    * Update session data
    */
-  async update(sessionId: number, data: UpdateUserSession): Promise<UserSession> {
+  async update(sessionId: number, data: UpdateUserSession): Promise<UserSession | null> {
     const [updated] = await this.db
       .update(schema.userSession)
       .set(data)
       .where(eq(schema.userSession.id, sessionId))
       .returning();
 
-    if (!updated) throw new InternalServerErrorException('Failed to update session');
-    return updated;
+    return updated ?? null;
   }
 
   /**
@@ -166,8 +164,8 @@ export class SessionsRepository {
    * Get session count for user (for enforcing session limit)
    */
   async getActiveSessionCount(userId: number): Promise<number> {
-    const sessions = await this.db
-      .select()
+    const [result] = await this.db
+      .select({ count: count() })
       .from(schema.userSession)
       .where(
         and(
@@ -176,7 +174,7 @@ export class SessionsRepository {
         ),
       );
 
-    return sessions.length;
+    return result?.count ?? 0;
   }
 
   /**
@@ -196,5 +194,161 @@ export class SessionsRepository {
       .limit(1);
 
     return session ?? null;
+  }
+
+  /**
+   * Find session by guuid with exclusive lock (FOR UPDATE).
+   * Used for atomic refresh token rotation to prevent concurrent rotations.
+   */
+  async findByGuuidForUpdate(guuid: string): Promise<UserSession | null> {
+    const [session] = await this.db
+      .select()
+      .from(schema.userSession)
+      .where(eq(schema.userSession.guuid, guuid))
+      .for('update')
+      .limit(1);
+
+    return session ?? null;
+  }
+
+  /**
+   * Find session by token and return a new session record.
+   * Used after BetterAuth creates a session to fetch the typed row.
+   */
+  async findByTokenFull(token: string): Promise<UserSession | null> {
+    const [session] = await this.db
+      .select()
+      .from(schema.userSession)
+      .where(eq(schema.userSession.token, token))
+      .limit(1);
+
+    return session ?? null;
+  }
+
+  /**
+   * Update session by session token (not ID).
+   * Returns the session guuid — used in createSessionForUser to capture guuid after device update.
+   */
+  async updateByToken(
+    token: string,
+    data: UpdateUserSession,
+  ): Promise<{ guuid: string } | null> {
+    const [updated] = await this.db
+      .update(schema.userSession)
+      .set(data)
+      .where(eq(schema.userSession.token, token))
+      .returning({ guuid: schema.userSession.guuid });
+
+    return updated ?? null;
+  }
+
+  /**
+   * Store refresh token data for a session identified by its BetterAuth token.
+   * Called from createTokenPair() after generating the structured refresh token.
+   */
+  async setRefreshTokenData(
+    sessionToken: string,
+    data: {
+      refreshTokenHash: string;
+      refreshTokenExpiresAt: Date;
+      accessTokenExpiresAt: Date;
+    },
+  ): Promise<void> {
+    await this.db
+      .update(schema.userSession)
+      .set(data)
+      .where(eq(schema.userSession.token, sessionToken));
+  }
+
+  /**
+   * Revoke all sessions for a user with a reason (theft detection response).
+   * Sets revokedReason before deletion for audit trail.
+   */
+  async revokeAndDeleteAllForUser(
+    userId: number,
+    revokedReason: string,
+  ): Promise<void> {
+    await this.db
+      .update(schema.userSession)
+      .set({ refreshTokenRevokedAt: new Date(), revokedReason })
+      .where(eq(schema.userSession.userId, userId));
+
+    await this.db
+      .delete(schema.userSession)
+      .where(eq(schema.userSession.userId, userId));
+  }
+
+  /**
+   * Get all sessions for a user ordered by creation date.
+   * Used by enforceSessionLimit to find and remove oldest sessions.
+   */
+  async findAllByUserIdOrdered(
+    userId: number,
+  ): Promise<Array<{ id: number; createdAt: Date | null }>> {
+    return this.db
+      .select({
+        id: schema.userSession.id,
+        createdAt: schema.userSession.createdAt,
+      })
+      .from(schema.userSession)
+      .where(eq(schema.userSession.userId, userId))
+      .orderBy(asc(schema.userSession.createdAt));
+  }
+
+  /**
+   * Find session by numeric ID and user ID — verifies ownership.
+   */
+  async findByIdAndUserId(
+    sessionId: number,
+    userId: number,
+  ): Promise<UserSession | null> {
+    const [session] = await this.db
+      .select()
+      .from(schema.userSession)
+      .where(
+        and(
+          eq(schema.userSession.id, sessionId),
+          eq(schema.userSession.userId, userId),
+        ),
+      )
+      .limit(1);
+
+    return session ?? null;
+  }
+
+  /**
+   * Get active sessions for a user with selected device fields.
+   * Used for listing sessions in the session management API.
+   */
+  async findActiveSessionsForUser(userId: number): Promise<
+    Array<{
+      id: number;
+      deviceId: string | null;
+      deviceName: string | null;
+      deviceType: string | null;
+      platform: string | null;
+      appVersion: string | null;
+      createdAt: Date | null;
+      expiresAt: Date;
+    }>
+  > {
+    return this.db
+      .select({
+        id: schema.userSession.id,
+        deviceId: schema.userSession.deviceId,
+        deviceName: schema.userSession.deviceName,
+        deviceType: schema.userSession.deviceType,
+        platform: schema.userSession.platform,
+        appVersion: schema.userSession.appVersion,
+        createdAt: schema.userSession.createdAt,
+        expiresAt: schema.userSession.expiresAt,
+      })
+      .from(schema.userSession)
+      .where(
+        and(
+          eq(schema.userSession.userId, userId),
+          gt(schema.userSession.expiresAt, new Date()),
+        ),
+      );
   }
 }

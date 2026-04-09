@@ -12,9 +12,26 @@ export const SYSTEM_ROLES: SystemRoleSeed[] = [
   {
     code: 'SUPER_ADMIN',
     roleName: 'Super Admin',
-    description:
-      'Platform-wide administrator. Full access to all features and stores.',
+    description: 'Platform-wide administrator. Full access.',
     sortOrder: 1,
+  },
+  {
+    code: 'USER',
+    roleName: 'User',
+    description: 'Default platform user.',
+    sortOrder: 2,
+  },
+  {
+    code: 'STORE_OWNER',
+    roleName: 'Store Owner',
+    description: 'Full access to their store.',
+    sortOrder: 3,
+  },
+  {
+    code: 'STAFF',
+    roleName: 'Staff',
+    description: 'Access via custom role assignment.',
+    sortOrder: 4,
   },
 ];
 

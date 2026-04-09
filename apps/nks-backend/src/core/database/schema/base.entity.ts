@@ -92,15 +92,20 @@ export const appendOnlyEntity = () => ({
  * auditFields — who created/modified/deleted a row.
  * Use on tables where human-initiated writes need attribution.
  * Skip on BetterAuth-managed tables (user_session, user_auth_provider, otp_verification).
+ *
+ * CRITICAL: Uses onDelete: 'restrict' to prevent audit trail loss.
+ * When a user is deleted, their audit trail records MUST be preserved for compliance (SOX, GDPR).
+ * Instead of allowing NULL createdBy, the deletion is prevented at DB level.
+ * Deleted users should be archived (is_active = false) rather than hard-deleted.
  */
 export const auditFields = (getUsersId: () => AnyPgColumn) => ({
   createdBy: bigint('created_by', { mode: 'number' }).references(getUsersId, {
-    onDelete: 'set null',
+    onDelete: 'restrict', // ← CHANGED: prevent loss of audit trail
   }),
   modifiedBy: bigint('modified_by', { mode: 'number' }).references(getUsersId, {
-    onDelete: 'set null',
+    onDelete: 'restrict', // ← CHANGED: prevent loss of audit trail
   }),
   deletedBy: bigint('deleted_by', { mode: 'number' }).references(getUsersId, {
-    onDelete: 'set null',
+    onDelete: 'restrict', // ← CHANGED: prevent loss of audit trail
   }),
 });

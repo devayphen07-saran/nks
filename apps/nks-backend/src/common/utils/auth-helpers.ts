@@ -22,11 +22,20 @@ export class AuthControllerHelpers {
       userAgent,
     );
 
+    // Resolve real client IP (respects X-Forwarded-For from trusted proxies)
+    const forwarded = req.headers['x-forwarded-for'];
+    const ipAddress: string | undefined = forwarded
+      ? (Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0])?.trim()
+      : (req.ip ?? req.socket?.remoteAddress ?? undefined);
+
     return {
       deviceId: (req.headers['x-device-id'] as string) || undefined,
       deviceName: (req.headers['x-device-name'] as string) || undefined,
       deviceType: validatedDeviceType || undefined,
       appVersion: (req.headers['x-app-version'] as string) || undefined,
+      // Request metadata for audit logging
+      ipAddress,
+      userAgent,
     };
   }
 

@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
@@ -9,23 +9,13 @@ type Db = NodePgDatabase<typeof schema>;
 
 @Injectable()
 export class AuditRepository {
-  private readonly logger = new Logger(AuditRepository.name);
-
   constructor(@InjectDb() private readonly db: Db) {}
 
-  async create(data: Omit<NewAuditLog, 'createdAt'>): Promise<void> {
-    try {
-      await this.db.insert(schema.auditLogs).values({
-        ...data,
-        createdAt: new Date(),
-      } as any);
-    } catch (err) {
-      // Log but don't throw - audit logging failure shouldn't block main flow
-      this.logger.error(
-        `Failed to create audit log: ${err instanceof Error ? err.message : String(err)}`,
-        err instanceof Error ? err.stack : undefined,
-      );
-    }
+  async create(data: Omit<NewAuditLog, 'createdAt' | 'id' | 'guuid'>): Promise<void> {
+    await this.db.insert(schema.auditLogs).values({
+      ...data,
+      createdAt: new Date(),
+    });
   }
 
   async findByUserId(

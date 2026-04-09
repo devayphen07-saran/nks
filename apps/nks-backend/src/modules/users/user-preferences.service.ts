@@ -1,16 +1,12 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
-import { eq, and, isNull } from 'drizzle-orm';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { InjectDb } from '../../core/database/inject-db.decorator';
-import * as schema from '../../core/database/schema';
 import { UserPreferencesValidator } from './validators';
 import { AuthorizationValidator } from '../../common/validators/authorization.validator';
 import { UserPreferencesRepository } from './repositories/user-preferences.repository';
+import type { UserPreferences } from '../../core/database/schema/user-preferences';
 
 @Injectable()
 export class UserPreferencesService {
   constructor(
-    @InjectDb() private readonly db: NodePgDatabase<typeof schema>,
     private readonly userPreferencesRepository: UserPreferencesRepository,
   ) {}
 
@@ -43,7 +39,7 @@ export class UserPreferencesService {
    */
   async update(
     userId: number,
-    data: Partial<schema.UserPreferences>,
+    data: Partial<UserPreferences>,
     modifiedBy: number,
     isSuperAdmin: boolean = false,
   ) {

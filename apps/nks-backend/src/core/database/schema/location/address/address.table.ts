@@ -41,7 +41,7 @@ export const address = pgTable(
 
     line1: varchar('line1', { length: 255 }).notNull(),
     line2: varchar('line2', { length: 255 }),
-    cityName: varchar('city_name', { length: 150 }),
+    cityName: varchar('city_name', { length: 150 }).notNull(), // ← FIXED: address is incomplete without city
 
     // India-specific location FKs (replaces text fields)
     stateFk: bigint('state_fk', { mode: 'number' })

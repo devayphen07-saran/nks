@@ -4,7 +4,9 @@ import * as crypto from 'crypto';
 import { RSAKeyManager } from '../core/crypto/rsa-keys';
 
 export interface JWTPayload {
-  sub: string;
+  sub: string;       // user guuid — immutable across DB migrations
+  sid: string;       // session guuid — ties JWT to a specific session row
+  jti: string;       // unique token ID — prevents replay across contexts
   email: string;
   roles: string[];
   primaryRole: string | null;

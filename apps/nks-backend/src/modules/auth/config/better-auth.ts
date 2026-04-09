@@ -87,57 +87,16 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
     },
 
     databaseHooks: {
+      // NOTE: SUPER_ADMIN assignment logic has been moved to AuthService.assignFirstUserAsSuperAdminIfNeeded()
+      // This ensures business logic is in the service layer, not in config.
+      // The hook is intentionally kept minimal - actual role assignment is handled by AuthService.
       user: {
         create: {
           after: async (user) => {
-            try {
-              const userId = Number(user.id);
-              if (isNaN(userId)) return;
-
-              // Check if any SUPER_ADMIN exists in user_role_mapping
-              const [existingSuperAdmin] = await db
-                .select({ id: userRoleMapping.id })
-                .from(userRoleMapping)
-                .innerJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
-                .where(
-                  and(
-                    eq(schema.roles.code, 'SUPER_ADMIN'),
-                    isNull(userRoleMapping.storeFk),
-                    isNull(userRoleMapping.deletedAt),
-                    eq(userRoleMapping.isActive, true),
-                  ),
-                )
-                .limit(1);
-
-              if (!existingSuperAdmin) {
-                // Assign SUPER_ADMIN role to first user
-                const [superAdminRole] = await db
-                  .select({ id: schema.roles.id })
-                  .from(schema.roles)
-                  .where(and(eq(schema.roles.code, 'SUPER_ADMIN'), isNull(schema.roles.storeFk)))
-                  .limit(1);
-
-                if (superAdminRole) {
-                  await db.insert(userRoleMapping).values({
-                    userFk: userId,
-                    roleFk: superAdminRole.id,
-                    isPrimary: true,
-                    isActive: true,
-                    assignedAt: new Date(),
-                  });
-                  Logger.log(
-                    `First user (ID: ${userId}) assigned SUPER_ADMIN`,
-                    'Auth',
-                  );
-                }
-              }
-            } catch (err) {
-              Logger.error(
-                'Failed to auto-assign SUPER_ADMIN role',
-                err,
-                'Auth',
-              );
-            }
+            // SECURITY NOTE: This hook is called automatically by BetterAuth after user creation.
+            // However, the actual SUPER_ADMIN role assignment is handled by AuthService.assignFirstUserAsSuperAdminIfNeeded()
+            // which is called explicitly in the register() and other user creation flows.
+            // This separation ensures: (1) business logic in service layer, (2) testability, (3) auditability
           },
         },
       },

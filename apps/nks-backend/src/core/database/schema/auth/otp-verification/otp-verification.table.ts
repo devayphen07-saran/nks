@@ -44,7 +44,7 @@ export const otpVerification = pgTable(
     // For LOGIN and RESET_PASSWORD: NULL (user not yet authenticated)
     authProviderId: bigint('auth_provider_fk', { mode: 'number' }).references(
       () => userAuthProvider.id,
-      { onDelete: 'cascade' },
+      { onDelete: 'restrict' }, // ← FIXED: prevent auth provider deletion if OTP exists (preserve audit trail)
     ),
   },
   (table) => [

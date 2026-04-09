@@ -1,6 +1,10 @@
 import { relations } from 'drizzle-orm';
 import { lookup } from './lookup.table';
+import { lookupType } from '../lookup-type/lookup-type.table';
 
-// Generic lookup values have no incoming relationships in the current schema.
-// Relations are defined when specific lookup types become dependent entities.
-export const lookupRelations = relations(lookup, () => ({}));
+export const lookupRelations = relations(lookup, ({ one }) => ({
+  type: one(lookupType, {
+    fields: [lookup.lookupTypeFk],
+    references: [lookupType.id],
+  }),
+}));

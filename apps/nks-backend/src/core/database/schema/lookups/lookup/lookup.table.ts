@@ -1,6 +1,7 @@
-import { pgTable, varchar } from 'drizzle-orm/pg-core';
+import { pgTable, varchar, bigint, index } from 'drizzle-orm/pg-core';
 import { baseEntity, auditFields } from '../../base.entity';
 import { users } from '../../auth/users';
+import { lookupType } from '../lookup-type/lookup-type.table';
 
 /**
  * Generic lookup table for system-wide reference values
@@ -11,17 +12,26 @@ import { users } from '../../auth/users';
  * - FREQUENCY_MONTHLY, FREQUENCY_ANNUAL, FREQUENCY_ONE_TIME
  * - PRODUCT_TYPE_SAAS, PRODUCT_TYPE_SERVICE
  */
-export const lookup = pgTable('lookup', {
-  ...baseEntity(),
+export const lookup = pgTable(
+  'lookup',
+  {
+    ...baseEntity(),
 
-  // Business Fields
-  code: varchar('code', { length: 30 }).notNull().unique(),
-  title: varchar('title', { length: 50 }).notNull(),
-  description: varchar('description', { length: 100 }),
+    // Relationship: Links lookup values to their type category
+    lookupTypeFk: bigint('lookup_type_fk', { mode: 'number' })
+      .notNull()
+      .references(() => lookupType.id, { onDelete: 'restrict' }),
 
-  // Audit Fields
-  ...auditFields(() => users.id),
-});
+    // Business Fields
+    code: varchar('code', { length: 30 }).notNull().unique(),
+    title: varchar('title', { length: 50 }).notNull(),
+    description: varchar('description', { length: 100 }),
+
+    // Audit Fields
+    ...auditFields(() => users.id),
+  },
+  (table) => [index('lookup_type_fk_idx').on(table.lookupTypeFk)],
+);
 
 export type Lookup = typeof lookup.$inferSelect;
 export type NewLookup = typeof lookup.$inferInsert;

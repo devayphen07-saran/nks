@@ -1,4 +1,11 @@
-import { pgTable, varchar, bigint, boolean, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  varchar,
+  bigint,
+  boolean,
+  uniqueIndex,
+  index,
+} from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { baseEntity, auditFields } from '../../base.entity';
 import { users } from '../../auth/users';
@@ -17,10 +24,9 @@ export const roles = pgTable(
     description: varchar('description', { length: 250 }),
 
     // Store scope: nullable for system roles, required for custom roles
-    storeFk: bigint('store_fk', { mode: 'number' })
-      .references(() => store.id, {
-        onDelete: 'restrict',
-      }),
+    storeFk: bigint('store_fk', { mode: 'number' }).references(() => store.id, {
+      onDelete: 'restrict',
+    }),
 
     // System role flag: true for SUPER_ADMIN, false for custom roles
     // System roles: isSystem=true, isEditable=false, storeFk=NULL
@@ -57,5 +63,11 @@ export type NewRole = typeof roles.$inferInsert;
 export type UpdateRole = Partial<Omit<NewRole, 'id'>>;
 
 // System role codes that are reserved and cannot be used for custom roles
-export type SystemRoleCode = 'SUPER_ADMIN';
-export const SYSTEM_ROLE_CODES = ['SUPER_ADMIN'] as const;
+// These are seeded as rows in the roles table with storeFk=NULL and isEditable=false
+export type SystemRoleCode = 'SUPER_ADMIN' | 'USER' | 'STORE_OWNER' | 'STAFF';
+export const SYSTEM_ROLE_CODES = [
+  'SUPER_ADMIN',
+  'USER',
+  'STORE_OWNER',
+  'STAFF',
+] as const;

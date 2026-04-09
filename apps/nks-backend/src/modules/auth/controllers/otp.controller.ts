@@ -12,10 +12,14 @@ import {
 import type { Request, Response } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { OtpService } from '../services/otp.service';
+import { OtpAuthOrchestrator } from '../services/otp-auth-orchestrator.service';
 import { AuthControllerHelpers } from '../../../common/utils/auth-helpers';
 import { SendOtpDto, VerifyOtpDto, ResendOtpDto } from '../dto/otp.dto';
 import { SendEmailOtpDto, VerifyEmailOtpDto } from '../dto/email-verify.dto';
-import { SendOtpResponseDto, ResendOtpResponseDto } from '../dto/otp-response.dto';
+import {
+  SendOtpResponseDto,
+  ResendOtpResponseDto,
+} from '../dto/otp-response.dto';
 import { ApiResponse } from '../../../common/utils/api-response';
 import { AuthGuard } from '../../../common/guards/auth.guard';
 import type { AuthResponseEnvelope } from '../dto';
@@ -25,12 +29,17 @@ import type { AuthResponseEnvelope } from '../dto';
 export class OtpController {
   private readonly logger = new Logger(OtpController.name);
 
-  constructor(private readonly otpService: OtpService) {}
+  constructor(
+    private readonly otpService: OtpService,
+    private readonly otpAuthOrchestrator: OtpAuthOrchestrator,
+  ) {}
 
   @Post('send')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Send OTP via MSG91' })
-  async sendOtp(@Body() dto: SendOtpDto): Promise<ApiResponse<SendOtpResponseDto>> {
+  async sendOtp(
+    @Body() dto: SendOtpDto,
+  ): Promise<ApiResponse<SendOtpResponseDto>> {
     const result = await this.otpService.sendOtp(dto);
     return ApiResponse.ok(result, 'OTP sent successfully');
   }
@@ -44,7 +53,11 @@ export class OtpController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<ApiResponse<AuthResponseEnvelope>> {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
-    const result = await this.otpService.verifyOtp(dto, deviceInfo);
+    // Delegate to orchestrator to bridge OtpService and AuthService
+    const result = await this.otpAuthOrchestrator.verifyOtpAndBuildAuthResponse(
+      dto,
+      deviceInfo,
+    );
 
     // Only set httpOnly cookie for web clients
     // Mobile clients don't use cookies - they use JWT tokens
@@ -52,7 +65,9 @@ export class OtpController {
       AuthControllerHelpers.applySessionCookie(res, result);
       this.logger.debug('[OTP] Session cookie set for WEB client');
     } else {
-      this.logger.debug(`[OTP] Skipped session cookie for ${deviceInfo.deviceType} client (uses JWT)`);
+      this.logger.debug(
+        `[OTP] Skipped session cookie for ${deviceInfo.deviceType} client (uses JWT)`,
+      );
     }
 
     return ApiResponse.ok(result, 'Login successful');
@@ -61,7 +76,9 @@ export class OtpController {
   @Post('resend')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resend OTP using original request ID' })
-  async resendOtp(@Body() dto: ResendOtpDto): Promise<ApiResponse<ResendOtpResponseDto>> {
+  async resendOtp(
+    @Body() dto: ResendOtpDto,
+  ): Promise<ApiResponse<ResendOtpResponseDto>> {
     const result = await this.otpService.resendOtp(dto.reqId);
     return ApiResponse.ok(result, 'OTP resent successfully');
   }
@@ -89,5 +106,4 @@ export class OtpController {
     await this.otpService.verifyEmailOtp(dto);
     return ApiResponse.ok(null, 'Email verified successfully');
   }
-
 }

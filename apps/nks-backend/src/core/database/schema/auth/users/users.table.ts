@@ -9,7 +9,9 @@ import {
   bigint,
   index,
   uniqueIndex,
+  check,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 
 import { coreEntity, auditFields } from '../../base.entity';
@@ -86,6 +88,11 @@ export const users = pgTable(
     ...auditFields(selfRef),
   },
   (table) => [
+    // Ensure at least one contact method (email OR phone) exists
+    check(
+      'users_contact_method_chk',
+      sql`email IS NOT NULL OR phone_number IS NOT NULL`,
+    ),
     index('users_email_idx').on(table.email),
     index('users_phone_number_idx').on(table.phoneNumber),
     uniqueIndex('users_iam_user_id_idx').on(table.iamUserId),

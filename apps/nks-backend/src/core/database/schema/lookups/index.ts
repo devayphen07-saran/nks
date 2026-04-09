@@ -1,5 +1,6 @@
 export * from './code-category';
 export * from './code-value';
+export * from './lookup-type';
 export * from './lookup';
 export * from './salutation-type';
 export * from './designation-type';

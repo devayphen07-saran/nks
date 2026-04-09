@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import type { AuthResponseEnvelope } from '../dto/auth-response.dto';
 import { STORE_CONSTANTS } from '../../../common/constants/app-constants';
+// crypto import removed - UUID generation is business logic, not transformation
 
 export type PublicUserDto = {
   id: string;
@@ -74,28 +75,28 @@ export class AuthMapper {
     traceId: string,
     tokenPair?: TokenPair,
     defaultStore?: { guuid: string } | null,
+    sessionId?: string, // Business logic: must be generated in service
+    issuedAt?: string, // Business logic: must be generated in service
+    expiresAt?: string | Date, // Business logic: TTL calculation must be in service
+    refreshExpiresAt?: string | Date, // Business logic: TTL calculation must be in service
   ): AuthResponseEnvelope {
     const user = authResult.user;
     const sessionToken = authResult.token ?? authResult.session?.token ?? '';
-    const sessionId = authResult.session?.sessionId ?? crypto.randomUUID();
-    const issuedAt = new Date().toISOString();
+
+    // Require sessionId and issuedAt from service (mapper is pure transformation only)
+    if (!sessionId) {
+      throw new BadRequestException('AuthMapper.toAuthResponseEnvelope: sessionId is required');
+    }
+    if (!issuedAt) {
+      throw new BadRequestException('AuthMapper.toAuthResponseEnvelope: issuedAt is required');
+    }
 
     const jwtToken = tokenPair?.jwtToken;
     const refreshToken = tokenPair?.refreshToken ?? sessionToken;
-    const jwtExpiresAt = tokenPair?.jwtExpiresAt;
-    const refreshTokenExpiresAt = tokenPair?.refreshTokenExpiresAt;
 
-    const expiresAt =
-      jwtExpiresAt instanceof Date
-        ? jwtExpiresAt.toISOString()
-        : authResult.session?.expiresAt instanceof Date
-          ? authResult.session.expiresAt.toISOString()
-          : new Date(Date.now() + 60 * 60 * 1000).toISOString();
-
-    const refreshExpiresAt =
-      refreshTokenExpiresAt instanceof Date
-        ? refreshTokenExpiresAt.toISOString()
-        : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    // Convert expiresAt/refreshExpiresAt to ISO string (transformation only, no calculation)
+    const expiresAtStr = expiresAt instanceof Date ? expiresAt.toISOString() : String(expiresAt ?? '');
+    const refreshExpiresAtStr = refreshExpiresAt instanceof Date ? refreshExpiresAt.toISOString() : String(refreshExpiresAt ?? '');
 
     const {
       method = 'password',
@@ -118,11 +119,11 @@ export class AuthMapper {
           tokenType: 'Bearer',
           sessionToken,
           issuedAt,
-          expiresAt,
+          expiresAt: expiresAtStr,
           refreshToken,
-          refreshExpiresAt,
+          refreshExpiresAt: refreshExpiresAtStr,
           mechanism: method,
-          absoluteExpiry: refreshExpiresAt,
+          absoluteExpiry: refreshExpiresAtStr,
           defaultStore: defaultStore ?? null,
           ...(jwtToken ? { jwtToken } : {}),
         },
@@ -141,7 +142,7 @@ export class AuthMapper {
             storeId: r.storeId ?? null,
             storeName: r.storeName ?? null,
             isPrimary: r.isPrimary,
-            assignedAt: r.assignedAt ?? new Date().toISOString(),
+            assignedAt: r.assignedAt, // Must be provided by service, not generated here
             expiresAt: r.expiresAt ?? null,
           })),
         },
@@ -175,5 +176,39 @@ export class AuthMapper {
       lastLoginAt,
       lastLoginIp: user.lastLoginIp || null,
     };
+  }
+
+  /**
+   * Transform database role rows to UserRoleEntry objects
+   * Handles role code resolution, store ID overrides, and primary role detection
+   */
+  static mapToRoleEntries(
+    rows: Array<{
+      roleCode?: string;
+      code?: string;
+      storeFk?: number | null;
+      storeName?: string | null;
+    }>,
+    storeIdOverride?: number,
+    assignedAt?: string, // Business logic: timestamp must be generated in service
+  ): UserRoleEntry[] {
+    if (!assignedAt) {
+      throw new BadRequestException('AuthMapper.mapToRoleEntries: assignedAt is required');
+    }
+
+    return rows.map((r) => {
+      const roleCode = (r.roleCode ?? r.code) as UserRoleEntry['roleCode'];
+      return {
+        roleCode,
+        storeId: storeIdOverride ?? r.storeFk ?? null,
+        storeName: r.storeName ?? null,
+        // Primary role: STORE_OWNER (user owns the store) or global role with no store scope
+        isPrimary:
+          roleCode === 'STORE_OWNER' ||
+          (r.storeFk === null && roleCode === 'SUPER_ADMIN'),
+        assignedAt, // Transformation only - value provided by service
+        expiresAt: null,
+      };
+    });
   }
 }

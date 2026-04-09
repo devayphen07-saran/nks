@@ -31,42 +31,36 @@ export class RefreshTokenRepository {
     return session ?? null;
   }
 
-  async revokeAllUserSessions(userId: number): Promise<void> {
+  async revokeAllUserSessions(
+    userId: number,
+    revokedReason: string = 'TOKEN_REUSE',
+  ): Promise<void> {
     await this.db
       .update(schema.userSession)
       .set({
         refreshTokenRevokedAt: new Date(),
         isRefreshTokenRotated: true,
+        revokedReason,
       })
       .where(eq(schema.userSession.userId, userId));
   }
 
-  async rotateToken(
+  async revokeAndRotateToken(
     sessionId: number,
     newRefreshTokenHash: string,
     newRefreshTokenExpiresAt: Date,
   ): Promise<void> {
-    // Wrap entire rotation in transaction for atomicity
-    await this.db.transaction(async (tx) => {
-      // 1. Mark old session's refresh token as revoked
-      await tx
-        .update(schema.userSession)
-        .set({
-          refreshTokenRevokedAt: new Date(),
-          isRefreshTokenRotated: true,
-        })
-        .where(eq(schema.userSession.id, sessionId));
-
-      // 2. Update session with new refresh token
-      await tx
-        .update(schema.userSession)
-        .set({
-          refreshTokenHash: newRefreshTokenHash,
-          refreshTokenExpiresAt: newRefreshTokenExpiresAt,
-          isRefreshTokenRotated: false,
-        })
-        .where(eq(schema.userSession.id, sessionId));
-    });
+    // Mark old refresh token as revoked and set new token
+    await this.db
+      .update(schema.userSession)
+      .set({
+        refreshTokenRevokedAt: new Date(),
+        refreshTokenHash: newRefreshTokenHash,
+        refreshTokenExpiresAt: newRefreshTokenExpiresAt,
+        isRefreshTokenRotated: true,
+        revokedReason: 'ROTATION',
+      })
+      .where(eq(schema.userSession.id, sessionId));
   }
 
   async hasRevokedSessions(userId: number): Promise<boolean> {

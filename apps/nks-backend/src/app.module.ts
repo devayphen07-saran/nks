@@ -12,11 +12,13 @@ import { UsersModule } from './modules/users/users.module';
 import { StatusModule } from './modules/status/status.module';
 import { EntityStatusModule } from './modules/entity-status/entity-status.module';
 import { LoggerModule } from './core/logger/logger.module';
+import { AuditModule } from './modules/audit/audit.module';
 @Module({
   imports: [
     ConfigModule,
     DatabaseModule,
     LoggerModule,
+    AuditModule,
     AuthModule,
     RolesModule,
     RoutesModule,

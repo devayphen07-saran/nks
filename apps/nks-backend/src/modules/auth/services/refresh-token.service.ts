@@ -1,12 +1,9 @@
 import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
-import { eq, and, isNotNull } from 'drizzle-orm';
-import { InjectDb } from '../../../core/database/inject-db.decorator';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../../../core/database/schema';
 import { RefreshTokenRepository } from '../repositories/refresh-token.repository';
 
-type Db = NodePgDatabase<typeof schema>;
+const REFRESH_TOKEN_HMAC_SECRET =
+  process.env['REFRESH_TOKEN_HMAC_SECRET'] || 'default-refresh-token-secret';
 
 /**
  * Refresh Token Service
@@ -21,7 +18,6 @@ export class RefreshTokenService {
   private readonly logger = new Logger(RefreshTokenService.name);
 
   constructor(
-    @InjectDb() private readonly db: Db,
     private readonly refreshTokenRepository: RefreshTokenRepository,
   ) {}
 
@@ -151,8 +147,8 @@ export class RefreshTokenService {
     const newRefreshTokenHash = this.hashToken(newRefreshToken);
     const newRefreshExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
 
-    // SECURITY: Token rotation is handled as a transaction by the repository
-    await this.refreshTokenRepository.rotateToken(
+    // Revoke old token and set new token atomically
+    await this.refreshTokenRepository.revokeAndRotateToken(
       sessionIdNum,
       newRefreshTokenHash,
       newRefreshExpiresAt,
@@ -192,11 +188,16 @@ export class RefreshTokenService {
   }
 
   /**
-   * Hash token using SHA256.
+   * Hash token using HMAC-SHA256 with server secret.
+   * HMAC binds the hash to the server key — even with DB access an attacker
+   * cannot forge a valid token without knowing REFRESH_TOKEN_HMAC_SECRET.
    * Never store plaintext tokens in the database.
    */
   private hashToken(token: string): string {
-    return crypto.createHash('sha256').update(token).digest('hex');
+    return crypto
+      .createHmac('sha256', REFRESH_TOKEN_HMAC_SECRET)
+      .update(token)
+      .digest('hex');
   }
 
   /**

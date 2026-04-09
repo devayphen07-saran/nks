@@ -1,4 +1,4 @@
-import { pgTable, bigint, date } from 'drizzle-orm/pg-core';
+import { pgTable, bigint, timestamp } from 'drizzle-orm/pg-core';
 import { baseEntity, auditFields } from '../../base.entity';
 import { users } from '../../auth/users';
 import { store } from '../../store/store';
@@ -33,8 +33,8 @@ export const subscription = pgTable('subscription', {
     .references(() => status.id, { onDelete: 'restrict' }),
 
   // Business Fields
-  firstInvoiceRecordedAt: date('first_invoice_recorded_at'),
-  trialEnd: date('trial_end'),
+  firstInvoiceRecordedAt: timestamp('first_invoice_recorded_at', { withTimezone: true }), // ← FIXED: standardized to timestamp
+  trialEnd: timestamp('trial_end', { withTimezone: true }), // ← FIXED: standardized to timestamp
 
   // Audit Fields
   ...auditFields(() => users.id),

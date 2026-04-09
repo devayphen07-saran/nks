@@ -7,13 +7,11 @@ import {
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
-import { eq, and, sql, lt, gt, asc, inArray, isNull, ne } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
 import * as schema from '../../../core/database/schema';
 import { EmailValidator, PasswordValidator } from './validators';
 import { SanitizerValidator } from '../../../common/validators/sanitizer.validator';
-import { userRoleMapping } from '../../../core/database/schema/auth/user-role-mapping';
 import {
   LoginDto,
   RegisterDto,
@@ -35,12 +33,14 @@ import type { Auth } from '../config/better-auth';
 import { RolesRepository } from '../../roles/roles.repository';
 import { AuthUsersRepository } from '../repositories/auth-users.repository';
 import { AuthProviderRepository } from '../repositories/auth-provider.repository';
+import { SessionsRepository } from '../repositories/sessions.repository';
 import { SessionService } from './session.service';
 import { PasswordService } from './password.service';
 import { OtpService } from './otp.service';
 import { PermissionsService } from './permissions.service';
 import { JWTConfigService } from '../../../config/jwt.config';
 import { RoutesService } from '../../routes/routes.service';
+import { AuditService, AuditEventType } from '../../audit/audit.service';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -59,7 +59,7 @@ interface BetterAuthInternal {
 // JWT verification response
 export interface VerifyClaimsResponse {
   isValid: boolean;
-  sub?: string | number;
+  sub?: string;
   rolesChanged: boolean;
   currentRoles?: string[];
   stores?: Array<{ id: number | null; name: string | null }>;
@@ -69,6 +69,10 @@ const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
 const SYSTEM_ROLE_STORE_OWNER = 'STORE_OWNER';
 const JWT_AUDIENCE = 'nks-app';
+const REFRESH_TOKEN_HMAC_SECRET =
+  process.env['REFRESH_TOKEN_HMAC_SECRET'] || 'default-refresh-token-secret';
+const IP_HMAC_SECRET =
+  process.env['IP_HMAC_SECRET'] || 'default-ip-hmac-secret';
 
 @Injectable()
 export class AuthService {
@@ -80,12 +84,14 @@ export class AuthService {
     private readonly rolesRepository: RolesRepository,
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly authProviderRepository: AuthProviderRepository,
+    private readonly sessionsRepository: SessionsRepository,
     private readonly sessionService: SessionService,
     private readonly passwordService: PasswordService,
     private readonly otpService: OtpService,
     private readonly permissionsService: PermissionsService,
     private readonly jwtConfigService: JWTConfigService,
     private readonly routesService: RoutesService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -110,9 +116,21 @@ export class AuthService {
   async findOrCreateUserByPhone(
     phone: string,
   ): Promise<typeof schema.users.$inferSelect> {
-    let user = await this.authUsersRepository.findOrCreateByPhone(phone, {
-      iamUserId: crypto.randomUUID(),
-    });
+    let user = await this.authUsersRepository.findByPhone(phone);
+
+    if (!user) {
+      // Create new user with phone number
+      user = await this.authUsersRepository.create({
+        name: `User ${phone.slice(-4)}`,
+        phoneNumber: phone,
+        phoneNumberVerified: false,
+        iamUserId: crypto.randomUUID(),
+      });
+
+      if (!user) {
+        throw new Error('Failed to create user in database');
+      }
+    }
 
     // Mark phone as verified after MSG91 OTP verification
     if (!user.phoneNumberVerified) {
@@ -142,10 +160,13 @@ export class AuthService {
       deviceName?: string;
       deviceType?: string;
       appVersion?: string;
+      ipAddress?: string;
+      userAgent?: string;
     },
   ): Promise<{
     token: string;
     expiresAt: Date;
+    sessionGuuid: string;
     jwtToken?: string;
     userRoles: SessionUserRole[];
     userEmail: string;
@@ -161,38 +182,17 @@ export class AuthService {
       const userRoles = permissions.roles || [];
       const primaryRole = userRoles[0]?.roleCode || null;
 
-      // Get user email for JWT
-      const [user] = await this.db
-        .select({ email: schema.users.email })
-        .from(schema.users)
-        .where(eq(schema.users.id, userId))
-        .limit(1);
+      // Get user guuid + email for JWT
+      const user = await this.authUsersRepository.findEmailAndGuuid(userId);
 
       // Calculate and store role hash for detecting changes
       const roleHash = this.hashRoles(userRoles);
 
-      // Create and sign RS256 JWT with embedded roles
+      // Sign JWT after session update so sid (session guuid) is available
+      // jwtToken is overwritten by createTokenPair() for login/register/otp flows;
+      // this fallback is used only by refreshSession() which doesn't expose it.
       let jwtToken: string | null = null;
-      try {
-        jwtToken = this.jwtConfigService.signToken({
-          sub: String(userId),
-          email: user?.email || 'noemail@example.com',
-          roles: userRoles.map((r) => r.roleCode),
-          primaryRole,
-          stores: userRoles
-            .filter((r) => r.storeId && r.storeName)
-            .map((r) => ({
-              id: r.storeId as number,
-              name: r.storeName as string,
-            })),
-          activeStoreId: userRoles.find((r) => r.storeId)?.storeId || null,
-          iss: process.env.BETTER_AUTH_BASE_URL || 'nks-auth',
-          aud: JWT_AUDIENCE,
-        });
-      } catch (jwtErr) {
-        this.logger.error(`Failed to generate RS256 JWT: ${jwtErr}`);
-        // Don't fail session creation if JWT generation fails
-      }
+      let sessionGuuid = '';
 
       // Validate device type against schema enum
       type DeviceType = 'IOS' | 'ANDROID' | 'WEB';
@@ -209,38 +209,69 @@ export class AuthService {
           ? rawDeviceType
           : null;
 
-      // Update session with device info and role hash
-      // Note: JWT is managed in application memory, not persisted
-      // Roles are always read live from user_role_mapping — never cached in session
-      // roleHash is stored to detect role changes on every request (via AuthGuard)
-      await this.db
-        .update(schema.userSession)
-        .set({
+      // Compute IP hash (HMAC-SHA256 — privacy-safe fingerprint, server-keyed)
+      const ipHash = deviceInfo?.ipAddress
+        ? crypto
+            .createHmac('sha256', IP_HMAC_SECRET)
+            .update(deviceInfo.ipAddress)
+            .digest('hex')
+        : null;
+
+      // Update session with full device fingerprint + role hash, capture guuid
+      const updatedSession = await this.sessionsRepository.updateByToken(
+        session.token,
+        {
           roleHash,
-          // Store device tracking data
           ...(deviceInfo
             ? {
                 deviceId: deviceInfo.deviceId || null,
                 deviceName: deviceInfo.deviceName || null,
                 deviceType: validatedDeviceType,
                 appVersion: deviceInfo.appVersion || null,
+                ipAddress: deviceInfo.ipAddress || null,
+                userAgent: deviceInfo.userAgent || null,
+                ipHash,
               }
             : {}),
-        })
-        .where(eq(schema.userSession.token, session.token));
+        },
+      );
+
+      sessionGuuid = updatedSession?.guuid ?? '';
+
+      // Sign JWT now that session guuid is available for sid claim
+      try {
+        jwtToken = this.jwtConfigService.signToken({
+          sub: user?.guuid || '',
+          sid: sessionGuuid,
+          jti: crypto.randomUUID(),
+          email: user?.email || 'noemail@example.com',
+          roles: userRoles.map((r) => r.roleCode),
+          primaryRole,
+          stores: userRoles
+            .filter((r) => r.storeId && r.storeName)
+            .map((r) => ({
+              id: r.storeId as number,
+              name: r.storeName as string,
+            })),
+          activeStoreId: userRoles.find((r) => r.storeId)?.storeId || null,
+          iss: process.env.BETTER_AUTH_BASE_URL || 'nks-auth',
+          aud: JWT_AUDIENCE,
+        });
+      } catch (jwtErr) {
+        this.logger.error(`Failed to generate RS256 JWT: ${jwtErr}`);
+      }
 
       this.logger.log(
         `Session created for user ${userId}. RS256 JWT token generated with embedded roles.`,
       );
 
-      // Delete oldest sessions if > 5
+      // Delete oldest sessions if > 10
       await this.enforceSessionLimit(userId);
 
-      // Return session token, JWT, and resolved roles/email so callers
-      // don't need to fetch permissions again
       return {
         token: session.token,
         expiresAt: session.expiresAt,
+        sessionGuuid,
         jwtToken: jwtToken || undefined,
         userRoles,
         userEmail: user?.email || 'noemail@example.com',
@@ -251,6 +282,7 @@ export class AuthService {
       return {
         token: session.token,
         expiresAt: session.expiresAt,
+        sessionGuuid: '',
         userRoles: [],
         userEmail: 'noemail@example.com',
       };
@@ -283,27 +315,60 @@ export class AuthService {
       deviceName?: string;
       deviceType?: string;
       appVersion?: string;
+      ipAddress?: string;
+      userAgent?: string;
     },
   ): Promise<AuthResponseEnvelope> {
+    const auditDeviceInfo = {
+      deviceId: deviceInfo?.deviceId,
+      deviceType: deviceInfo?.deviceType,
+    };
+
     // Use repository to find user by email
     const user = await this.authUsersRepository.findByEmail(dto.email);
     if (!user) throw new UnauthorizedException('Invalid credentials');
-    if (user.isBlocked) throw new UnauthorizedException('Account is blocked');
+    if (user.isBlocked) {
+      void this.auditService.log({
+        eventType: AuditEventType.LOGIN,
+        userId: user.id,
+        description: 'Login attempt - account is blocked',
+        ipAddress: deviceInfo?.ipAddress,
+        userAgent: deviceInfo?.userAgent,
+        metadata: auditDeviceInfo,
+        severity: 'warning',
+        resourceType: 'user',
+        resourceId: user.id,
+      });
+      throw new UnauthorizedException('Account is blocked');
+    }
 
     // Check brute-force lockout (with auto-unlock if expired)
     if (user.accountLockedUntil) {
       const now = new Date();
       if (user.accountLockedUntil > now) {
-        // Account is still locked
+        void this.auditService.log({
+          eventType: AuditEventType.LOGIN,
+          userId: user.id,
+          description: 'Login attempt - account locked (brute-force)',
+          ipAddress: deviceInfo?.ipAddress,
+          userAgent: deviceInfo?.userAgent,
+          metadata: auditDeviceInfo,
+          severity: 'warning',
+          resourceType: 'user',
+          resourceId: user.id,
+        });
         throw new UnauthorizedException(
           `Account locked due to too many failed attempts. Try again after ${user.accountLockedUntil.toISOString()}`,
         );
       } else {
         // Lock has expired, auto-unlock account via repository
-        await this.authUsersRepository.update(user.id, {
+        const unlocked = await this.authUsersRepository.update(user.id, {
           accountLockedUntil: null,
           failedLoginAttempts: 0,
         });
+        if (!unlocked) {
+          throw new Error(`Failed to update user lockout status for user ${user.id}`);
+        }
         this.logger.log(
           `Auto-unlocked account for user ${user.id} (lockout expired)`,
         );
@@ -328,7 +393,7 @@ export class AuthService {
       const newFailedCount = user.failedLoginAttempts + 1;
       const shouldLock = newFailedCount >= MAX_FAILED_ATTEMPTS;
       // Update failed attempts (and lock if threshold exceeded) via repository
-      await this.authUsersRepository.update(user.id, {
+      const updated = await this.authUsersRepository.update(user.id, {
         failedLoginAttempts: newFailedCount,
         ...(shouldLock
           ? {
@@ -338,25 +403,59 @@ export class AuthService {
             }
           : {}),
       });
+      if (!updated) {
+        throw new Error(`Failed to update failed login attempts for user ${user.id}`);
+      }
+      void this.auditService.log({
+        eventType: AuditEventType.LOGIN,
+        userId: user.id,
+        description: 'Login attempt - invalid password',
+        ipAddress: deviceInfo?.ipAddress,
+        userAgent: deviceInfo?.userAgent,
+        metadata: {
+          ...auditDeviceInfo,
+          failedAttempts: newFailedCount,
+          accountLocked: shouldLock,
+        },
+        severity: 'warning',
+        resourceType: 'user',
+        resourceId: user.id,
+      });
       throw new UnauthorizedException('Invalid credentials');
     }
 
     // Reset lockout state and record login via repository
-    await this.authUsersRepository.update(user.id, {
+    const loginReset = await this.authUsersRepository.update(user.id, {
       failedLoginAttempts: 0,
       accountLockedUntil: null,
       lastActiveAt: new Date(),
     });
+    if (!loginReset) {
+      throw new Error(`Failed to reset lockout state for user ${user.id}`);
+    }
     await this.authUsersRepository.recordLogin(user.id);
 
     // Use token pair (access + refresh)
     const session = await this.createSessionForUser(user.id, deviceInfo);
     const tokenPair = await this.createTokenPair(
-      user.id,
+      user.guuid,
       session.token,
       session.userRoles,
       session.userEmail,
+      session.sessionGuuid,
     );
+
+    void this.auditService.log({
+      eventType: AuditEventType.LOGIN,
+      userId: user.id,
+      description: 'User logged in via email',
+      ipAddress: deviceInfo?.ipAddress,
+      userAgent: deviceInfo?.userAgent,
+      metadata: { ...auditDeviceInfo },
+      severity: 'info',
+      resourceType: 'user',
+      resourceId: user.id,
+    });
 
     return this.buildAuthResponse(
       user,
@@ -390,6 +489,8 @@ export class AuthService {
       deviceName?: string;
       deviceType?: string;
       appVersion?: string;
+      ipAddress?: string;
+      userAgent?: string;
     },
   ): Promise<AuthResponseEnvelope> {
     // Sanitize inputs
@@ -414,53 +515,40 @@ export class AuthService {
     // Generate IAM user ID
     const iamUserId = crypto.randomUUID();
 
-    // Wrap user creation + auth provider in transaction
-    // SECURITY: Transaction ensures atomic operation and handles race conditions
-    const user = await this.db
-      .transaction(async (tx) => {
-        // Create user
-        const [created] = await tx
-          .insert(schema.users)
-          .values({
-            iamUserId,
-            name: dto.name,
-            email: dto.email,
-            emailVerified: false,
-          })
-          .returning();
+    // Delegate entire registration (user + auth provider + role assignment) to repository
+    // SECURITY: This wraps the entire operation in a single atomic transaction,
+    // preventing race conditions where multiple users could become SUPER_ADMIN.
+    const user = await this.authUsersRepository.createUserWithInitialRole(
+      {
+        iamUserId,
+        name: dto.name,
+        email: dto.email,
+        emailVerified: false,
+      },
+      {
+        providerId: 'email',
+        accountId: dto.email,
+        password: passwordHash,
+        isVerified: false,
+      },
+      // Callback for role assignment (receives transaction context + userId)
+      async (tx, userId) => {
+        await this.assignInitialRoleInTransaction(userId, tx);
+      },
+    );
 
-        if (!created) throw new BadRequestException('Failed to create user');
-
-        // Create email auth provider
-        await tx.insert(schema.userAuthProvider).values({
-          userId: created.id,
-          providerId: 'email',
-          accountId: dto.email,
-          password: passwordHash,
-          isVerified: false,
-        });
-
-        return created;
-      })
-      .catch((err) => {
-        // SECURITY: Handle unique constraint violation (race condition)
-        // Error code 23505 = unique constraint violation in PostgreSQL
-        if ((err as { code?: string }).code === '23505') {
-          throw new ConflictException('Email already in use');
-        }
-        throw err;
-      });
-
-    // Role assignments run after the transaction commits so this.db can see the new user
-    await this.assignInitialRole(user.id);
+    if (!user) {
+      throw new ConflictException('Email already in use');
+    }
 
     // Use token pair (access + refresh)
     const session = await this.createSessionForUser(user.id, deviceInfo);
     const tokenPair = await this.createTokenPair(
-      user.id,
+      user.guuid,
       session.token,
       session.userRoles,
       session.userEmail,
+      session.sessionGuuid,
     );
 
     return this.buildAuthResponse(
@@ -479,21 +567,55 @@ export class AuthService {
     const superAdminRoleId =
       await this.rolesRepository.findSystemRoleId('SUPER_ADMIN');
     if (!superAdminRoleId) return false;
-    const existing = await this.db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .innerJoin(
-        userRoleMapping,
-        and(
-          eq(userRoleMapping.userFk, schema.users.id),
-          eq(userRoleMapping.roleFk, superAdminRoleId),
-          isNull(userRoleMapping.storeFk),
-          isNull(userRoleMapping.deletedAt),
-          eq(userRoleMapping.isActive, true),
-        ),
-      )
-      .limit(1);
-    return existing.length > 0;
+    return this.rolesRepository.hasUserWithRole(superAdminRoleId);
+  }
+
+  /**
+   * Auto-assign SUPER_ADMIN role to first user in the system.
+   * Called after user creation via BetterAuth hook.
+   * SECURITY: This is called automatically by BetterAuth after user creation.
+   * Business logic extracted from config layer to service layer for testability and auditability.
+   *
+   * @param userId - ID of the newly created user
+   * @throws Error if user already exists or role assignment fails
+   */
+  async assignFirstUserAsSuperAdminIfNeeded(userId: number): Promise<void> {
+    try {
+      // Check if any SUPER_ADMIN already exists
+      const superAdminExists = await this.isSuperAdminSeeded();
+      if (superAdminExists) {
+        return; // SUPER_ADMIN already exists, skip assignment
+      }
+
+      // Get SUPER_ADMIN role ID
+      const superAdminRoleId =
+        await this.rolesRepository.findSystemRoleId('SUPER_ADMIN');
+      if (!superAdminRoleId) {
+        this.logger.warn(
+          'SUPER_ADMIN role not found in database. Ensure system roles are seeded.',
+        );
+        return;
+      }
+
+      // Assign SUPER_ADMIN role to first user
+      await this.db.insert(schema.userRoleMapping).values({
+        userFk: userId,
+        roleFk: superAdminRoleId,
+        isPrimary: true,
+        isActive: true,
+        assignedAt: new Date(),
+      });
+
+      this.logger.log(
+        `First user (ID: ${userId}) auto-assigned SUPER_ADMIN role`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Failed to assign SUPER_ADMIN role to first user`,
+        err instanceof Error ? err.stack : String(err),
+      );
+      // Don't rethrow - this is a non-critical operation that shouldn't fail user creation
+    }
   }
 
   /**
@@ -558,14 +680,7 @@ export class AuthService {
    * Called from OTP and OAuth paths that don't go through login().
    */
   async recordSuccessfulLogin(userId: number): Promise<void> {
-    await this.db
-      .update(schema.users)
-      .set({
-        loginCount: sql`login_count + 1`,
-        lastLoginAt: new Date(),
-        lastActiveAt: new Date(),
-      })
-      .where(eq(schema.users.id, userId));
+    await this.authUsersRepository.recordSuccessfulLogin(userId);
   }
 
   /**
@@ -597,7 +712,9 @@ export class AuthService {
     reason = 'ROLE_CHANGE',
   ): Promise<void> {
     const count = await this.sessionService.terminateAllSessions(userId);
-    this.logger.log(`Invalidated ${count} session(s) for user ${userId}: ${reason}`);
+    this.logger.log(
+      `Invalidated ${count} session(s) for user ${userId}: ${reason}`,
+    );
   }
 
   /**
@@ -635,7 +752,9 @@ export class AuthService {
     const activeStoreId =
       userRoles.find((r) => r.storeFk != null)?.storeFk ?? null;
 
-    const roles = this.mapToRoleEntries(userRoles);
+    // Generate assignedAt timestamp before passing to mapper
+    const assignedAt = new Date().toISOString();
+    const roles = AuthMapper.mapToRoleEntries(userRoles, undefined, assignedAt);
 
     // Return fresh permissions from DB (not from cached session)
     if (roleCodes.includes('SUPER_ADMIN')) {
@@ -711,7 +830,10 @@ export class AuthService {
     // Wrap all profile updates in a transaction
     await this.db.transaction(async () => {
       // Update name via repository
-      await this.authUsersRepository.update(userId, { name: dto.name });
+      const nameUpdated = await this.authUsersRepository.update(userId, { name: dto.name });
+      if (!nameUpdated) {
+        throw new Error(`Failed to update user name for user ${userId}`);
+      }
 
       // Case 1: User logged in via phone, adding email + password
       if (dto.email) {
@@ -722,33 +844,38 @@ export class AuthService {
         }
 
         // SECURITY: Check email not already in use by OTHER users
-        const [existingEmail] = await this.db
-          .select({ id: schema.users.id })
-          .from(schema.users)
-          .where(
-            and(eq(schema.users.email, dto.email), ne(schema.users.id, userId)),
-          )
-          .limit(1);
+        const emailTaken =
+          await this.authUsersRepository.emailExistsForOtherUser(
+            dto.email,
+            userId,
+          );
 
-        if (existingEmail) {
+        if (emailTaken) {
           throw new ConflictException('Email already in use by another user');
         }
 
         // Update user email (unverified initially) via repository
-        await this.authUsersRepository.update(userId, {
+        const emailUpdated = await this.authUsersRepository.update(userId, {
           email: dto.email,
           emailVerified: false,
         });
+        if (!emailUpdated) {
+          throw new Error(`Failed to update user email for user ${userId}`);
+        }
 
         // Hash and store password
         const hash = await this.passwordService.hash(dto.password);
-        const existingProviderId = await this.authProviderRepository.findIdByUserIdAndProvider(
-          userId,
-          'email',
-        );
+        const existingProviderId =
+          await this.authProviderRepository.findIdByUserIdAndProvider(
+            userId,
+            'email',
+          );
 
         if (existingProviderId) {
-          await this.authProviderRepository.updatePassword(existingProviderId, hash);
+          await this.authProviderRepository.updatePassword(
+            existingProviderId,
+            hash,
+          );
         } else {
           await this.authProviderRepository.create({
             accountId: dto.email,
@@ -764,24 +891,21 @@ export class AuthService {
 
       // Case 2: User logged in via email, adding phone number
       if (dto.phoneNumber) {
-        // Check phone not already in use
-        const [existingPhone] = await this.db
-          .select({ id: schema.users.id })
-          .from(schema.users)
-          .where(
-            and(
-              eq(schema.users.phoneNumber, dto.phoneNumber),
-              eq(schema.users.id, userId),
-            ),
-          )
-          .limit(1);
+        // Check phone not already linked to this user
+        const alreadyLinked = await this.authUsersRepository.phoneLinkedToUser(
+          dto.phoneNumber,
+          userId,
+        );
 
-        if (!existingPhone) {
+        if (!alreadyLinked) {
           // Update user phone (unverified initially) via repository
-          await this.authUsersRepository.update(userId, {
+          const phoneUpdated = await this.authUsersRepository.update(userId, {
             phoneNumber: dto.phoneNumber,
             phoneNumberVerified: false,
           });
+          if (!phoneUpdated) {
+            throw new Error(`Failed to update user phone for user ${userId}`);
+          }
         }
 
         nextStep = 'verifyPhone';
@@ -862,77 +986,49 @@ export class AuthService {
 
   /**
    * Assign the correct initial role to a newly registered user — one row, no soft-delete.
+   * Called INSIDE the user creation transaction to prevent race condition on first user.
+   * Uses FOR UPDATE lock to ensure only one user can be assigned SUPER_ADMIN.
+   *
    * - First user ever → SUPER_ADMIN (platform administrator)
    * - All subsequent users → USER (default platform user)
+   *
+   * @param userId - The newly created user ID
+   * @param tx - The transaction client to use (required for atomic operation)
    */
-  private async assignInitialRole(userId: number): Promise<void> {
+  private async assignInitialRoleInTransaction(
+    userId: number,
+    tx: NodePgDatabase<typeof schema>,
+  ): Promise<void> {
     try {
-      const roleCode = (await this.isSuperAdminSeeded())
-        ? 'USER'
-        : 'SUPER_ADMIN';
-
-      const [roleRecord] = await this.db
-        .select({ id: schema.roles.id })
-        .from(schema.roles)
-        .where(
-          and(eq(schema.roles.code, roleCode), isNull(schema.roles.storeFk)),
-        )
-        .limit(1);
-
-      if (!roleRecord) {
+      const superAdminRoleId = await this.rolesRepository.findSystemRoleId(
+        'SUPER_ADMIN',
+        tx,
+      );
+      if (!superAdminRoleId) {
         this.logger.warn(
-          `assignInitialRole: '${roleCode}' system role not found in DB for userId=${userId}`,
+          `assignInitialRoleInTransaction: SUPER_ADMIN system role not found in DB`,
         );
         return;
       }
 
-      await this.db
-        .insert(userRoleMapping)
-        .values({
-          userFk: userId,
-          roleFk: roleRecord.id,
-          isPrimary: true,
-          isActive: true,
-        })
-        .onConflictDoNothing();
-    } catch (err) {
-      if ((err as { code?: string }).code !== '23505') {
-        this.logger.error(
-          `assignInitialRole failed for userId=${userId}`,
-          err instanceof Error ? err.stack : String(err),
+      const roleCode =
+        await this.rolesRepository.resolveInitialRoleWithinTransaction(
+          tx,
+          superAdminRoleId,
         );
-      }
-    }
-  }
 
-  /**
-   * Normalise a raw role-DB-row array into the UserRoleEntry shape expected
-   * by AuthMapper. Pass `storeIdOverride` when the rows don't carry storeFk
-   * (e.g. the store-scoped query in switchStore()).
-   */
-  private mapToRoleEntries(
-    rows: Array<{
-      roleCode?: string;
-      code?: string;
-      storeFk?: number | null;
-      storeName?: string | null;
-    }>,
-    storeIdOverride?: number,
-  ): UserRoleEntry[] {
-    return rows.map((r) => {
-      const roleCode = (r.roleCode ?? r.code) as UserRoleEntry['roleCode'];
-      return {
+      await this.rolesRepository.assignRoleWithinTransaction(
+        tx,
+        userId,
         roleCode,
-        storeId: storeIdOverride ?? r.storeFk ?? null,
-        storeName: r.storeName ?? null,
-        // Primary role: STORE_OWNER (user owns the store) or global role with no store scope
-        isPrimary:
-          roleCode === 'STORE_OWNER' ||
-          (r.storeFk === null && roleCode === 'SUPER_ADMIN'),
-        assignedAt: new Date().toISOString(),
-        expiresAt: null,
-      };
-    });
+      );
+    } catch (err) {
+      this.logger.error(
+        `assignInitialRoleInTransaction failed for userId=${userId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+      throw err;
+    }
   }
 
   /**
@@ -959,26 +1055,27 @@ export class AuthService {
     const requestId = crypto.randomUUID();
     const traceId = crypto.randomUUID();
 
+    // Generate timestamps and IDs at service layer (business logic, not transformation)
+    const sessionId = crypto.randomUUID();
+    const issuedAt = new Date().toISOString();
+
+    // Calculate refresh token expiry: 30 days from now
+    const refreshExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+    // JWT expiry: use tokenPair if provided, otherwise use session expiry
+    const jwtExpiresAt = tokenPair?.jwtExpiresAt ?? expiresAt;
+
     // Fetch user's primary/default store.
     // Primary store: where user is STORE_OWNER (exactly one per user via unique constraint).
     const storeOwnerRoleId = await this.rolesRepository.findSystemRoleId(
       SYSTEM_ROLE_STORE_OWNER,
     );
-    const [primaryStore] = storeOwnerRoleId
-      ? await this.db
-          .select({ guuid: schema.store.guuid })
-          .from(userRoleMapping)
-          .innerJoin(schema.store, eq(schema.store.id, userRoleMapping.storeFk))
-          .where(
-            and(
-              eq(userRoleMapping.userFk, user.id),
-              eq(userRoleMapping.roleFk, storeOwnerRoleId),
-              isNull(userRoleMapping.deletedAt),
-              eq(userRoleMapping.isActive, true),
-            ),
-          )
-          .limit(1)
-      : [];
+    const primaryStore = storeOwnerRoleId
+      ? await this.rolesRepository.findPrimaryStoreForUser(
+          user.id,
+          storeOwnerRoleId,
+        )
+      : null;
 
     return AuthMapper.toAuthResponseEnvelope(
       {
@@ -998,16 +1095,18 @@ export class AuthService {
         session: {
           token,
           expiresAt,
-          sessionId: crypto.randomUUID(),
+          sessionId, // Already generated above
         },
       },
       await this.getUserPermissions(user.id),
       requestId,
       traceId,
-      // Pass tokenPair to mapper so it uses JWT access/refresh tokens
       tokenPair,
-      // Pass primary store guuid to mapper
       primaryStore ? { guuid: primaryStore.guuid } : null,
+      sessionId, // Pass pre-generated sessionId
+      issuedAt, // Pass pre-generated timestamp
+      jwtExpiresAt, // Pass JWT expiry
+      refreshExpiresAt, // Pass refresh token expiry
     );
   }
 
@@ -1019,15 +1118,18 @@ export class AuthService {
    * Refresh Token: Opaque, 30 days expiry (stored as hash)
    */
   async createTokenPair(
-    userId: number,
+    userGuuid: string,
     sessionToken: string,
     userRoles: SessionUserRole[],
     userEmail: string,
+    sessionGuuid: string,
   ): Promise<TokenPair> {
     // Sign RS256 JWT — for mobile offline role decoding only
     // Roles and email are passed in — no extra DB queries needed
     const jwtToken = this.jwtConfigService.signToken({
-      sub: String(userId),
+      sub: userGuuid,
+      sid: sessionGuuid,
+      jti: crypto.randomUUID(),
       email: userEmail,
       roles: userRoles.map((r) => r.roleCode),
       primaryRole: userRoles[0]?.roleCode || null,
@@ -1039,13 +1141,16 @@ export class AuthService {
       aud: 'nks-app',
     });
 
-    // Create refresh token (opaque, random 32 bytes)
-    const refreshToken = crypto.randomBytes(32).toString('hex');
-
-    // Hash refresh token before storing (never store plaintext)
+    // Structured refresh token: base64url(sessionGuuid:randomSecret)
+    // sessionGuuid prefix enables direct session lookup (no hash scan on refresh)
+    // Only HMAC(randomSecret) is stored — the public sessionGuuid is not hashed
+    const randomSecret = crypto.randomBytes(32).toString('hex');
+    const refreshToken = Buffer.from(
+      `${sessionGuuid}:${randomSecret}`,
+    ).toString('base64url');
     const refreshTokenHash = crypto
-      .createHash('sha256')
-      .update(refreshToken)
+      .createHmac('sha256', REFRESH_TOKEN_HMAC_SECRET)
+      .update(randomSecret)
       .digest('hex');
 
     // Calculate expiry times
@@ -1056,17 +1161,14 @@ export class AuthService {
     ); // 7d (rolling window — resets on each refresh)
 
     // Store hash in the specific session only — not all user sessions
-    await this.db
-      .update(schema.userSession)
-      .set({
-        refreshTokenHash,
-        refreshTokenExpiresAt,
-        accessTokenExpiresAt: jwtExpiresAt,
-      })
-      .where(eq(schema.userSession.token, sessionToken));
+    await this.sessionsRepository.setRefreshTokenData(sessionToken, {
+      refreshTokenHash,
+      refreshTokenExpiresAt,
+      accessTokenExpiresAt: jwtExpiresAt,
+    });
 
     this.logger.log(
-      `Token pair created for user ${userId}. JWT expires in 1h, refresh token in 30d.`,
+      `Token pair created for user ${userGuuid}. JWT expires in 1h, refresh token in 30d.`,
     );
 
     // Return both tokens to client
@@ -1096,23 +1198,42 @@ export class AuthService {
     refreshExpiresAt: string;
     defaultStore: { guuid: string } | null;
   }> {
-    // Step 1: Hash the incoming refresh token
-    const tokenHash = crypto
-      .createHash('sha256')
-      .update(refreshToken)
-      .digest('hex');
+    // Step 1: Decode structured refresh token — base64url(sessionGuuid:randomSecret)
+    // Extract sessionGuuid for direct PK-adjacent lookup (no hash scan)
+    let sessionGuuidFromToken: string;
+    let randomSecretFromToken: string;
+    try {
+      const decoded = Buffer.from(refreshToken, 'base64url').toString('utf8');
+      const colonIdx = decoded.indexOf(':');
+      if (colonIdx === -1) throw new Error('malformed');
+      sessionGuuidFromToken = decoded.substring(0, colonIdx);
+      randomSecretFromToken = decoded.substring(colonIdx + 1);
+    } catch {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
 
-    // Step 2: Look up session by refresh token hash WITH EXCLUSIVE LOCK
-    // This ensures only ONE request processes this token at a time
-    // Prevents race condition where attacker and legitimate user both use same token
-    const [session] = await this.db
-      .select()
-      .from(schema.userSession)
-      .where(eq(schema.userSession.refreshTokenHash, tokenHash))
-      .for('update')
-      .limit(1);
+    // Step 2: Look up session by guuid WITH EXCLUSIVE LOCK (direct unique-index lookup)
+    // FOR UPDATE prevents two concurrent requests from both rotating the same token
+    const session = await this.sessionsRepository.findByGuuidForUpdate(
+      sessionGuuidFromToken,
+    );
 
     if (!session) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    // Step 2a: Verify HMAC(randomSecret) — ensures token wasn't forged
+    const expectedHash = crypto
+      .createHmac('sha256', REFRESH_TOKEN_HMAC_SECRET)
+      .update(randomSecretFromToken)
+      .digest('hex');
+    const isValidSecret =
+      session.refreshTokenHash != null &&
+      crypto.timingSafeEqual(
+        Buffer.from(expectedHash, 'hex'),
+        Buffer.from(session.refreshTokenHash, 'hex'),
+      );
+    if (!isValidSecret) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
@@ -1136,12 +1257,11 @@ export class AuthService {
         },
       );
 
-      // Delete ALL sessions for this user (emergency security response)
-      // This forces legitimate user to re-authenticate
-      // And blocks attacker's stolen tokens immediately
-      await this.db
-        .delete(schema.userSession)
-        .where(eq(schema.userSession.userId, session.userId));
+      // Mark all sessions TOKEN_REUSE then hard-delete (emergency security response)
+      await this.sessionsRepository.revokeAndDeleteAllForUser(
+        session.userId,
+        'TOKEN_REUSE',
+      );
 
       throw new UnauthorizedException(
         'Session compromised. Please log in again.',
@@ -1175,14 +1295,47 @@ export class AuthService {
     const userRoles = permissions.roles || [];
     const currentRoleHash = this.hashRoles(userRoles);
 
-    const [user] = await this.db
-      .select({ email: schema.users.email })
-      .from(schema.users)
-      .where(eq(schema.users.id, session.userId))
-      .limit(1);
+    const user = await this.authUsersRepository.findEmailAndGuuid(
+      session.userId,
+    );
 
+    const accessTokenExpiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
+
+    // Step 5: Rotate session token — create new BetterAuth session (new opaque token)
+    const ctx = await this.getBetterAuthContext();
+    const createdSession = await ctx.internalAdapter.createSession(
+      String(session.userId),
+    );
+    if (!createdSession)
+      throw new UnauthorizedException('Failed to rotate session');
+
+    // Fetch the new session from DB to get fully-typed row (id, guuid, token, etc.)
+    const newSession = await this.sessionsRepository.findByTokenFull(
+      createdSession.token,
+    );
+
+    if (!newSession)
+      throw new UnauthorizedException('Failed to retrieve rotated session');
+
+    // Step 6: Generate new structured refresh token using new session guuid
+    // base64url(newSession.guuid:randomSecret) — enables direct lookup on next refresh
+    const newRandomSecret = crypto.randomBytes(32).toString('hex');
+    const newRefreshToken = Buffer.from(
+      `${newSession.guuid}:${newRandomSecret}`,
+    ).toString('base64url');
+    const newRefreshTokenHash = crypto
+      .createHmac('sha256', REFRESH_TOKEN_HMAC_SECRET)
+      .update(newRandomSecret)
+      .digest('hex');
+    const newRefreshTokenExpiresAt = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000,
+    ); // 7d rolling window
+
+    // Sign new JWT now that newSession.guuid is available for sid
     const accessToken = this.jwtConfigService.signToken({
-      sub: String(session.userId),
+      sub: user?.guuid || '',
+      sid: newSession.guuid,
+      jti: crypto.randomUUID(),
       email: user?.email || '',
       roles: userRoles.map((r) => r.roleCode),
       primaryRole: userRoles[0]?.roleCode || null,
@@ -1194,84 +1347,36 @@ export class AuthService {
       aud: 'nks-app',
     });
 
-    const accessTokenExpiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
-
-    // Step 5: Rotate refresh token
-    const newRefreshToken = crypto.randomBytes(32).toString('hex');
-    const newRefreshTokenHash = crypto
-      .createHash('sha256')
-      .update(newRefreshToken)
-      .digest('hex');
-    const newRefreshTokenExpiresAt = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000,
-    ); // 7d (device trust — rolling window)
-
-    // Step 6: Rotate session token — create a new BetterAuth session (new opaque token)
-    // then delete the old one so the old token is immediately invalid
-    const ctx = await this.getBetterAuthContext();
-    const createdSession = await ctx.internalAdapter.createSession(
-      String(session.userId),
-    );
-    if (!createdSession)
-      throw new UnauthorizedException('Failed to rotate session');
-
-    // Fetch the new session from DB to get the fully-typed row (id, guuid, token, etc.)
-    const [newSession] = await this.db
-      .select()
-      .from(schema.userSession)
-      .where(eq(schema.userSession.token, createdSession.token))
-      .limit(1);
-
-    if (!newSession)
-      throw new UnauthorizedException('Failed to retrieve rotated session');
-
     // Copy device context and update role hash into the new session row
     // Roles are always read live from user_role_mapping — never cached in session
-    await this.db
-      .update(schema.userSession)
-      .set({
-        roleHash: currentRoleHash,
-        deviceId: session.deviceId,
-        deviceName: session.deviceName,
-        deviceType: session.deviceType,
-        appVersion: session.appVersion,
-        activeStoreFk: session.activeStoreFk,
-        refreshTokenHash: newRefreshTokenHash,
-        refreshTokenExpiresAt: newRefreshTokenExpiresAt,
-        accessTokenExpiresAt,
-      })
-      .where(eq(schema.userSession.id, newSession.id));
+    await this.sessionsRepository.update(newSession.id, {
+      roleHash: currentRoleHash,
+      deviceId: session.deviceId,
+      deviceName: session.deviceName,
+      deviceType: session.deviceType,
+      appVersion: session.appVersion,
+      activeStoreFk: session.activeStoreFk,
+      refreshTokenHash: newRefreshTokenHash,
+      refreshTokenExpiresAt: newRefreshTokenExpiresAt,
+      accessTokenExpiresAt,
+    });
 
     // Mark OLD token as revoked (for theft detection on next use)
-    // If someone tries to use this old refresh token again,
-    // Step 2b will detect refreshTokenRevokedAt !== null and trigger theft detection
-    // We keep the session row (don't delete yet) so next attempted use is detected
-    await this.db
-      .update(schema.userSession)
-      .set({
-        refreshTokenRevokedAt: new Date(),
-      })
-      .where(eq(schema.userSession.id, session.id));
+    await this.sessionsRepository.update(session.id, {
+      refreshTokenRevokedAt: new Date(),
+      revokedReason: 'ROTATION',
+    });
 
     // Step 7: Fetch default store
     const storeOwnerRoleId = await this.rolesRepository.findSystemRoleId(
       SYSTEM_ROLE_STORE_OWNER,
     );
-    const [primaryStore] = storeOwnerRoleId
-      ? await this.db
-          .select({ guuid: schema.store.guuid })
-          .from(userRoleMapping)
-          .innerJoin(schema.store, eq(schema.store.id, userRoleMapping.storeFk))
-          .where(
-            and(
-              eq(userRoleMapping.userFk, session.userId),
-              eq(userRoleMapping.roleFk, storeOwnerRoleId),
-              isNull(userRoleMapping.deletedAt),
-              eq(userRoleMapping.isActive, true),
-            ),
-          )
-          .limit(1)
-      : [];
+    const primaryStore = storeOwnerRoleId
+      ? await this.rolesRepository.findPrimaryStoreForUser(
+          session.userId,
+          storeOwnerRoleId,
+        )
+      : null;
 
     this.logger.log(`Session rotated for user ${session.userId}`);
 
@@ -1303,10 +1408,14 @@ export class AuthService {
         throw new UnauthorizedException('Invalid JWT audience');
       }
 
+      // Resolve user ID from GUUID (sub claim is now the immutable GUUID)
+      const user = await this.authUsersRepository.findByGuuid(payload.sub);
+      if (!user) {
+        throw new UnauthorizedException('User not found');
+      }
+
       // Get current user roles
-      const currentPermissions = await this.getUserPermissions(
-        Number(payload.sub),
-      );
+      const currentPermissions = await this.getUserPermissions(user.id);
       const currentRoles = currentPermissions.roles || [];
       const currentRoleCodes = currentRoles.map((r) => r.roleCode);
 
@@ -1347,23 +1456,14 @@ export class AuthService {
   private async enforceSessionLimit(userId: number): Promise<void> {
     const MAX_CONCURRENT_SESSIONS = 5;
 
-    const sessions = await this.db
-      .select({
-        id: schema.userSession.id,
-        createdAt: schema.userSession.createdAt,
-      })
-      .from(schema.userSession)
-      .where(eq(schema.userSession.userId, userId))
-      .orderBy(asc(schema.userSession.createdAt));
+    const sessions =
+      await this.sessionsRepository.findAllByUserIdOrdered(userId);
 
     const excessCount = sessions.length - MAX_CONCURRENT_SESSIONS;
     if (excessCount > 0) {
-      // Delete oldest session(s)
       const sessionsToDelete = sessions.slice(0, excessCount);
       for (const session of sessionsToDelete) {
-        await this.db
-          .delete(schema.userSession)
-          .where(eq(schema.userSession.id, session.id));
+        await this.sessionsRepository.delete(session.id);
       }
       this.logger.log(
         `Enforced session limit for user ${userId}. Deleted ${excessCount} oldest session(s).`,
@@ -1419,29 +1519,13 @@ export class AuthService {
    * Get all active sessions for a user
    */
   async getUserSessions(userId: number): Promise<SessionInfoDto[]> {
-    const sessions = await this.db
-      .select({
-        id: schema.userSession.id,
-        deviceId: schema.userSession.deviceId,
-        deviceName: schema.userSession.deviceName,
-        deviceType: schema.userSession.deviceType,
-        platform: schema.userSession.platform,
-        appVersion: schema.userSession.appVersion,
-        createdAt: schema.userSession.createdAt,
-        expiresAt: schema.userSession.expiresAt,
-      })
-      .from(schema.userSession)
-      .where(
-        and(
-          eq(schema.userSession.userId, userId),
-          gt(schema.userSession.expiresAt, new Date()),
-        ),
-      );
+    const sessions =
+      await this.sessionsRepository.findActiveSessionsForUser(userId);
 
     return sessions.map((s) => ({
       ...s,
-      createdAt: s.createdAt?.toISOString(),
-      expiresAt: s.expiresAt?.toISOString(),
+      createdAt: s.createdAt?.toISOString() ?? new Date(0).toISOString(),
+      expiresAt: s.expiresAt.toISOString(),
     }));
   }
 
@@ -1462,26 +1546,16 @@ export class AuthService {
     const sessionIdNum = parseInt(sessionId, 10);
 
     // Verify session belongs to user
-    const [session] = await this.db
-      .select()
-      .from(schema.userSession)
-      .where(
-        and(
-          eq(schema.userSession.id, sessionIdNum),
-          eq(schema.userSession.userId, userId),
-        ),
-      )
-      .limit(1);
+    const session = await this.sessionsRepository.findByIdAndUserId(
+      sessionIdNum,
+      userId,
+    );
 
     if (!session) {
       throw new Error('Session not found or does not belong to user');
     }
 
-    // Delete the session
-    await this.db
-      .delete(schema.userSession)
-      .where(eq(schema.userSession.id, sessionIdNum));
-
+    await this.sessionsRepository.delete(sessionIdNum);
     this.logger.log(`Session ${sessionId} terminated for user ${userId}`);
   }
 
@@ -1489,10 +1563,7 @@ export class AuthService {
    * Terminate all sessions for a user (e.g., after password change)
    */
   async terminateAllSessions(userId: number): Promise<void> {
-    await this.db
-      .delete(schema.userSession)
-      .where(eq(schema.userSession.userId, userId));
-
+    await this.sessionsRepository.deleteAllForUser(userId);
     this.logger.log(`All sessions terminated for user ${userId}`);
   }
 

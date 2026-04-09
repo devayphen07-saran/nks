@@ -3,7 +3,6 @@ import { sql } from 'drizzle-orm';
 import { users } from '../../auth/users';
 import { baseEntity, auditFields } from '../../base.entity';
 import { district } from '../../location/district/district.table';
-import { state } from '../../location/state/state.table';
 
 /**
  * PINCODE
@@ -40,13 +39,13 @@ export const pincode = pgTable(
       .notNull()
       .references(() => district.id, { onDelete: 'restrict' }),
 
-    // FK to state (denormalized for easier querying)
-    stateFk: bigint('state_fk', { mode: 'number' })
-      .notNull()
-      .references(() => state.id, { onDelete: 'restrict' }),
+    // REMOVED: stateFk was denormalized (district already has state reference)
+    // This prevented data inconsistency where district.stateFk ≠ pincode.stateFk
+    // Derive state via district join if needed in queries
 
     // Geographic coordinates
-    latitude: numeric('latitude', { precision: 10, scale: 7 }),
+    // Fixed precision: latitude ±90.0000000, longitude ±180.0000000
+    latitude: numeric('latitude', { precision: 9, scale: 7 }),
     longitude: numeric('longitude', { precision: 10, scale: 7 }),
 
     ...auditFields(() => users.id),
@@ -57,7 +56,7 @@ export const pincode = pgTable(
       .on(table.code)
       .where(sql`deleted_at IS NULL`),
     index('pincode_district_idx').on(table.districtFk),
-    index('pincode_state_idx').on(table.stateFk),
+    // REMOVED: pincode_state_idx (state now derived via district)
   ],
 );
 

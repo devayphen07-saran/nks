@@ -1,15 +1,21 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
-import { InjectDb } from '../../../core/database/inject-db.decorator';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../../../core/database/schema';
-import { eq, and } from 'drizzle-orm';
 import {
   PhoneValidator,
   EmailValidator,
   OtpRequestValidator,
 } from './validators';
 import { SanitizerValidator } from '../../../common/validators/sanitizer.validator';
+import { Msg91Service } from './msg91.service';
+import { SendOtpDto, VerifyOtpDto } from '../dto/otp.dto';
+import { VerifyEmailOtpDto } from '../dto/email-verify.dto';
+import * as schema from '../../../core/database/schema';
+// NOTE: OtpService intentionally does NOT import AuthService
+// This breaks the circular dependency. Session creation is now handled by OtpAuthOrchestrator.
+import { OtpRateLimitService } from './otp-rate-limit.service';
+import { OtpRepository } from '../repositories/otp.repository';
+import { AuthProviderRepository } from '../repositories/auth-provider.repository';
+import { AuthUsersRepository } from '../repositories/auth-users.repository';
 
 /**
  * OTP Hashing Strategy: HMAC-SHA256 (not bcrypt)
@@ -27,27 +33,14 @@ import { SanitizerValidator } from '../../../common/validators/sanitizer.validat
 const OTP_HMAC_SECRET = process.env['OTP_HMAC_SECRET'] || 'default-otp-secret';
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_EMAIL_DIGITS = 6;
-import { Msg91Service } from './msg91.service';
-import { SendOtpDto, VerifyOtpDto } from '../dto/otp.dto';
-import { VerifyEmailOtpDto } from '../dto/email-verify.dto';
-import { AuthService } from './auth.service';
-import { OtpRateLimitService } from './otp-rate-limit.service';
-import { OtpRepository } from '../repositories/otp.repository';
-import { AuthProviderRepository } from '../repositories/auth-provider.repository';
-import { AuthUsersRepository } from '../repositories/auth-users.repository';
-import type { AuthResponseEnvelope } from '../dto';
-
-type Db = NodePgDatabase<typeof schema>;
 
 @Injectable()
 export class OtpService {
   private readonly logger = new Logger(OtpService.name);
 
   constructor(
-    @InjectDb() private readonly db: Db,
     private readonly msg91: Msg91Service,
     private readonly rateLimitService: OtpRateLimitService,
-    private readonly authService: AuthService,
     private readonly otpRepository: OtpRepository,
     private readonly authProviderRepository: AuthProviderRepository,
     private readonly authUsersRepository: AuthUsersRepository,
@@ -86,11 +79,12 @@ export class OtpService {
       throw new BadRequestException(response.message || 'Failed to send OTP');
     }
 
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await this.otpRepository.insertOtpRecord(
       phone,
       'PHONE_VERIFY',
       'MSG91_MANAGED',
-      10 * 60 * 1000,
+      expiresAt,
     );
 
     // MSG91 returns reqId in the "message" field on success: { type: "success", message: "<reqId>" }
@@ -99,20 +93,22 @@ export class OtpService {
   }
 
   /**
-   * Verify OTP via MSG91.
-   * On success, identity is proven → AuthService creates session and returns auth response.
+   * Verify OTP via MSG91 and find/create user.
+   * Returns minimal verification result — session creation is handled by OtpAuthOrchestrator.
    *
-   * @returns AuthResponseEnvelope with tokens and user data
+   * ARCHITECTURE: OtpService is now pure OTP verification logic.
+   * It does NOT call AuthService (breaks circular dependency).
+   * OtpAuthOrchestrator orchestrates the full flow: verify OTP → create session → build response.
+   *
+   * @returns Verification result with user data (not full auth response)
    */
-  async verifyOtp(
-    dto: VerifyOtpDto,
-    deviceInfo?: {
-      deviceId?: string;
-      deviceName?: string;
-      deviceType?: string;
-      appVersion?: string;
-    },
-  ): Promise<AuthResponseEnvelope> {
+  async verifyOtp(dto: VerifyOtpDto): Promise<{
+    verified: true;
+    userId: number;
+    phone: string;
+    guuid: string;
+    user: typeof schema.users.$inferSelect;
+  }> {
     const { phone, otp, reqId } = dto;
 
     // Validate phone format
@@ -136,33 +132,41 @@ export class OtpService {
       'PHONE_VERIFY',
     );
 
-    // 3. Check if super admin has been seeded (first user case)
-    await this.authService.isSuperAdminSeeded();
+    // 3. Find or create user by phone (phone is now proven via MSG91)
+    // NOTE: This logic is now in OtpService (no longer calls AuthService)
+    let user = await this.authUsersRepository.findByPhone(phone);
 
-    // 4. Find or create user by phone (phone is now proven via MSG91)
-    const user = await this.authService.findOrCreateUserByPhone(phone);
+    if (!user) {
+      // Create new user with phone number
+      user = await this.authUsersRepository.create({
+        name: `User ${phone.slice(-4)}`,
+        phoneNumber: phone,
+        phoneNumberVerified: false,
+        iamUserId: crypto.randomUUID(),
+      });
 
-    // 5. Create session and get response envelope
-    const session = await this.authService.createSessionForUser(
-      user.id,
-      deviceInfo,
-    );
+      if (!user) {
+        throw new BadRequestException('Failed to create user');
+      }
+    }
 
-    // 6. Create token pair (access + refresh tokens)
-    const tokenPair = await this.authService.createTokenPair(
-      user.id,
-      session.token,
-      session.userRoles,
-      session.userEmail,
-    );
+    // 4. Mark phone as verified after MSG91 OTP verification
+    if (!user.phoneNumberVerified) {
+      await this.authUsersRepository.verifyPhone(user.id);
+      user = { ...user, phoneNumberVerified: true };
+      this.logger.log(
+        `Phone number verified via MSG91 OTP for user ${user.id}: ${phone.slice(-4)}`,
+      );
+    }
 
-    // 7. Build and return full auth response
-    return this.authService.buildAuthResponse(
+    // Return minimal result — OtpAuthOrchestrator will handle session creation
+    return {
+      verified: true,
+      userId: user.id,
+      phone,
+      guuid: user.guuid,
       user,
-      session.token,
-      session.expiresAt,
-      tokenPair,
-    );
+    };
   }
 
   /**
@@ -182,11 +186,12 @@ export class OtpService {
     const otpHash = this.hashOtp(otp);
 
     // Store hashed OTP record with EMAIL_VERIFY purpose
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await this.otpRepository.insertOtpRecord(
       email,
       'EMAIL_VERIFY',
       otpHash,
-      24 * 60 * 60 * 1000,
+      expiresAt,
     );
 
     // TODO: integrate email delivery service (SendGrid / AWS SES / SMTP)

@@ -1,20 +1,11 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { SessionsRepository } from '../repositories/sessions.repository';
-import type { UserSession, NewUserSession } from '../../../core/database/schema/auth/user-session';
-
-/** Device type enum — must match sessionDeviceTypeEnum in database */
-enum DeviceTypeEnum {
-  IOS = 'IOS',
-  ANDROID = 'ANDROID',
-  WEB = 'WEB',
-}
-
-/** Authentication method enum — must match authMethodEnum in database */
-enum AuthMethodEnum {
-  OTP = 'OTP',
-  PASSWORD = 'PASSWORD',
-  GOOGLE = 'GOOGLE',
-}
+import { SessionMapper } from '../mapper/session.mapper';
+import { SessionValidator } from './validators/session.validator';
+import type {
+  UserSession,
+  NewUserSession,
+} from '../../../core/database/schema/auth/user-session';
 
 export interface DeviceInfo {
   deviceId?: string;
@@ -44,32 +35,6 @@ export interface PublicSession {
 
 const MAX_SESSIONS_PER_USER = 10;
 
-/** Validate and normalize device type to database enum */
-function validateDeviceType(
-  deviceType?: string,
-): DeviceTypeEnum | undefined {
-  if (!deviceType) return undefined;
-  if (Object.values(DeviceTypeEnum).includes(deviceType as DeviceTypeEnum)) {
-    return deviceType as DeviceTypeEnum;
-  }
-  throw new BadRequestException(
-    `Invalid device type: ${deviceType}. Must be one of: ${Object.values(DeviceTypeEnum).join(', ')}`,
-  );
-}
-
-/** Validate and normalize login method to database enum */
-function validateLoginMethod(
-  loginMethod?: string,
-): AuthMethodEnum | undefined {
-  if (!loginMethod) return undefined;
-  if (Object.values(AuthMethodEnum).includes(loginMethod as AuthMethodEnum)) {
-    return loginMethod as AuthMethodEnum;
-  }
-  throw new BadRequestException(
-    `Invalid login method: ${loginMethod}. Must be one of: ${Object.values(AuthMethodEnum).join(', ')}`,
-  );
-}
-
 /**
  * SessionService
  * Responsible for session lifecycle management
@@ -96,8 +61,12 @@ export class SessionService {
     await this.enforceSessionLimit(input.userId);
 
     // Validate and normalize enum values
-    const validatedDeviceType = validateDeviceType(input.deviceType);
-    const validatedLoginMethod = validateLoginMethod(input.loginMethod);
+    const validatedDeviceType = SessionValidator.validateDeviceType(
+      input.deviceType,
+    );
+    const validatedLoginMethod = SessionValidator.validateLoginMethod(
+      input.loginMethod,
+    );
 
     // Create session
     const session = await this.sessionsRepository.create({
@@ -114,6 +83,10 @@ export class SessionService {
       loginMethod: validatedLoginMethod,
     } as NewUserSession);
 
+    if (!session) {
+      throw new BadRequestException('Failed to create session');
+    }
+
     this.logger.debug(
       `Session created for user ${input.userId} (device: ${input.deviceName})`,
     );
@@ -126,7 +99,7 @@ export class SessionService {
    */
   async getUserSessions(userId: number): Promise<PublicSession[]> {
     const sessions = await this.sessionsRepository.findActiveByUserId(userId);
-    return sessions.map(this.toPublicSession);
+    return sessions.map(SessionMapper.toPublicSession);
   }
 
   /**
@@ -212,9 +185,7 @@ export class SessionService {
     }
 
     await this.sessionsRepository.setActiveStore(sessionId, storeId);
-    this.logger.debug(
-      `Active store set for session ${sessionId}: ${storeId}`,
-    );
+    this.logger.debug(`Active store set for session ${sessionId}: ${storeId}`);
   }
 
   /**
@@ -231,9 +202,8 @@ export class SessionService {
    * If user has MAX_SESSIONS, remove oldest before creating new one
    */
   private async enforceSessionLimit(userId: number): Promise<void> {
-    const activeSessions = await this.sessionsRepository.findActiveByUserId(
-      userId,
-    );
+    const activeSessions =
+      await this.sessionsRepository.findActiveByUserId(userId);
 
     if (activeSessions.length >= MAX_SESSIONS_PER_USER) {
       // Remove oldest session
@@ -243,19 +213,5 @@ export class SessionService {
         `Session limit enforced: removed oldest for user ${userId}`,
       );
     }
-  }
-
-  /**
-   * Convert internal session to public format (hide sensitive data)
-   */
-  private toPublicSession(session: UserSession): PublicSession {
-    return {
-      id: session.id,
-      deviceId: session.deviceId ?? undefined,
-      deviceName: session.deviceName ?? undefined,
-      deviceType: session.deviceType ?? undefined,
-      expiresAt: session.expiresAt,
-      createdAt: session.createdAt,
-    };
   }
 }

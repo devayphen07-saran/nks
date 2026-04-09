@@ -1,11 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectDb } from '../../../core/database/inject-db.decorator';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../../../core/database/schema';
-import { eq, and } from 'drizzle-orm';
 import { RoleEntityPermissionRepository } from '../../roles/role-entity-permission.repository';
-
-type Db = NodePgDatabase<typeof schema>;
+import { RoleMapper } from '../../roles/mapper/role.mapper';
+import { AuthUsersRepository } from '../repositories/auth-users.repository';
 
 export interface PermissionsSnapshot {
   [entityCode: string]: {
@@ -30,7 +26,7 @@ export class PermissionsService {
   private readonly logger = new Logger(PermissionsService.name);
 
   constructor(
-    @InjectDb() private readonly db: Db,
+    private readonly authUsersRepository: AuthUsersRepository,
     private readonly roleEntityPermissionRepository: RoleEntityPermissionRepository,
   ) {}
 
@@ -58,70 +54,28 @@ export class PermissionsService {
    * Security is enforced by RBACGuard checking user's activeStoreId (line 80-93 in rbac.guard.ts).
    */
   async buildPermissionsSnapshot(userId: number): Promise<PermissionsSnapshot> {
-    const userStores = await this.db
-      .select({
-        storeId: schema.storeUserMapping.storeFk,
-      })
-      .from(schema.storeUserMapping)
-      .where(
-        and(
-          eq(schema.storeUserMapping.userFk, userId),
-          eq(schema.storeUserMapping.isActive, true),
-        ),
-      );
-
-    const snapshot: PermissionsSnapshot = {};
+    const storeIds = await this.authUsersRepository.findActiveStoreIds(userId);
 
     // Collect permissions from all stores
-    for (const store of userStores) {
-      if (!store.storeId) continue;
-
+    const allStorePermissions: PermissionsSnapshot[] = [];
+    for (const storeId of storeIds) {
       const storePerms =
         await this.roleEntityPermissionRepository.getUserEntityPermissions(
           userId,
-          store.storeId,
+          storeId,
         );
-
-      // Merge permissions (union approach)
-      for (const [entityCode, perms] of Object.entries(storePerms)) {
-        if (!snapshot[entityCode]) {
-          snapshot[entityCode] = {
-            canView: false,
-            canCreate: false,
-            canEdit: false,
-            canDelete: false,
-            deny: false,
-          };
-        }
-        // Union: if ANY store grants, user has it (except deny)
-        snapshot[entityCode].canView =
-          snapshot[entityCode].canView || perms.canView;
-        snapshot[entityCode].canCreate =
-          snapshot[entityCode].canCreate || perms.canCreate;
-        snapshot[entityCode].canEdit =
-          snapshot[entityCode].canEdit || perms.canEdit;
-        snapshot[entityCode].canDelete =
-          snapshot[entityCode].canDelete || perms.canDelete;
-        // DENY: if ANY store denies, deny is true (overrides all)
-        snapshot[entityCode].deny =
-          (snapshot[entityCode].deny || perms.deny) ?? false;
-      }
+      allStorePermissions.push(storePerms);
     }
 
-    return snapshot;
+    // Merge permissions using RoleMapper (union approach)
+    return RoleMapper.mergePermissions(allStorePermissions);
   }
 
   /**
    * Get current permissions version for a user
    */
   async getPermissionsVersion(userId: number): Promise<string> {
-    const [user] = await this.db
-      .select({ permissionsVersion: schema.users.permissionsVersion })
-      .from(schema.users)
-      .where(eq(schema.users.id, userId))
-      .limit(1);
-
-    return user?.permissionsVersion ?? 'v1';
+    return this.authUsersRepository.getPermissionsVersion(userId);
   }
 
   /**
@@ -166,28 +120,11 @@ export class PermissionsService {
    * Called when permissions change
    */
   async incrementPermissionsVersion(userId: number): Promise<string> {
-    const [user] = await this.db
-      .select({ permissionsVersion: schema.users.permissionsVersion })
-      .from(schema.users)
-      .where(eq(schema.users.id, userId))
-      .limit(1);
-
-    if (!user) {
-      this.logger.warn(`User ${userId} not found for version increment`);
-      return 'v1';
-    }
-
-    const currentVersion = user.permissionsVersion ?? 'v1';
-    const versionNum = parseInt(currentVersion.substring(1), 10) || 1;
-    const newVersion = `v${versionNum + 1}`;
-
-    await this.db
-      .update(schema.users)
-      .set({ permissionsVersion: newVersion })
-      .where(eq(schema.users.id, userId));
+    const newVersion =
+      await this.authUsersRepository.incrementPermissionsVersion(userId);
 
     this.logger.log(
-      `Permissions version bumped for user ${userId}: ${currentVersion} → ${newVersion}`,
+      `Permissions version bumped for user ${userId}: → ${newVersion}`,
     );
 
     return newVersion;

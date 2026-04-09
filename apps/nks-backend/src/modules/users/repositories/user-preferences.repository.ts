@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { eq, and, isNull } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
@@ -29,17 +29,13 @@ export class UserPreferencesRepository {
     return prefs ?? null;
   }
 
-  async create(data: NewUserPreferences): Promise<UserPreferences> {
+  async create(data: NewUserPreferences): Promise<UserPreferences | null> {
     const [prefs] = await this.db
       .insert(schema.userPreferences)
       .values(data)
       .returning();
 
-    if (!prefs) {
-      throw new InternalServerErrorException('Failed to create user preferences');
-    }
-
-    return prefs;
+    return prefs ?? null;
   }
 
   async update(

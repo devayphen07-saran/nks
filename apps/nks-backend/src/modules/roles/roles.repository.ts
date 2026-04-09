@@ -24,9 +24,11 @@ export class RolesRepository {
   /**
    * Resolve the database ID for a system role by code.
    * System roles have storeFk = NULL and isEditable = false.
+   * Pass tx parameter to use within a transaction (useful for atomic first-user role assignment).
    */
-  async findSystemRoleId(code: string): Promise<number | null> {
-    const [row] = await this.db
+  async findSystemRoleId(code: string, tx?: Db): Promise<number | null> {
+    const client = tx ?? this.db;
+    const [row] = await client
       .select({ id: schema.roles.id })
       .from(schema.roles)
       .where(
@@ -44,10 +46,13 @@ export class RolesRepository {
 
   /**
    * Get all active roles for a user from user_role_mapping.
-   * Returns both global (storeFk=null) and store-scoped roles.
+   *
+   * user_role_mapping is the single source of truth for all roles:
+   * - Platform-level roles (SUPER_ADMIN, USER) have storeFk = NULL
+   * - Store-scoped roles (STORE_OWNER, STAFF, custom roles) have storeFk = storeId
    */
   async findUserRoles(userId: number): Promise<UserRoleRow[]> {
-    const rows = await this.db
+    return this.db
       .select({
         roleId: userRoleMapping.roleFk,
         roleCode: schema.roles.code,
@@ -64,21 +69,17 @@ export class RolesRepository {
           isNull(userRoleMapping.deletedAt),
         ),
       );
-
-    return rows.map((r) => ({
-      roleId: r.roleId,
-      roleCode: r.roleCode,
-      isSystem: r.isSystem,
-      storeFk: r.storeFk ?? null,
-      isPrimary: r.isPrimary,
-    }));
   }
 
   /**
    * Get all active roles for a user with store name included.
+   *
+   * user_role_mapping is the single source of truth for all roles:
+   * - Platform-level roles (SUPER_ADMIN, USER) have storeFk = NULL (storeName = null in result)
+   * - Store-scoped roles have storeFk = storeId (storeName populated from store table)
    */
   async findUserRolesWithCompany(userId: number): Promise<UserRoleWithStoreRow[]> {
-    const rows = await this.db
+    return this.db
       .select({
         roleId: userRoleMapping.roleFk,
         roleCode: schema.roles.code,
@@ -97,15 +98,6 @@ export class RolesRepository {
           isNull(userRoleMapping.deletedAt),
         ),
       );
-
-    return rows.map((r) => ({
-      roleId: r.roleId,
-      roleCode: r.roleCode,
-      isSystem: r.isSystem,
-      storeFk: r.storeFk ?? null,
-      storeName: r.storeName ?? null,
-      isPrimary: r.isPrimary,
-    }));
   }
 
   /** Get route permissions (path + CRUD flags) for a single role ID. */
@@ -449,5 +441,102 @@ export class RolesRepository {
       .update(schema.roles)
       .set({ isActive: false, deletedAt: new Date(), deletedBy })
       .where(eq(schema.roles.id, id));
+  }
+
+  /**
+   * Check whether any active user is assigned a given role.
+   * Used for SUPER_ADMIN seeding check.
+   */
+  async hasUserWithRole(roleId: number): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: userRoleMapping.id })
+      .from(userRoleMapping)
+      .where(
+        and(
+          eq(userRoleMapping.roleFk, roleId),
+          isNull(userRoleMapping.storeFk),
+          isNull(userRoleMapping.deletedAt),
+          eq(userRoleMapping.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    return !!row;
+  }
+
+  /**
+   * Find the primary store (STORE_OWNER) for a user.
+   * Returns the store guuid, or null if the user owns no store.
+   */
+  async findPrimaryStoreForUser(
+    userId: number,
+    storeOwnerRoleId: number,
+  ): Promise<{ guuid: string } | null> {
+    const [row] = await this.db
+      .select({ guuid: schema.store.guuid })
+      .from(userRoleMapping)
+      .innerJoin(schema.store, eq(schema.store.id, userRoleMapping.storeFk))
+      .where(
+        and(
+          eq(userRoleMapping.userFk, userId),
+          eq(userRoleMapping.roleFk, storeOwnerRoleId),
+          isNull(userRoleMapping.deletedAt),
+          eq(userRoleMapping.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  /**
+   * Assign a role to a user inside an existing transaction.
+   * Used during registration to atomically assign the initial role.
+   */
+  async assignRoleWithinTransaction(
+    tx: Db,
+    userId: number,
+    roleCode: string,
+  ): Promise<void> {
+    const [roleRecord] = await tx
+      .select({ id: schema.roles.id })
+      .from(schema.roles)
+      .where(
+        and(eq(schema.roles.code, roleCode), isNull(schema.roles.storeFk)),
+      )
+      .limit(1);
+
+    if (!roleRecord) return;
+
+    await tx.insert(userRoleMapping).values({
+      userFk: userId,
+      roleFk: roleRecord.id,
+      isPrimary: true,
+      isActive: true,
+    });
+  }
+
+  /**
+   * Check if SUPER_ADMIN is already assigned within a transaction (FOR UPDATE lock).
+   * Returns the role code to assign: 'SUPER_ADMIN' if first user, else 'USER'.
+   */
+  async resolveInitialRoleWithinTransaction(
+    tx: Db,
+    superAdminRoleId: number,
+  ): Promise<'SUPER_ADMIN' | 'USER'> {
+    const existing = await tx
+      .select({ id: userRoleMapping.id })
+      .from(userRoleMapping)
+      .where(
+        and(
+          eq(userRoleMapping.roleFk, superAdminRoleId),
+          isNull(userRoleMapping.storeFk),
+          isNull(userRoleMapping.deletedAt),
+          eq(userRoleMapping.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    return existing.length > 0 ? 'USER' : 'SUPER_ADMIN';
   }
 }

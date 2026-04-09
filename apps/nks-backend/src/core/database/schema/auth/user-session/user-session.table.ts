@@ -53,16 +53,28 @@ export const userSession = pgTable(
       withTimezone: true,
     }),
 
+    // Device fingerprint — HMAC-SHA256 of client IP (privacy-safe, server-keyed)
+    // Stored alongside raw ipAddress so fingerprint checks don't expose the raw IP
+    ipHash: varchar('ip_hash', { length: 64 }),
+
     // Role hash (SHA256) for detecting role changes between requests
     // If this differs from current role hash, roles have changed and session should be invalidated
     roleHash: varchar('role_hash', { length: 64 }),
 
     // Refresh Token Rotation (security)
     // When null: refresh token is still valid
-    // When set: refresh token was revoked during rotation or logout
+    // When set: refresh token was revoked — revokedReason explains why
     refreshTokenRevokedAt: timestamp('refresh_token_revoked_at', {
       withTimezone: true,
     }),
+
+    // Why this token was revoked:
+    //   ROTATION          — normal token rotation (expected)
+    //   TOKEN_REUSE       — stolen/replayed token detected
+    //   LOGOUT            — user explicitly logged out
+    //   PASSWORD_CHANGE   — password changed, all sessions invalidated
+    //   ADMIN_FORCE_LOGOUT — admin terminated session
+    revokedReason: varchar('revoked_reason', { length: 50 }),
 
     // True if this session issued a new refresh token to the client (rotation completed)
     // On next refresh, old session marked as rotated, new session created with new token

@@ -122,13 +122,19 @@ export class RoleEntityPermissionRepository {
   /**
    * Create or update entity permission for a role.
    * Accepts entityCode string and looks up entity_type to find FK.
+   * @throws NotFoundException if entity type not found
    */
   async upsertPermission(
     roleId: number,
     entityCode: string,
     permission: Partial<EntityPermission>,
   ): Promise<void> {
-    const entityTypeId = await this.resolveEntityTypeIdOrThrow(entityCode);
+    const entityTypeId = await this.resolveEntityTypeId(entityCode);
+    if (!entityTypeId) {
+      throw new NotFoundException(
+        `Entity type '${entityCode}' not found`,
+      );
+    }
 
     const [existing] = await this.db
       .select()
@@ -211,36 +217,20 @@ export class RoleEntityPermissionRepository {
         ),
       );
 
-    // Merge permissions (union grant, but DENY overrides all)
-    const result: RoleEntityPermissions = {};
-    permissions.forEach((perm) => {
-      if (!result[perm.entityCode]) {
-        result[perm.entityCode] = {
-          canView: false,
-          canCreate: false,
-          canEdit: false,
-          canDelete: false,
-          deny: false,
-        };
-      }
-      result[perm.entityCode].canView =
-        result[perm.entityCode].canView || perm.canView;
-      result[perm.entityCode].canCreate =
-        result[perm.entityCode].canCreate || perm.canCreate;
-      result[perm.entityCode].canEdit =
-        result[perm.entityCode].canEdit || perm.canEdit;
-      result[perm.entityCode].canDelete =
-        result[perm.entityCode].canDelete || perm.canDelete;
-      result[perm.entityCode].deny =
-        result[perm.entityCode].deny || perm.deny;
-    });
-
-    return result;
+    return this.mergeEntityPermissions(permissions);
   }
 
-  /** Soft-delete permission. */
+  /**
+   * Soft-delete permission.
+   * @throws NotFoundException if entity type not found
+   */
   async deletePermission(roleId: number, entityCode: string): Promise<void> {
-    const entityTypeId = await this.resolveEntityTypeIdOrThrow(entityCode);
+    const entityTypeId = await this.resolveEntityTypeId(entityCode);
+    if (!entityTypeId) {
+      throw new NotFoundException(
+        `Entity type '${entityCode}' not found`,
+      );
+    }
 
     await this.db
       .update(roleEntityPermission)
@@ -298,13 +288,21 @@ export class RoleEntityPermissionRepository {
       );
   }
 
-  /** Create a new entity permission using entity code (looks up FK). */
+  /**
+   * Create a new entity permission using entity code (looks up FK).
+   * @throws NotFoundException if entity type not found
+   */
   async create(
     roleId: number,
     entityCode: string,
     data: Partial<EntityPermission>,
   ): Promise<RoleEntityPermissionRow> {
-    const entityTypeId = await this.resolveEntityTypeIdOrThrow(entityCode);
+    const entityTypeId = await this.resolveEntityTypeId(entityCode);
+    if (!entityTypeId) {
+      throw new NotFoundException(
+        `Entity type '${entityCode}' not found`,
+      );
+    }
 
     const [created] = await this.db
       .insert(roleEntityPermission)
@@ -350,14 +348,43 @@ export class RoleEntityPermissionRepository {
     return row?.id ?? null;
   }
 
-  /** Resolve entity_type FK by code. Throws NotFoundException if not found. */
-  private async resolveEntityTypeIdOrThrow(entityCode: string): Promise<number> {
-    const id = await this.resolveEntityTypeId(entityCode);
-    if (!id) {
-      throw new NotFoundException(
-        `Entity type '${entityCode}' not found`,
-      );
-    }
-    return id;
+  /**
+   * Merge permissions across multiple roles.
+   * Uses union grant (OR) for allow, but DENY overrides all.
+   */
+  private mergeEntityPermissions(
+    permissions: Array<{
+      entityCode: string;
+      canView: boolean;
+      canCreate: boolean;
+      canEdit: boolean;
+      canDelete: boolean;
+      deny: boolean;
+    }>,
+  ): RoleEntityPermissions {
+    const result: RoleEntityPermissions = {};
+    permissions.forEach((perm) => {
+      if (!result[perm.entityCode]) {
+        result[perm.entityCode] = {
+          canView: false,
+          canCreate: false,
+          canEdit: false,
+          canDelete: false,
+          deny: false,
+        };
+      }
+      result[perm.entityCode].canView =
+        result[perm.entityCode].canView || perm.canView;
+      result[perm.entityCode].canCreate =
+        result[perm.entityCode].canCreate || perm.canCreate;
+      result[perm.entityCode].canEdit =
+        result[perm.entityCode].canEdit || perm.canEdit;
+      result[perm.entityCode].canDelete =
+        result[perm.entityCode].canDelete || perm.canDelete;
+      result[perm.entityCode].deny =
+        result[perm.entityCode].deny || perm.deny;
+    });
+
+    return result;
   }
 }

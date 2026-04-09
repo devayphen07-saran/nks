@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
@@ -21,17 +21,13 @@ export class OtpRateLimitRepository {
     return record ?? null;
   }
 
-  async create(data: NewOtpRequestLog): Promise<OtpRequestLog> {
+  async create(data: NewOtpRequestLog): Promise<OtpRequestLog | null> {
     const [record] = await this.db
       .insert(schema.otpRequestLog)
       .values(data)
       .returning();
 
-    if (!record) {
-      throw new InternalServerErrorException('Failed to create OTP request log');
-    }
-
-    return record;
+    return record ?? null;
   }
 
   async incrementRequestCount(id: number, newCount: number): Promise<void> {

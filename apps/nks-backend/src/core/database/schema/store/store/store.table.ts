@@ -35,7 +35,7 @@ export const store = pgTable(
     // Owner user can be changed via this field; replaces the old STORE_OWNER role concept
     ownerUserFk: bigint('owner_user_fk', { mode: 'number' })
       .references(() => users.id, {
-        onDelete: 'set null',
+        onDelete: 'restrict', // ← FIXED: prevent loss of store ownership audit trail
       }),
 
     // Legal entity type (PVT_LTD, SOLE_PROP, PARTNERSHIP, LLC, CORP, TRUST, OPC, SOCIETY, etc.)
@@ -97,6 +97,7 @@ export const store = pgTable(
       sql`(store_status = 'ACTIVE') = is_active`,
     ),
     index('store_owner_user_idx').on(table.ownerUserFk),
+    index('store_parent_store_idx').on(table.parentStoreFk), // ← ADDED: for hierarchy queries
   ],
 );
 

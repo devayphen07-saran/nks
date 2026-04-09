@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { eq, and, lt, desc, sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
@@ -42,17 +42,13 @@ export class OtpRepository {
     return otp ?? null;
   }
 
-  async create(data: NewOtpVerification): Promise<OtpVerification> {
+  async create(data: NewOtpVerification): Promise<OtpVerification | null> {
     const [otp] = await this.db
       .insert(schema.otpVerification)
       .values(data)
       .returning();
 
-    if (!otp) {
-      throw new InternalServerErrorException('Failed to create OTP');
-    }
-
-    return otp;
+    return otp ?? null;
   }
 
   async markAsUsed(otpId: number): Promise<void> {
@@ -106,13 +102,13 @@ export class OtpRepository {
     identifier: string,
     purpose: 'LOGIN' | 'PHONE_VERIFY' | 'EMAIL_VERIFY' | 'RESET_PASSWORD',
     value: string,
-    expiresInMs: number,
+    expiresAt: Date,
   ): Promise<void> {
     await this.db.insert(schema.otpVerification).values({
       identifier,
       value,
       purpose,
-      expiresAt: new Date(Date.now() + expiresInMs),
+      expiresAt,
     });
   }
 }

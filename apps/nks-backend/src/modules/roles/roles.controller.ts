@@ -17,7 +17,7 @@ import { RBACGuard } from '../../common/guards/rbac.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CreateRoleDto, UpdateRoleDto } from './dto';
-import type { RoleDetailResponse, RoleResponse } from './dto/role-response.dto';
+import type { RoleDetailResponse, RoleResponse, RoleResponseDto } from './dto/role-response.dto';
 import type { SessionUser } from 'src/modules/auth/interfaces/session-user.interface';
 
 @ApiTags('Roles')
@@ -40,7 +40,7 @@ export class RolesController {
   async createRole(
     @Body() dto: CreateRoleDto,
     @CurrentUser() user: SessionUser,
-  ): Promise<ApiResponse<RoleResponse>> {
+  ): Promise<ApiResponse<RoleResponseDto>> {
     const role = await this.rolesService.createRole(user.userId, dto);
     return ApiResponse.ok(role, 'Role created successfully');
   }
@@ -78,7 +78,7 @@ export class RolesController {
     @Param('guuid') guuid: string,
     @Body() dto: UpdateRoleDto,
     @CurrentUser() user: SessionUser,
-  ): Promise<ApiResponse<RoleResponse>> {
+  ): Promise<ApiResponse<RoleResponseDto>> {
     const role = await this.rolesService.updateRoleByGuuid(
       guuid,
       dto,

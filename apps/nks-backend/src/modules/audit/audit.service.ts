@@ -1,11 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { InjectDb } from '../../core/database/inject-db.decorator';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../../core/database/schema';
-import { eq } from 'drizzle-orm';
 import { AuditRepository } from './repositories/audit.repository';
-
-type Db = NodePgDatabase<typeof schema>;
 
 export enum AuditEventType {
   LOGIN = 'LOGIN',
@@ -116,7 +110,6 @@ export class AuditService {
   private readonly logger = new Logger(AuditService.name);
 
   constructor(
-    @InjectDb() private readonly db: Db,
     private readonly auditRepository: AuditRepository,
   ) {}
 
@@ -319,7 +312,7 @@ export class AuditService {
   async getUserAuditLogs(
     userId: number,
     limit: number = 100,
-  ): Promise<(typeof schema.auditLogs.$inferSelect)[]> {
+  ): Promise<Awaited<ReturnType<typeof this.auditRepository.findByUserId>>> {
     return this.auditRepository.findByUserId(userId, limit);
   }
 }

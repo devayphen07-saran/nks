@@ -47,6 +47,8 @@ export const plans = pgTable('plans', {
   ...auditFields(() => users.id),
 }, (table) => [
   index('plans_plan_type_idx').on(table.planTypeFk),
+  index('plans_allow_to_upgrade_idx').on(table.allowToUpgradeFk), // ← ADDED: for upgrade path queries
+  index('plans_allow_to_downgrade_idx').on(table.allowToDowngradeFk), // ← ADDED: for downgrade path queries
 
   // Prevent a plan from referencing itself as an upgrade/downgrade target
   check('plans_no_self_upgrade_chk', sql`allow_to_upgrade_fk IS NULL OR allow_to_upgrade_fk != id`),

@@ -1,4 +1,4 @@
-import { pgTable, bigint, varchar, date, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigint, varchar, timestamp, index } from 'drizzle-orm/pg-core';
 import { baseEntity, auditFields } from '../../base.entity';
 import { users } from '../../auth/users';
 import { subscription } from './subscription.table';
@@ -33,8 +33,8 @@ export const subscriptionItem = pgTable('subscription_item', {
 
   // Business Fields
   priceMode: varchar('price_mode', { length: 30 }).notNull().default('RECURRING'), // RECURRING | ONE_TIME
-  effectiveFrom: date('effective_from'),
-  effectiveTo: date('effective_to'),
+  effectiveFrom: timestamp('effective_from', { withTimezone: true }), // ← FIXED: standardized to timestamp
+  effectiveTo: timestamp('effective_to', { withTimezone: true }), // ← FIXED: standardized to timestamp
 
   // Audit Fields
   ...auditFields(() => users.id),

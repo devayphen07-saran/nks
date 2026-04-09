@@ -1,12 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { RolesRepository } from './roles.repository';
 import { RoleEntityPermissionRepository } from './role-entity-permission.repository';
+import { RoleMapper } from './mapper/role.mapper';
 import { CreateRoleDto, UpdateRoleDto } from './dto';
 import type { EntityPermission } from './dto/role-response.dto';
-import {
-  NotFoundException,
-  ForbiddenException,
-} from '../../common/exceptions';
+import { NotFoundException, ForbiddenException } from '../../common/exceptions';
 import { ErrorCode } from '../../common/constants/error-codes.constants';
 
 @Injectable()
@@ -26,7 +24,11 @@ export class RolesService {
   async listRoles(
     opts: { search?: string; page?: number; pageSize?: number } = {},
   ) {
-    return this.rolesRepository.findAll(opts);
+    const { rows, total } = await this.rolesRepository.findAll(opts);
+    return {
+      rows: rows.map(RoleMapper.toResponseDto),
+      total,
+    };
   }
 
   /**
@@ -39,7 +41,7 @@ export class RolesService {
         errorCode: ErrorCode.ROLE_NOT_FOUND,
         message: 'Role not found',
       });
-    return role;
+    return RoleMapper.toResponseDto(role);
   }
 
   /**
@@ -52,7 +54,7 @@ export class RolesService {
         errorCode: ErrorCode.ROLE_NOT_FOUND,
         message: 'Role not found',
       });
-    return role;
+    return RoleMapper.toResponseDto(role);
   }
 
   /**
@@ -83,11 +85,20 @@ export class RolesService {
       }>;
     }
   > {
-    const role = await this.getRoleByGuuid(guuid);
+    // Get raw entity (not mapped) for internal security checks requiring storeFk
+    const role = await this.rolesRepository.findByGuuid(guuid);
+    if (!role)
+      throw new NotFoundException({
+        errorCode: ErrorCode.ROLE_NOT_FOUND,
+        message: 'Role not found',
+      });
 
     // Record-Level Security: Verify user owns the store this role belongs to
     if (role.storeFk) {
-      const isOwner = await this.rolesRepository.isStoreOwner(userId, role.storeFk);
+      const isOwner = await this.rolesRepository.isStoreOwner(
+        userId,
+        role.storeFk,
+      );
       if (!isOwner) {
         throw new ForbiddenException({
           errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
@@ -101,28 +112,16 @@ export class RolesService {
       role.id,
     );
 
-    const entityPermissions = entityPerms.reduce(
-      (acc, perm) => {
-        acc[perm.entityCode] = {
-          canView: perm.canView,
-          canCreate: perm.canCreate,
-          canEdit: perm.canEdit,
-          canDelete: perm.canDelete,
-        };
-        return acc;
-      },
-      {} as Record<string, EntityPermission>,
-    );
+    const entityPermissions = RoleMapper.toEntityPermissionMap(entityPerms);
 
-    const routePermissions = await this.rolesRepository.findRoutePermissionsByRoleId(
-      role.id,
-    );
+    const routePermissions =
+      await this.rolesRepository.findRoutePermissionsByRoleId(role.id);
 
     return {
       ...role,
       entityPermissions,
       routePermissions,
-    } as any;
+    };
   }
 
   /**
@@ -130,12 +129,25 @@ export class RolesService {
    * Only store owners can create roles in their stores.
    */
   async createRole(userId: number, dto: CreateRoleDto) {
+    // Guard: Prevent creation of roles with reserved system role codes
+    const RESERVED_CODES = ['SUPER_ADMIN', 'USER', 'STORE_OWNER', 'STAFF'];
+    if (RESERVED_CODES.includes(dto.code.toUpperCase())) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.BAD_REQUEST,
+        message: `Role code '${dto.code}' is reserved for system roles and cannot be used for custom roles.`,
+      });
+    }
+
     // Verify user owns the store
-    const isOwner = await this.rolesRepository.isStoreOwner(userId, dto.storeId);
+    const isOwner = await this.rolesRepository.isStoreOwner(
+      userId,
+      dto.storeId,
+    );
     if (!isOwner) {
       throw new ForbiddenException({
         errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
-        message: 'You do not own this store. Only store owners can create roles.',
+        message:
+          'You do not own this store. Only store owners can create roles.',
       });
     }
 
@@ -147,19 +159,30 @@ export class RolesService {
       storeFk: dto.storeId,
       createdBy: userId,
     });
-    this.logger.log(`Created role: ${dto.code} for store ${dto.storeId} by user ${userId}`);
-    return created;
+    this.logger.log(
+      `Created role: ${dto.code} for store ${dto.storeId} by user ${userId}`,
+    );
+    return RoleMapper.toResponseDto(created);
   }
 
   /**
    * Update role by GUUID with store ownership verification.
    */
   async updateRoleByGuuid(guuid: string, dto: UpdateRoleDto, userId: number) {
-    const role = await this.getRoleByGuuid(guuid);
+    // Get raw entity for internal security checks requiring storeFk
+    const role = await this.rolesRepository.findByGuuid(guuid);
+    if (!role)
+      throw new NotFoundException({
+        errorCode: ErrorCode.ROLE_NOT_FOUND,
+        message: 'Role not found',
+      });
 
     // Verify user owns the store
     if (role.storeFk) {
-      const isOwner = await this.rolesRepository.isStoreOwner(userId, role.storeFk);
+      const isOwner = await this.rolesRepository.isStoreOwner(
+        userId,
+        role.storeFk,
+      );
       if (!isOwner) {
         throw new ForbiddenException({
           errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
@@ -199,7 +222,7 @@ export class RolesService {
         message: 'Role not found',
       });
     this.logger.log(`Updated role ${id} by user ${modifiedBy}`);
-    return updated;
+    return RoleMapper.toResponseDto(updated);
   }
 
   /**

@@ -47,7 +47,7 @@ export interface PincodeResponse {
   localityName: string;
   areaName: string | null;
   districtFk: number;
-  stateFk: number;
+  // REMOVED: stateFk (state derived via district relationship)
   latitude: string | null;
   longitude: string | null;
   isActive: boolean;

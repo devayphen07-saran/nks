@@ -2,7 +2,7 @@ import {
   pgTable,
   numeric,
   bigint,
-  date,
+  timestamp,
   boolean,
   check,
   index,
@@ -74,10 +74,10 @@ export const taxRateMaster = pgTable(
     }).default('0'),
 
     // Date this rate becomes effective
-    effectiveFrom: date('effective_from').notNull(),
+    effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull(), // ← FIXED: standardized to timestamp
 
     // Date this rate expires (NULL = still active)
-    effectiveTo: date('effective_to'),
+    effectiveTo: timestamp('effective_to', { withTimezone: true }), // ← FIXED: standardized to timestamp
 
     // Is this rate currently in use?
     isActive: boolean('is_active').notNull().default(true),

@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
@@ -47,17 +47,13 @@ export class AuthProviderRepository {
     return provider?.id ?? null;
   }
 
-  async create(data: NewUserAuthProvider): Promise<UserAuthProvider> {
+  async create(data: NewUserAuthProvider): Promise<UserAuthProvider | null> {
     const [provider] = await this.db
       .insert(schema.userAuthProvider)
       .values(data)
       .returning();
 
-    if (!provider) {
-      throw new InternalServerErrorException('Failed to create auth provider');
-    }
-
-    return provider;
+    return provider ?? null;
   }
 
   async updatePassword(providerId: number, passwordHash: string): Promise<void> {

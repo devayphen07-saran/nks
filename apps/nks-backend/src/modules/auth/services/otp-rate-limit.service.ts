@@ -1,13 +1,7 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import { InjectDb } from '../../../core/database/inject-db.decorator';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../../../core/database/schema';
-import { eq } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { OtpRateLimitRepository } from '../repositories/otp-rate-limit.repository';
-
-type Db = NodePgDatabase<typeof schema>;
 
 /**
  * OTP Request Rate Limiting Service
@@ -24,7 +18,6 @@ export class OtpRateLimitService {
   private readonly WINDOW_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
   constructor(
-    @InjectDb() private readonly db: Db,
     private readonly otpRateLimitRepository: OtpRateLimitRepository,
     private readonly configService: ConfigService,
   ) {}

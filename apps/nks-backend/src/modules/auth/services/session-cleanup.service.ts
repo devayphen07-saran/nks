@@ -1,11 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectDb } from '../../../core/database/inject-db.decorator';
-import * as schema from '../../../core/database/schema';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { lt } from 'drizzle-orm';
 import { SessionCleanupRepository } from '../repositories/session-cleanup.repository';
-
-type Db = NodePgDatabase<typeof schema>;
 
 /**
  * Session Cleanup Service
@@ -24,7 +18,6 @@ export class SessionCleanupService {
   private readonly logger = new Logger(SessionCleanupService.name);
 
   constructor(
-    @InjectDb() private readonly db: Db,
     private readonly sessionCleanupRepository: SessionCleanupRepository,
   ) {}
 

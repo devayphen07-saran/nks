@@ -17,7 +17,6 @@ import {
 import type { AuthenticatedRequest } from '../../../common/guards/auth.guard';
 import type { Request, Response } from 'express';
 import { AuthService } from '../services/auth.service';
-import { RefreshTokenService } from '../services/refresh-token.service';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthControllerHelpers } from '../../../common/utils/auth-helpers';
 import {
@@ -48,7 +47,6 @@ export class AuthController {
 
   constructor(
     private readonly authService: AuthService,
-    private readonly refreshTokenService: RefreshTokenService,
     private readonly jwtConfigService: JWTConfigService,
   ) {}
 
@@ -118,26 +116,8 @@ export class AuthController {
       (req.headers as Record<string, string | undefined>)['x-device-id'] ??
       null;
 
-    // ───────────────────────────────────────────────────────────────
-    // PHASE 1 SECURITY: Refresh Token Rotation + Reuse Detection
-    // ───────────────────────────────────────────────────────────────
-    // Step 1: Extract sessionId from refresh token
-    const sessionId =
-      await this.refreshTokenService.extractSessionIdFromRefreshToken(
-        providedRefreshToken,
-      );
-
-    // Step 2: Verify token validity and detect reuse/theft
-    // If token was revoked (previous rotation), this throws immediately
-    // and the service nukes ALL sessions for this user
-    await this.refreshTokenService.verifyRefreshToken(
-      sessionId,
-      providedRefreshToken,
-    );
-
-    // Step 3: Call existing refresh logic (generates new access token)
-    // Note: Token rotation (step 4 previously) is already done inside refreshAccessToken()
-    // No need to call rotateRefreshToken() again - would cause duplicate rotation
+    // refreshAccessToken() handles structured token decode, session lookup,
+    // reuse detection, rotation, and new token issuance atomically.
     const result = await this.authService.refreshAccessToken(
       providedRefreshToken,
       deviceId,

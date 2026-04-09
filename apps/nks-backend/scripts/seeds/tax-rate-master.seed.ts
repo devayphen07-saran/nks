@@ -105,7 +105,7 @@ export async function seedTaxRateMaster(db: Db) {
 
   // Create rates for each (store, commodity code) pair
   const rates: Array<typeof taxRateMaster.$inferInsert> = [];
-  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const today = new Date(); // ← FIXED: changed from string to Date (for timestamp field)
 
   for (const storeRecord of stores) {
     for (const commodity of commodityCodeList) {
