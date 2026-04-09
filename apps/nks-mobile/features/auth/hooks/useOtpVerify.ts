@@ -10,10 +10,13 @@ const RESEND_COOLDOWN = 30;
 
 export function useOtpVerify() {
   const dispatch = useRootDispatch();
-  const { phone, reqId: initialReqId } = useLocalSearchParams<{
+  const { phone: rawPhone, reqId: initialReqId } = useLocalSearchParams<{
     phone: string;
     reqId: string;
   }>();
+
+  // Clean up phone: remove duplicate +, ensure single +91 prefix
+  const phone = rawPhone ? rawPhone.replace(/^\++/, '+') : '';
 
   const reqIdRef = useRef(initialReqId ?? "");
   const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(""));
