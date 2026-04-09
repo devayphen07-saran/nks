@@ -10,6 +10,8 @@
     "target": "ES2022",
     "lib": ["ES2022", "DOM"],
     "baseUrl": ".",
-    "paths": {}
+    "paths": {},
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
   }
 }
