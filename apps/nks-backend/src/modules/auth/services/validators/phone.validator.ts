@@ -4,10 +4,10 @@ import { ErrorCodes, ErrorMessages } from '../../../../core/constants/error-code
 /**
  * Phone Number Validator
  * Validates Indian phone numbers
- * Accepts: 10-digit (6-9 start) or +91-prefixed format
+ * Accepts: 10-digit (6-9 start), +91-prefixed, or 91-prefixed format
  */
 export class PhoneValidator {
-  private static readonly PHONE_REGEX = /^(\+91)?[6-9]\d{9}$/;
+  private static readonly PHONE_REGEX = /^(\+91|91)?[6-9]\d{9}$/;
 
   /**
    * Validate phone and throw BadRequestException if invalid
