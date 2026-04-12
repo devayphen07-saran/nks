@@ -4,7 +4,7 @@ import { sessionTokenReg } from "@nks/utils";
 import { fetchJwksPublicKey } from "../lib/jwks-cache";
 import { offlineSession } from "../lib/offline-session";
 import { syncServerTime } from "../lib/server-time";
-import { setCredentials } from "./auth-slice";
+import { setCredentials, logout } from "./auth-slice";
 import {
   validateAuthResponse,
   validateRefreshTokenFormat,
@@ -134,7 +134,7 @@ export async function persistLogin(
     tokenManager.clear();
     await tokenManager.clearSession().catch(() => {});
     await offlineSession.clear().catch(() => {});
-    dispatch(setCredentials(null as any));
+    dispatch(logout());
 
     // Provide clear error to user
     const message = error instanceof Error ? error.message : "Unknown error";

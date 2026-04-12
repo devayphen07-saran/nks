@@ -88,8 +88,8 @@ export class NKSPowerSyncConnector implements PowerSyncBackendConnector {
    * Blocks (throws) if the offline JWT has expired — prevents stale writes.
    */
   async uploadData(database: AbstractPowerSyncDatabase): Promise<void> {
-    // Block writes if offline window expired
-    assertWriteAllowed();
+    // Block writes if offline window expired or user lacks write role
+    await assertWriteAllowed(["CASHIER", "STORE_MANAGER", "STORE_OWNER"]);
 
     const tx = await database.getNextCrudTransaction();
     if (!tx) return;

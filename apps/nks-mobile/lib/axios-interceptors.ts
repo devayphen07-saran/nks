@@ -3,11 +3,17 @@ import { tokenManager } from "@nks/mobile-utils";
 import { offlineSession } from "./offline-session";
 import { sanitizeError } from "./log-sanitizer";
 import { refreshTokenAttempt } from "./refresh-token-attempt";
+import { tokenMutex } from "./token-mutex";
 import { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 
 // ─── Refresh Queue ──────────────────────────────────────────────────────────
 // When multiple requests hit 401 simultaneously, only one refresh fires.
 // All others wait in the queue and replay with the new token.
+//
+// tokenMutex (same singleton as refresh-session.ts / logout-thunk.ts) ensures
+// that the actual refresh call is serialised across the whole app — an
+// interceptor-triggered refresh and a Redux-triggered refreshSession can never
+// both call refreshTokenAttempt() at the same time.
 
 let isRefreshing = false;
 let failedQueue: Array<{
@@ -95,7 +101,24 @@ export function setupAxiosInterceptors(
         isRefreshing = true;
 
         try {
-          const result = await refreshTokenAttempt();
+          // Use shared tokenMutex so this refresh is serialised with
+          // Redux refreshSession and logout — prevents dual-refresh race.
+          // withRefreshLock returns undefined if another refresh was already
+          // running (it waits for it to complete and returns undefined).
+          const result = await tokenMutex.withRefreshLock(() => refreshTokenAttempt());
+
+          // mutex_skip: another refresh completed while we were waiting.
+          // Get whatever token that refresh produced and replay the request.
+          if (result === undefined) {
+            const currentToken = tokenManager.get();
+            if (currentToken) {
+              processQueue(null, currentToken);
+              originalRequest.headers.Authorization = `Bearer ${currentToken}`;
+              return API(originalRequest);
+            }
+            processQueue(error, null);
+            return Promise.reject(error);
+          }
 
           if (result.success && result.newToken) {
             // Refresh succeeded — sync Redux state with fresh session data

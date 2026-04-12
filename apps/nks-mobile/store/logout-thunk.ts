@@ -6,6 +6,7 @@ import { tokenMutex } from "../lib/token-mutex";
 import { offlineSession } from "../lib/offline-session";
 import { sanitizeError } from "../lib/log-sanitizer";
 import { JWTManager } from "../lib/jwt-manager";
+import { OTP_RATE_LIMITS } from "../lib/rate-limiter";
 import type { AppDispatch } from "./index";
 
 export const logoutThunk = createAsyncThunk<
@@ -29,6 +30,10 @@ export const logoutThunk = createAsyncThunk<
       await tokenManager.clearSession();
       await offlineSession.clear();
       await JWTManager.clear();
+      // Reset OTP rate limiters so a fresh login session starts clean
+      OTP_RATE_LIMITS.verify.reset();
+      OTP_RATE_LIMITS.resend.reset();
+      OTP_RATE_LIMITS.send.reset();
       dispatch(logoutAction());
       console.log("[Logout] Session and offline data cleared successfully");
     } catch (error) {
