@@ -9,7 +9,7 @@ import { I18nProvider, i18nInstance } from "@nks/mobile-i18n";
 import { store } from "../store";
 import { AuthProvider } from "../lib/auth-provider";
 import { LoadingFallback } from "../components/feedback/LoadingFallback";
-import { OfflineBanner } from "../components/feedback/OfflineBanner";
+import { OfflineStatusBanner } from "../components/feedback/OfflineStatusBanner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 SplashScreen.preventAutoHideAsync().catch(() => {});
 const queryClient = new QueryClient({
@@ -32,7 +32,7 @@ export default function RootLayout() {
               <MobileThemeProvider loadingFallback={<LoadingFallback />}>
                 <AuthProvider>
                   <View style={{ flex: 1 }}>
-                    <OfflineBanner />
+                    <OfflineStatusBanner />
                     <Slot />
                   </View>
                 </AuthProvider>
