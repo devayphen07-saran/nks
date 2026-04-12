@@ -1,70 +1,96 @@
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { router } from "expo-router";
 import { phoneSchema } from "../schema/phone";
 import { sendOtp } from "@nks/api-manager";
 import { useRootDispatch } from "../../../store";
-
-const DIAL_CODE = "+91";
+import { ErrorHandler } from "../../../shared/errors";
+import { OTP_RATE_LIMITS } from "../../../lib/rate-limiter";
+import {
+  formatPhoneWithCountryCode,
+  sanitizePhoneInput,
+  INDIA_DIAL_CODE,
+} from "@nks/utils";
 
 export function usePhoneAuth() {
   const dispatch = useRootDispatch();
-  const [phone, setPhone] = useState("");
+  const [phone, setPhoneState] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
 
+  // Ref-based guard prevents double-submit from rapid taps
+  const submittingRef = useRef(false);
+
   const canSubmit = phone.length === 10 && !isLoading;
 
-  const handleSendOtp = () => {
-    if (!canSubmit) return;
+  const handlePhoneChange = useCallback((text: string) => {
+    const sanitized = sanitizePhoneInput(text);
+    setPhoneState(sanitized);
+    setErrorMessage(null);
+  }, []);
 
-    const result = phoneSchema.safeParse({ phone: phone.trim() });
-    if (!result.success) {
+  const handleSendOtp = useCallback(() => {
+    if (!canSubmit || submittingRef.current) return;
+
+    // ✅ CRITICAL FIX #5: Rate limit OTP send attempts
+    const rateLimitCheck = OTP_RATE_LIMITS.send.check();
+    if (!rateLimitCheck.allowed) {
+      setErrorMessage(rateLimitCheck.message || "Please wait before requesting another OTP.");
+      return;
+    }
+
+    // Validate phone format
+    const validationResult = phoneSchema.safeParse({ phone: phone.trim() });
+    if (!validationResult.success) {
       setErrorMessage(
-        result.error.issues[0]?.message ?? "Invalid phone number",
+        validationResult.error.issues[0]?.message ?? "Invalid phone number",
       );
       return;
     }
 
+    submittingRef.current = true;
     setErrorMessage(null);
     setIsLoading(true);
 
-    const fullPhone = DIAL_CODE + phone.trim();
+    const fullPhone = formatPhoneWithCountryCode(phone);
 
     dispatch(sendOtp({ bodyParam: { phone: fullPhone } }))
       .unwrap()
-      .then((data) => {
-        const reqId = data?.data?.reqId;
+      .then((response) => {
+        const reqId = response?.data?.reqId;
         if (reqId) {
+          // Reset rate limiter on successful OTP send
+          OTP_RATE_LIMITS.send.reset();
           router.push({
             pathname: "/(auth)/otp",
             params: { phone: fullPhone, reqId },
           });
         } else {
-          setErrorMessage("Failed to send OTP. Please try again.");
+          setErrorMessage("Invalid response from server");
         }
       })
-      .catch((err) => {
-        const msg = err?.data?.message ?? err?.message ?? "Failed to send OTP";
-        setErrorMessage(msg);
+      .catch((error) => {
+        const appError = ErrorHandler.handle(error, {
+          phone: phone,
+          action: "send_otp",
+        });
+        setErrorMessage(appError.getUserMessage());
       })
-      .finally(() => setIsLoading(false));
-  };
-
-  const handlePhoneChange = (text: string) => {
-    setErrorMessage(null);
-    setPhone(text.replace(/[^0-9]/g, "").slice(0, 10));
-  };
+      .finally(() => {
+        setIsLoading(false);
+        submittingRef.current = false;
+      });
+  }, [phone, canSubmit, dispatch]);
 
   return {
     phone,
-    setPhone: handlePhoneChange,
-    dialCode: DIAL_CODE,
+    dialCode: INDIA_DIAL_CODE,
     isFocused,
-    setIsFocused,
     isLoading,
-    canSubmit,
     errorMessage,
+    setPhone: handlePhoneChange,
+    setIsFocused,
     handleSendOtp,
+    canSubmit,
   };
 }

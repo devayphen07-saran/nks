@@ -17,7 +17,7 @@ import type { ExpenseItem } from "./components/ExpenseRow";
 
 export function PersonalScreen() {
   const { theme } = useMobileTheme();
-  const user = useAuth().authResponse?.data?.user;
+  const user = useAuth().authResponse?.user;
   const { logout } = useLogout();
 
   const recentExpenses: ExpenseItem[] = [

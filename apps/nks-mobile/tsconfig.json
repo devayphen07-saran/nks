@@ -22,7 +22,9 @@
       "@nks/api-manager": ["../../libs-common/api-manager/src"],
       "@nks/api-manager/*": ["../../libs-common/api-manager/src/*"],
       "@nks/state-manager": ["../../libs-common/state-manager/src"],
-      "@nks/state-manager/*": ["../../libs-common/state-manager/src/*"]
+      "@nks/state-manager/*": ["../../libs-common/state-manager/src/*"],
+      "@nks/utils": ["../../libs-common/utils/src"],
+      "@nks/utils/*": ["../../libs-common/utils/src/*"]
     }
   },
   "include": [

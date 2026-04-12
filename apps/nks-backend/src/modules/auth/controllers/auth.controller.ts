@@ -100,6 +100,7 @@ export class AuthController {
       refreshToken: string;
       refreshExpiresAt: string;
       defaultStore: { guuid: string } | null;
+      offlineToken: string;
     }>
   > {
     const cookieToken = this.parseSessionCookie(req);
@@ -147,8 +148,6 @@ export class AuthController {
       phoneNumber: u.phoneNumber,
       phoneNumberVerified: u.phoneNumberVerified,
       image: u.image,
-      lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
-      lastLoginIp: null,
     };
     return ApiResponse.ok(me, 'Authenticated');
   }

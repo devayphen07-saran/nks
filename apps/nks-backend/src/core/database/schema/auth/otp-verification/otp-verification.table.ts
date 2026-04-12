@@ -46,6 +46,11 @@ export const otpVerification = pgTable(
       () => userAuthProvider.id,
       { onDelete: 'restrict' }, // ← FIXED: prevent auth provider deletion if OTP exists (preserve audit trail)
     ),
+
+    // reqId — MSG91 request ID, prevents OTP replay attacks
+    // Issued by MSG91 when OTP is sent, must match on verification
+    // NULL for email OTPs (only MSG91 phone OTPs have reqId)
+    reqId: text('req_id'),
   },
   (table) => [
     // Fast lookup: find active OTP by identifier + purpose (used at every verify attempt)

@@ -11,6 +11,7 @@ import {
   Typography,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
+import { maskPhone } from "@nks/utils";
 import { useOtpVerify } from "./hooks/useOtpVerify";
 
 const CARD_SHADOW = {
@@ -21,117 +22,47 @@ const CARD_SHADOW = {
   elevation: 8,
 } as const;
 
-// ─── OTP Digit Cell ───────────────────────────────────────────────────────────
-
-type OtpDigitCellProps = {
-  value: string;
-  hasError: boolean;
-  isFocused: boolean;
-  onChangeText: (t: string) => void;
-  onKeyPress: (e: { nativeEvent: { key: string } }) => void;
-  onFocus: () => void;
-  onBlur: () => void;
-  inputRef: (r: TextInput | null) => void;
-};
-
-function OtpDigitCell({
-  value,
-  hasError,
-  isFocused,
-  onChangeText,
-  onKeyPress,
-  onFocus,
-  onBlur,
-  inputRef,
-}: OtpDigitCellProps) {
-  const { theme } = useMobileTheme();
-  return (
-    <TextInput
-      ref={inputRef}
-      value={value}
-      onChangeText={onChangeText}
-      onKeyPress={onKeyPress}
-      onFocus={onFocus}
-      onBlur={onBlur}
-      keyboardType="number-pad"
-      maxLength={1}
-      selectTextOnFocus
-      caretHidden
-      style={{
-        width: "100%",
-        height: "100%",
-        textAlign: "center",
-        fontSize: theme.fontSize.xLarge,
-        fontFamily: theme.fontFamily.poppinsSemiBold,
-        color: hasError ? theme.colorError : theme.colorText,
-      }}
-    />
-  );
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function maskPhone(phone: string): string {
-  // Format: +919025863606 → +91****3606
-  if (phone.length < 5) return phone;
-
-  // Keep country code (+91) and last 4 digits visible
-  const countryCode = phone.startsWith("+") ? phone.slice(0, 3) : ""; // +91
-  const visibleDigits = phone.slice(-4); // 3606
-  const hiddenDigits = phone.slice(countryCode.length, -4).replace(/\d/g, "*");
-
-  return countryCode + hiddenDigits + visibleDigits;
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function OtpScreen() {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
-  const inputRefs = useRef<(TextInput | null)[]>([]);
+  const hiddenInputRef = useRef<TextInput>(null);
 
-  // ✅ Use hook for OTP verification logic
   const {
     digits,
-    focusedIndex,
     countdown,
     errorMessage,
     canVerify,
     isVerifying,
     isResending,
-    handleDigitChange: hookHandleDigitChange,
-    handleKeyPress: hookHandleKeyPress,
-    handleVerify: hookHandleVerify,
+    setOtpFromString,
+    handleVerify,
     handleResend,
-    setFocusedIndex,
     phone,
     OTP_LENGTH,
   } = useOtpVerify();
 
-  // Handle digit change with ref focus management
-  const handleDigitChange = (text: string, index: number) => {
-    hookHandleDigitChange(text, index);
-    const digit = text.replace(/[^0-9]/g, "").slice(-1);
-    if (digit && index < OTP_LENGTH - 1) {
-      inputRefs.current[index + 1]?.focus();
-    }
-  };
-
-  // Handle key press with ref focus management
-  const handleKeyPress = (
-    e: { nativeEvent: { key: string } },
-    index: number,
-  ) => {
-    hookHandleKeyPress(e, index);
-    if (e.nativeEvent.key === "Backspace" && !digits[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
-    }
-  };
-
-  // Auto-focus first input on mount
+  // Auto-focus hidden input on mount
   useEffect(() => {
-    setTimeout(() => inputRefs.current[0]?.focus(), 300);
+    const timer = setTimeout(() => hiddenInputRef.current?.focus(), 300);
+    return () => clearTimeout(timer);
   }, []);
+
+  // Clear + refocus after failed verification
+  useEffect(() => {
+    if (errorMessage && digits.every((d) => d === "")) {
+      const timer = setTimeout(() => {
+        if (hiddenInputRef.current) {
+          hiddenInputRef.current.clear();
+          hiddenInputRef.current.focus();
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [errorMessage, digits]);
+
+  const otpString = digits.join("");
 
   return (
     <Container>
@@ -141,7 +72,7 @@ export function OtpScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* ─── Brand Hero ─── */}
+          {/* ─── Hero Section ─── */}
           <BrandHero $topInset={insets.top}>
             <DecoRing1 />
             <DecoRing2 />
@@ -160,10 +91,7 @@ export function OtpScreen() {
                 >
                   NKS
                 </Typography.H5>
-                <Typography.Caption
-                  color={theme.colorWhite}
-                  style={{ opacity: 0.8 }}
-                >
+                <Typography.Caption color={theme.colorWhite} style={{ opacity: 0.8 }}>
                   Business Platform
                 </Typography.Caption>
               </Column>
@@ -175,7 +103,7 @@ export function OtpScreen() {
                 color={theme.colorWhite}
                 style={{ fontSize: 36, lineHeight: 42 }}
               >
-                {"Verify\nAccount."}
+                {`Verify\nAccount.`}
               </Typography.H1>
               <Typography.Body
                 color={theme.colorWhite}
@@ -189,28 +117,33 @@ export function OtpScreen() {
           {/* ─── Form Card ─── */}
           <FormCard $bottomInset={insets.bottom} style={CARD_SHADOW}>
             <FormContent gap="xLarge">
-              {/* ─── OTP Digit Boxes ─── */}
+              {/* ─── Hidden Input (Source of Truth) ─── */}
+              <HiddenInputContainer>
+                <HiddenInput
+                  ref={hiddenInputRef}
+                  onChangeText={setOtpFromString}
+                  keyboardType="number-pad"
+                  maxLength={OTP_LENGTH}
+                  placeholder=""
+                  textAlign="center"
+                  caretHidden
+                  autoFocus
+                />
+              </HiddenInputContainer>
+
+              {/* ─── OTP Display Boxes ─── */}
               <Column gap="medium">
                 <OtpBoxRow>
                   {Array.from({ length: OTP_LENGTH }, (_, i) => (
                     <OtpBox
                       key={i}
                       $filled={digits[i] !== ""}
-                      $isFocused={focusedIndex === i}
                       $hasError={errorMessage !== null}
+                      onPress={() => hiddenInputRef.current?.focus()}
                     >
-                      <OtpDigitCell
-                        value={digits[i]}
-                        hasError={errorMessage !== null}
-                        isFocused={focusedIndex === i}
-                        onFocus={() => setFocusedIndex(i)}
-                        onBlur={() => setFocusedIndex(null)}
-                        onChangeText={(t) => handleDigitChange(t, i)}
-                        onKeyPress={(e) => handleKeyPress(e, i)}
-                        inputRef={(r) => {
-                          inputRefs.current[i] = r;
-                        }}
-                      />
+                      <OtpDigit weight="semiBold" color={theme.colorText}>
+                        {digits[i]}
+                      </OtpDigit>
                     </OtpBox>
                   ))}
                 </OtpBoxRow>
@@ -259,7 +192,7 @@ export function OtpScreen() {
                 label="Verify & Continue"
                 size="xlg"
                 variant="primary"
-                onPress={() => canVerify && hookHandleVerify(digits.join(""))}
+                onPress={() => canVerify && handleVerify(otpString)}
                 loading={isVerifying}
                 disabled={!canVerify}
                 style={{ borderRadius: 14 }}
@@ -383,9 +316,27 @@ const FormCard = styled(Column)<{ $bottomInset: number }>`
   margin-top: -${({ theme }) => theme.borderRadius.xxLarge}px;
   flex: 1;
   justify-content: space-between;
+  position: relative;
 `;
 
 const FormContent = styled(Column)``;
+
+// ─── Hidden Input (Production-Standard Pattern) ───
+const HiddenInputContainer = styled.View`
+  position: absolute;
+  width: 100%;
+  height: 56px;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  z-index: 10;
+`;
+
+const HiddenInput = styled(TextInput)`
+  flex: 1;
+  font-size: 24px;
+  color: transparent;
+`;
 
 const OtpBoxRow = styled.View`
   flex-direction: row;
@@ -395,30 +346,32 @@ const OtpBoxRow = styled.View`
   padding-right: ${({ theme }) => theme.sizing.xxSmall}px;
 `;
 
-const OtpBox = styled.View<{
+const OtpBox = styled.TouchableOpacity<{
   $filled: boolean;
-  $isFocused: boolean;
   $hasError: boolean;
 }>`
   width: 56px;
   height: 56px;
   border-radius: 14px;
   border-width: 2px;
-  border-color: ${({ theme, $filled, $isFocused, $hasError }) => {
+  border-color: ${({ theme, $filled, $hasError }) => {
     if ($hasError) return theme.colorError;
-    if ($isFocused) return theme.colorPrimary;
     if ($filled) return theme.colorPrimary;
     return "#E5E5E5";
   }};
-  background-color: ${({ theme, $filled, $isFocused, $hasError }) => {
+  background-color: ${({ theme, $filled, $hasError }) => {
     if ($hasError) return "#FFF1F1";
-    if ($isFocused) return "#F5F7FF";
     if ($filled) return "#F5F7FF";
     return "#FFFFFF";
   }};
   align-items: center;
   justify-content: center;
   overflow: hidden;
+`;
+
+const OtpDigit = styled(Typography.H3)`
+  font-size: 24px;
+  color: ${({ theme }) => theme.colorText};
 `;
 
 const ErrorBanner = styled(Row)`

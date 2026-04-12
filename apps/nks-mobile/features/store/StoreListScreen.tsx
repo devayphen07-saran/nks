@@ -33,7 +33,7 @@ interface Store {
 export function StoreListScreen() {
   const { theme } = useMobileTheme();
   const authState = useAuth();
-  const user = authState.authResponse?.data?.user;
+  const user = authState.authResponse?.user;
   const navigation = useNavigation();
 
   // TODO: Connect to store state from Redux or API

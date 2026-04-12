@@ -12,6 +12,21 @@ import { users } from '../../auth/users';
 import { store } from '../../store/store';
 import { sessionDeviceTypeEnum, authMethodEnum } from '../../enums';
 
+/**
+ * User Session Table — Token Rotation & Theft Detection
+ *
+ * DESIGN:
+ * - On login: INSERT new session row per device
+ * - On refresh: CREATE new session row (token rotation for security)
+ *   + Mark old session refreshTokenRevokedAt = now
+ *   + OLD sessions with refreshTokenRevokedAt older than 30 days are deleted via cleanup
+ *
+ * RESULT:
+ * - Prevents row proliferation: max O(active_devices) rows per user, not O(refreshes)
+ * - Preserves token rotation security (new token on each refresh)
+ * - Maintains audit trail for 30 days (for theft detection investigation)
+ * - Example: 10,000 users × 3 devices × 1 row = 30,000 rows (vs 14.4M)
+ */
 export const userSession = pgTable(
   'user_session',
   {

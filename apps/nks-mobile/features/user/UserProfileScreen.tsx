@@ -19,6 +19,7 @@ import {
   GroupedMenu,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
+import { useAuthUser } from "../../store";
 import {
   useUserProfileForm,
   ProfileFormValues,
@@ -27,13 +28,7 @@ import { router } from "expo-router";
 
 export function UserProfileScreen() {
   const { theme } = useMobileTheme();
-
-  // TODO: Connect to API for user details
-  const user = {
-    name: "John Doe",
-    email: "john@example.com",
-    phoneNumber: "+91 9999999999",
-  };
+  const user = useAuthUser();
 
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);

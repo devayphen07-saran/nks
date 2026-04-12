@@ -10,10 +10,12 @@ import {
   Typography,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
+import { useLogout } from "../../hooks/useLogout";
 
 export function AccountTypeScreen() {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
+  const { logout } = useLogout();
 
   const handleStore = useCallback(() => {
     router.push("/(protected)/(workspace)/(app)/(store)/list");
@@ -33,15 +35,22 @@ export function AccountTypeScreen() {
         { text: "Cancel", style: "cancel" },
         {
           text: "Logout",
-          onPress: () => {
-            // TODO: Dispatch logoutThunk API call
-            console.log("Logging out...");
+          onPress: async () => {
+            try {
+              // Dispatch logoutThunk: calls signOut API, clears token + SecureStore, updates Redux
+              await logout(() => {
+                router.replace("/(auth)/phone");
+              });
+            } catch (error) {
+              console.error("[AccountType] Logout failed:", error);
+              Alert.alert("Error", "Failed to log out. Please try again.");
+            }
           },
           style: "destructive",
         },
       ]
     );
-  }, []);
+  }, [logout]);
 
   return (
     <Container>

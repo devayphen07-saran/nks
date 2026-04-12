@@ -12,8 +12,6 @@ export type PublicUserDto = {
   phoneNumber: string | null;
   phoneNumberVerified: boolean;
   image: string | null;
-  lastLoginAt: string | null;
-  lastLoginIp: string | null;
 };
 
 interface AuthResult {
@@ -26,8 +24,6 @@ interface AuthResult {
     image?: string | null;
     phoneNumber?: string | null;
     phoneNumberVerified?: boolean;
-    lastLoginAt?: Date | string | null;
-    lastLoginIp?: string | null;
   };
   token?: string | null;
   session?: {
@@ -79,74 +75,66 @@ export class AuthMapper {
     issuedAt?: string, // Business logic: must be generated in service
     expiresAt?: string | Date, // Business logic: TTL calculation must be in service
     refreshExpiresAt?: string | Date, // Business logic: TTL calculation must be in service
+    offlineToken?: string, // 7-day offline JWT for mobile offline verification
   ): AuthResponseEnvelope {
     const user = authResult.user;
     const sessionToken = authResult.token ?? authResult.session?.token ?? '';
 
     // Require sessionId and issuedAt from service (mapper is pure transformation only)
     if (!sessionId) {
-      throw new BadRequestException('AuthMapper.toAuthResponseEnvelope: sessionId is required');
+      throw new BadRequestException(
+        'AuthMapper.toAuthResponseEnvelope: sessionId is required',
+      );
     }
     if (!issuedAt) {
-      throw new BadRequestException('AuthMapper.toAuthResponseEnvelope: issuedAt is required');
+      throw new BadRequestException(
+        'AuthMapper.toAuthResponseEnvelope: issuedAt is required',
+      );
     }
 
     const jwtToken = tokenPair?.jwtToken;
     const refreshToken = tokenPair?.refreshToken ?? sessionToken;
 
     // Convert expiresAt/refreshExpiresAt to ISO string (transformation only, no calculation)
-    const expiresAtStr = expiresAt instanceof Date ? expiresAt.toISOString() : String(expiresAt ?? '');
-    const refreshExpiresAtStr = refreshExpiresAt instanceof Date ? refreshExpiresAt.toISOString() : String(refreshExpiresAt ?? '');
+    const expiresAtStr =
+      expiresAt instanceof Date
+        ? expiresAt.toISOString()
+        : String(expiresAt ?? '');
+    const refreshExpiresAtStr =
+      refreshExpiresAt instanceof Date
+        ? refreshExpiresAt.toISOString()
+        : String(refreshExpiresAt ?? '');
 
-    const {
-      method = 'password',
-      mfaVerified = false,
-      mfaRequired = false,
-      trustLevel = 'standard',
-      stepUpRequired = false,
-      roles,
-    } = permissionContext;
+    const { roles } = permissionContext;
 
     return {
       requestId,
       traceId,
       apiVersion: '2026-03',
       timestamp: issuedAt,
-      data: {
-        user: this.toPublicUserDto(user),
-        session: {
-          sessionId,
-          tokenType: 'Bearer',
-          sessionToken,
-          issuedAt,
-          expiresAt: expiresAtStr,
-          refreshToken,
-          refreshExpiresAt: refreshExpiresAtStr,
-          mechanism: method,
-          absoluteExpiry: refreshExpiresAtStr,
-          defaultStore: defaultStore ?? null,
-          ...(jwtToken ? { jwtToken } : {}),
-        },
-        authContext: {
-          method,
-          mfaVerified,
-          mfaRequired,
-          trustLevel,
-          stepUpRequired,
-        },
-        access: {
-          isSuperAdmin: permissionContext.isSuperAdmin ?? false,
-          activeStoreId: permissionContext.activeStoreId ?? null,
-          roles: roles.map((r) => ({
-            roleCode: r.roleCode,
-            storeId: r.storeId ?? null,
-            storeName: r.storeName ?? null,
-            isPrimary: r.isPrimary,
-            assignedAt: r.assignedAt, // Must be provided by service, not generated here
-            expiresAt: r.expiresAt ?? null,
-          })),
-        },
+      user: this.toPublicUserDto(user),
+      session: {
+        sessionId,
+        sessionToken,
+        expiresAt: expiresAtStr,
+        refreshToken,
+        refreshExpiresAt: refreshExpiresAtStr,
+        defaultStore: defaultStore ?? null,
+        ...(jwtToken ? { jwtToken } : {}),
       },
+      access: {
+        isSuperAdmin: permissionContext.isSuperAdmin ?? false,
+        activeStoreId: permissionContext.activeStoreId ?? null,
+        roles: roles.map((r) => ({
+          roleCode: r.roleCode,
+          storeId: r.storeId ?? null,
+          storeName: r.storeName ?? null,
+          isPrimary: r.isPrimary,
+          assignedAt: r.assignedAt,
+          expiresAt: r.expiresAt ?? null,
+        })),
+      },
+      ...(offlineToken ? { offlineToken } : {}),
     };
   }
 
@@ -158,12 +146,6 @@ export class AuthMapper {
         'AuthMapper.toPublicUserDto: user is required',
       );
 
-    const lastLoginAt = user.lastLoginAt
-      ? user.lastLoginAt instanceof Date
-        ? user.lastLoginAt.toISOString()
-        : String(user.lastLoginAt)
-      : null;
-
     return {
       id: String(Number(user.id || 0)),
       guuid: user.guuid || '',
@@ -173,8 +155,6 @@ export class AuthMapper {
       phoneNumber: user.phoneNumber || null,
       phoneNumberVerified: !!user.phoneNumberVerified,
       image: user.image || null,
-      lastLoginAt,
-      lastLoginIp: user.lastLoginIp || null,
     };
   }
 
@@ -193,7 +173,9 @@ export class AuthMapper {
     assignedAt?: string, // Business logic: timestamp must be generated in service
   ): UserRoleEntry[] {
     if (!assignedAt) {
-      throw new BadRequestException('AuthMapper.mapToRoleEntries: assignedAt is required');
+      throw new BadRequestException(
+        'AuthMapper.mapToRoleEntries: assignedAt is required',
+      );
     }
 
     return rows.map((r) => {

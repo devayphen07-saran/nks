@@ -3,8 +3,8 @@ import { useAuth } from "../../../store";
 
 export default function WorkspaceIndex() {
   const authState = useAuth();
-  const roles = authState.authResponse?.data?.access?.roles ?? [];
-  const isSuperAdmin = authState.authResponse?.data?.access?.isSuperAdmin ?? false;
+  const roles = authState.authResponse?.access?.roles ?? [];
+  const isSuperAdmin = authState.authResponse?.access?.isSuperAdmin ?? false;
 
   const hasPersonalAccess = roles.some((r: any) => r.roleCode === "CUSTOMER");
 

@@ -4,16 +4,26 @@ import * as crypto from 'crypto';
 import { RSAKeyManager } from '../core/crypto/rsa-keys';
 
 export interface JWTPayload {
-  sub: string;       // user guuid — immutable across DB migrations
-  sid: string;       // session guuid — ties JWT to a specific session row
-  jti: string;       // unique token ID — prevents replay across contexts
-  email: string;
+  sub: string;
+  sid: string;
+  jti: string;
+  email?: string;
   roles: string[];
-  primaryRole: string | null;
+  iat: number;
+  exp: number;
+  iss: string;
+  aud: string;
+  kid?: string;
+}
+
+/** Offline JWT payload — identity + authorization only, no session binding */
+export interface OfflineJWTPayload {
+  sub: string;
+  jti: string;
+  email?: string;
+  roles: string[];
   stores: Array<{ id: number; name: string }>;
   activeStoreId: number | null;
-  permissionsVersion?: string;
-  permissionsSnapshot?: Record<string, Record<string, boolean>>;
   iat: number;
   exp: number;
   iss: string;
@@ -72,6 +82,48 @@ export class JWTConfigService {
       });
     } catch (error) {
       this.logger.error('Failed to sign JWT', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Sign a long-lived offline JWT for mobile offline verification.
+   * 7-day expiry — matches the OfflineSession window.
+   * Contains only identity + authorization claims, no session binding.
+   */
+  signOfflineToken(
+    payload: {
+      sub: string;
+      email?: string;
+      roles: string[];
+      stores: Array<{ id: number; name: string }>;
+      activeStoreId: number | null;
+    },
+  ): string {
+    const now = Math.floor(Date.now() / 1000);
+    const expiresIn = 7 * 24 * 60 * 60; // 7 days
+
+    const tokenPayload: OfflineJWTPayload = {
+      sub: payload.sub,
+      jti: crypto.randomUUID(),
+      ...(payload.email ? { email: payload.email } : {}),
+      roles: payload.roles,
+      stores: payload.stores,
+      activeStoreId: payload.activeStoreId,
+      iss: 'nks-auth',
+      aud: 'nks-offline',
+      iat: now,
+      exp: now + expiresIn,
+      kid: this.currentKeyId,
+    };
+
+    try {
+      return jwt.sign(tokenPayload, this.privateKey, {
+        algorithm: 'RS256',
+        keyid: this.currentKeyId,
+      });
+    } catch (error) {
+      this.logger.error('Failed to sign offline JWT', error);
       throw error;
     }
   }

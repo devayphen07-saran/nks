@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useNetworkState } from "./network-state";
 import { offlineSession, OfflineSession } from "./offline-session";
 
@@ -83,19 +83,3 @@ export function useOfflineMode(): OfflineModeState {
   };
 }
 
-/**
- * Determines if the user can perform POS operations.
- * Returns true if:
- * - Device is online (any endpoint call works), OR
- * - Offline mode is active (valid offline session + no internet)
- *
- * Returns false if:
- * - Offline session is expired (offline session + no internet)
- * - Not authenticated at all (no offline session + no internet)
- */
-export function canPerformPosOperations(state: OfflineModeState): boolean {
-  // If we can refresh/call the server, allow operations
-  // The network check happens implicitly via API calls
-  // This function just checks the offline session validity
-  return offlineSession.isValid(state.offlineSession);
-}

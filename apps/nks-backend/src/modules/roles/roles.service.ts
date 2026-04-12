@@ -231,6 +231,7 @@ export class RolesService {
    *
    * @param roleId - Role ID
    * @param entityPermissions - Map of entity code to permission flags
+   * @throws NotFoundException if any entity code does not exist
    */
   async updateEntityPermissions(
     roleId: number,
@@ -243,13 +244,24 @@ export class RolesService {
         entityCode,
       );
 
-      // Create new permission
-      await this.roleEntityPermissionRepository.create(roleId, entityCode, {
-        canView: perms.canView ?? false,
-        canCreate: perms.canCreate ?? false,
-        canEdit: perms.canEdit ?? false,
-        canDelete: perms.canDelete ?? false,
-      });
+      // Create new permission (repository returns null if entity type not found)
+      const created = await this.roleEntityPermissionRepository.create(
+        roleId,
+        entityCode,
+        {
+          canView: perms.canView ?? false,
+          canCreate: perms.canCreate ?? false,
+          canEdit: perms.canEdit ?? false,
+          canDelete: perms.canDelete ?? false,
+        },
+      );
+
+      if (!created) {
+        throw new NotFoundException({
+          errorCode: ErrorCode.ENTITY_NOT_FOUND,
+          message: `Entity type '${entityCode}' not found`,
+        });
+      }
     }
     this.logger.debug(`Updated entity permissions for role ${roleId}`);
   }

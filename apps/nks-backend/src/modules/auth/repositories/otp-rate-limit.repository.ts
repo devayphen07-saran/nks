@@ -56,4 +56,49 @@ export class OtpRateLimitRepository {
       })
       .where(eq(schema.otpRequestLog.id, id));
   }
+
+  async recordAttempt(
+    id: number,
+    newRequestCount: number,
+    lastAttemptAt: Date,
+  ): Promise<void> {
+    await this.db
+      .update(schema.otpRequestLog)
+      .set({
+        requestCount: newRequestCount,
+        lastAttemptAt,
+      })
+      .where(eq(schema.otpRequestLog.id, id));
+  }
+
+  async resetWindow(
+    id: number,
+    newRequestCount: number,
+    lastAttemptAt: Date,
+    newWindowExpiresAt: Date,
+  ): Promise<void> {
+    await this.db
+      .update(schema.otpRequestLog)
+      .set({
+        requestCount: newRequestCount,
+        lastAttemptAt,
+        windowExpiresAt: newWindowExpiresAt,
+        consecutiveFailures: 0,
+      })
+      .where(eq(schema.otpRequestLog.id, id));
+  }
+
+  async incrementFailureCount(id: number, newFailureCount: number): Promise<void> {
+    await this.db
+      .update(schema.otpRequestLog)
+      .set({ consecutiveFailures: newFailureCount })
+      .where(eq(schema.otpRequestLog.id, id));
+  }
+
+  async resetFailureCount(id: number): Promise<void> {
+    await this.db
+      .update(schema.otpRequestLog)
+      .set({ consecutiveFailures: 0 })
+      .where(eq(schema.otpRequestLog.id, id));
+  }
 }

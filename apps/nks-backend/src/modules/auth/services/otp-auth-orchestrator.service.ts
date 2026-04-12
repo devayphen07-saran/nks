@@ -1,41 +1,47 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AuthService } from './auth.service';
 import { OtpService } from './otp.service';
+import { UserCreationService } from './user-creation.service';
+import { AuthFlowOrchestrator } from './auth-flow-orchestrator.service';
 import { VerifyOtpDto } from '../dto/otp.dto';
 import type { AuthResponseEnvelope } from '../dto';
 
 /**
- * OtpAuthOrchestrator - Breaks circular dependency between OtpService and AuthService
+ * OtpAuthOrchestrator - Orchestrates OTP verification, user creation, and session setup
  *
- * ARCHITECTURE:
- * - OtpService: Pure OTP verification logic only. Returns {verified, userId, phone}
- * - AuthService: Never calls OtpService.verifyOtp() — only calls send methods (fine, not circular)
- * - OtpAuthOrchestrator: Bridges the two services, orchestrating the complete flow
+ * ARCHITECTURE (Issue #16: Separated OTP from User Creation):
+ * - OtpService: Pure OTP verification only (verify token with MSG91)
+ * - UserCreationService: User find/create logic (reusable for email signup, social auth)
+ * - AuthFlowOrchestrator: Unified session + token + response creation
+ * - OtpAuthOrchestrator: Bridges all three services
  *
- * This ensures acyclic dependency graph:
- *   AuthService
- *     ↑
- *     └─── OtpAuthOrchestrator ───┐
- *                                    │
- *                                    ├──→ OtpService
- *                                    └──→ AuthService (for session/token creation)
+ * This ensures:
+ * - No circular dependencies
+ * - Each service has single responsibility
+ * - User creation logic is reusable across multiple auth flows
+ *
+ * Flow:
+ *     OtpAuthOrchestrator
+ *           │
+ *     ┌─────┼─────┐
+ *     │     │     │
+ *   OTP  User  Auth
+ *  Verify Create Flow
  */
 @Injectable()
 export class OtpAuthOrchestrator {
-  private readonly logger = new Logger(OtpAuthOrchestrator.name);
-
   constructor(
     private readonly otpService: OtpService,
-    private readonly authService: AuthService,
+    private readonly userCreationService: UserCreationService,
+    private readonly authFlowOrchestrator: AuthFlowOrchestrator,
   ) {}
 
   /**
-   * Orchestrate complete OTP verification → session creation → auth response flow
+   * Orchestrate complete OTP verification → user creation → session creation → auth response flow
    *
    * Flow:
-   * 1. Delegate to OtpService for OTP verification + user find/create (returns minimal result)
-   * 2. Call AuthService to create session + build full auth response
-   * 3. Return full AuthResponseEnvelope to caller
+   * 1. Verify OTP via MSG91 (OtpService — pure verification)
+   * 2. Find or create user by phone (UserCreationService — separated concern)
+   * 3. Create session + tokens + build response (AuthFlowOrchestrator — unified auth flow)
    *
    * @param dto - VerifyOtpDto { phone, otp, reqId }
    * @param deviceInfo - Device tracking info (optional)
@@ -50,30 +56,13 @@ export class OtpAuthOrchestrator {
       appVersion?: string;
     },
   ): Promise<AuthResponseEnvelope> {
-    // Step 1: Verify OTP + find/create user (OtpService returns minimal result)
-    const verificationResult = await this.otpService.verifyOtp(dto);
+    // Step 1: Verify OTP via MSG91 (pure verification, no user data)
+    await this.otpService.verifyOtp(dto);
 
-    // Step 2: Create session for the verified user
-    const session = await this.authService.createSessionForUser(
-      verificationResult.userId,
-      deviceInfo,
-    );
+    // Step 2: Find or create user by phone (separate concern)
+    const user = await this.userCreationService.findOrCreateByPhone(dto.phone);
 
-    // Step 3: Create token pair (access + refresh tokens)
-    const tokenPair = await this.authService.createTokenPair(
-      verificationResult.guuid,
-      session.token,
-      session.userRoles,
-      session.userEmail,
-      session.sessionGuuid,
-    );
-
-    // Step 4: Build and return full auth response
-    return this.authService.buildAuthResponse(
-      verificationResult.user,
-      session.token,
-      session.expiresAt,
-      tokenPair,
-    );
+    // Step 3: Unified auth flow (create session + tokens + build response)
+    return this.authFlowOrchestrator.executeAuthFlow(user, deviceInfo);
   }
 }

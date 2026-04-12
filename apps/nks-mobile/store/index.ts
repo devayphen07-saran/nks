@@ -1,10 +1,6 @@
 import { configureStore } from "@reduxjs/toolkit";
 import { useDispatch, useSelector } from "react-redux";
-import {
-  userProfileSlice,
-  storeSlice,
-  userPreferencesSlice,
-} from "@nks/state-manager";
+import { storeSlice } from "@nks/state-manager";
 import { tokenManager } from "@nks/mobile-utils";
 import {
   authReducer,
@@ -12,21 +8,14 @@ import {
   selectUser,
   selectSession,
   selectAccess,
-  selectAuthContext,
-  selectFeatureFlags,
-} from "./authSlice";
-import { setUnauthenticated } from "./authSlice";
-import { refreshSession } from "./refreshSession";
-import { configMasterSlice } from "@nks/state-manager";
-import { setupAxiosInterceptors } from "../lib/axios-interceptors";
+} from "./auth-slice";
+import { setUnauthenticated } from "./auth-slice";
+import { refreshSession } from "./refresh-session";
 
 export const store = configureStore({
   reducer: {
     auth: authReducer,
-    userProfile: userProfileSlice.reducer,
-    userPreferences: userPreferencesSlice.reducer,
     store: storeSlice.reducer,
-    config: configMasterSlice.reducer,
   },
   middleware: (getDefaultMiddleware) => getDefaultMiddleware(),
 });
@@ -39,16 +28,24 @@ export const useRootDispatch = () => useDispatch<AppDispatch>();
 const useRootSelector = useSelector.withTypes<RootState>();
 
 export const useAuth = () => useRootSelector((state: RootState) => state.auth);
-export const useConfig = () =>
-  useRootSelector((state: RootState) => state.config);
-export const useUserProfile = () =>
-  useRootSelector((state: RootState) => state.userProfile);
-export const useUserPreferences = () =>
-  useRootSelector((state: RootState) => state.userPreferences);
+export const useAuthUser = () =>
+  useRootSelector((state: RootState) => state.auth.authResponse?.user);
+export const useStore = () =>
+  useRootSelector((state: RootState) => state.store);
 
-// 401 → clear session, set unauthenticated → root navigator shows login
+// HIGH FIX #2: Make logout atomic — clear storage BEFORE updating Redux state
+// Prevents race condition where Redux is cleared but SecureStore still has old token
 tokenManager.onExpired(async () => {
-  await tokenManager.clearSession();
+  try {
+    // Clear SecureStore synchronously to token manager perspective
+    // Actual async I/O happens but we await it here
+    await tokenManager.clearSession();
+  } catch (error) {
+    console.error("[Auth] Failed to clear session on expiry:", error);
+    // Continue anyway — dispatch logout to clear Redux state
+  }
+
+  // Only dispatch after storage is definitely cleared
   store.dispatch(setUnauthenticated());
 });
 
@@ -56,6 +53,3 @@ tokenManager.onExpired(async () => {
 tokenManager.onRefresh(() => {
   store.dispatch(refreshSession());
 });
-
-// Setup Axios interceptors to add Authorization header and handle token expiry
-setupAxiosInterceptors();

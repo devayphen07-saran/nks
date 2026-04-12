@@ -10,6 +10,54 @@ export const alphaNumericWithDotReg = RegExp(/^[a-zA-Z0-9.]+$/);
 
 export const phoneReg = RegExp(/^[6-9]\d{9}$/);
 
+export const OTP_LENGTH = 6;
+
+export const otpReg = RegExp(/^\d{6}$/);
+
+/** Base64url characters — matches JWT parts and session token characters */
+export const base64UrlReg = RegExp(/^[A-Za-z0-9_-]+$/);
+
+/** Session token: base64url, 20–500 chars */
+export const sessionTokenReg = RegExp(/^[A-Za-z0-9_-]{20,500}$/);
+
+export const SESSION_TOKEN_MIN_LENGTH = 20;
+
+export const SESSION_TOKEN_MAX_LENGTH = 500;
+
+// <------ Phone & OTP ------->
+
+/** India country dial code */
+export const INDIA_DIAL_CODE = "+91";
+
+export const PHONE_LENGTH = 10;
+
+/** Seconds a user must wait before requesting another OTP */
+export const OTP_RESEND_COOLDOWN_SECONDS = 30;
+
+// <------ Time durations (ms) ------->
+
+export const ONE_HOUR_MS = 60 * 60 * 1000;
+
+export const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+export const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
+
+/** Maximum acceptable server/device clock drift before warning */
+export const MAX_CLOCK_DRIFT_SECONDS = 30;
+
+// <------ HTTP status codes ------->
+
+export const HTTP_STATUS = {
+  OK: 200,
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  INTERNAL_SERVER_ERROR: 500,
+  SERVICE_UNAVAILABLE: 503,
+} as const;
+
 export const gstinReg = RegExp(
   /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/,
 );

@@ -72,7 +72,7 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
         // They are not defined here to avoid Better Auth insertion conflicts
         // Instead, they are UPDATEd after session creation
       },
-      expiresIn: 60 * 60 * 24 * 30, // 30 days
+      expiresIn: 60 * 60 * 24 * 7, // 7 days (aligned with refresh token expiry)
       updateAge: 60 * 60 * 24, // refresh if older than 1 day
     },
 

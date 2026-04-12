@@ -2,6 +2,15 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+/** Expo SecureStore hard limit per key (bytes) */
+export const SECURESTORE_LIMIT_BYTES = 1800;
+
+/** Warn when stored data exceeds this size (78% of limit) */
+export const SECURESTORE_WARNING_BYTES = 1400;
+
+/** Fail pre-persistence check when data exceeds this size (92% of limit) */
+export const SECURESTORE_CRITICAL_BYTES = 1650;
+
 /**
  * Cached result of the SecureStore availability check.
  * Resolved once on first use — the result never changes at runtime.

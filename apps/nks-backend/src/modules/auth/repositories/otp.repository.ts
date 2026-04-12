@@ -103,12 +103,47 @@ export class OtpRepository {
     purpose: 'LOGIN' | 'PHONE_VERIFY' | 'EMAIL_VERIFY' | 'RESET_PASSWORD',
     value: string,
     expiresAt: Date,
+    reqId?: string,
   ): Promise<void> {
     await this.db.insert(schema.otpVerification).values({
       identifier,
       value,
       purpose,
       expiresAt,
+      ...(reqId && { reqId }),
     });
+  }
+
+  async findByIdentifierPurposeAndReqId(
+    identifier: string,
+    purpose: 'LOGIN' | 'PHONE_VERIFY' | 'EMAIL_VERIFY' | 'RESET_PASSWORD',
+    reqId: string,
+  ): Promise<OtpVerification | null> {
+    const [otp] = await this.db
+      .select()
+      .from(schema.otpVerification)
+      .where(
+        and(
+          eq(schema.otpVerification.identifier, identifier),
+          eq(schema.otpVerification.purpose, purpose),
+          eq(schema.otpVerification.reqId, reqId),
+        ),
+      )
+      .orderBy(desc(schema.otpVerification.createdAt))
+      .limit(1);
+
+    return otp ?? null;
+  }
+
+  async markAsUsedByReqId(reqId: string): Promise<void> {
+    await this.db
+      .update(schema.otpVerification)
+      .set({ isUsed: true })
+      .where(
+        and(
+          eq(schema.otpVerification.reqId, reqId),
+          eq(schema.otpVerification.isUsed, false),
+        ),
+      );
   }
 }

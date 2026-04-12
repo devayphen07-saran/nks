@@ -55,10 +55,9 @@ export class AuthControllerHelpers {
 
   /**
    * Apply session cookie from AuthResponseEnvelope.
-   * The envelope has shape: { requestId, traceId, data: { session: { sessionToken } } }
    */
   static applySessionCookie(res: Response, result: AuthResponseEnvelope): void {
-    const token = result.data?.session?.sessionToken;
+    const token = result.session?.sessionToken;
     if (token) {
       this.setSessionCookie(res, token);
     }

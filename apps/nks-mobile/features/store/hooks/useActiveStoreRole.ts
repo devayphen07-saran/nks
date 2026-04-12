@@ -4,7 +4,7 @@ import { ROLE_MENU_MAP, type MenuItem, type RoleCode } from '../constants/drawer
 
 export function useActiveStoreRole() {
   const authState = useSelector((state: RootState) => state.auth);
-  const access = authState.authResponse?.data?.access;
+  const access = authState.authResponse?.access;
 
   const activeStoreId = access?.activeStoreId;
   const roles = access?.roles ?? [];

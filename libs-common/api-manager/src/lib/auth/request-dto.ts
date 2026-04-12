@@ -32,30 +32,16 @@ export interface AuthUserResponse {
   phoneNumber: string | null;
   phoneNumberVerified: boolean;
   image: string | null;
-  lastLoginAt: string | null;
-  lastLoginIp: string | null;
 }
 
 export interface AuthSessionResponse {
   sessionId: string;
-  tokenType: string;
   sessionToken: string;
-  issuedAt: string;
   expiresAt: string;
   refreshToken: string;
   refreshExpiresAt: string;
-  mechanism: "password" | "otp" | "oauth" | "token";
-  absoluteExpiry: string;
   defaultStore: { guuid: string } | null;
   jwtToken?: string;
-}
-
-export interface AuthContextResponse {
-  method: "password" | "otp" | "oauth";
-  mfaVerified: boolean;
-  mfaRequired: boolean;
-  trustLevel: "standard" | "high" | "unverified";
-  stepUpRequired: boolean;
 }
 
 export interface UserRoleEntry {
@@ -120,25 +106,23 @@ export interface ApiMetadataResponse {
   timestamp: string;
 }
 
-export interface AuthData {
+export interface AuthResponse extends ApiMetadataResponse {
   user: AuthUserResponse;
   session: AuthSessionResponse;
-  authContext: AuthContextResponse;
   access: AuthAccessResponse;
-  flags: FeatureFlagsResponse;
+  offlineToken?: string;
 }
 
-export interface AuthResponse extends ApiMetadataResponse {
-  data: AuthData;
-}
+/** @deprecated Use AuthResponse directly — fields are now at top level */
+export type AuthData = Omit<AuthResponse, keyof ApiMetadataResponse>;
 
 // ─── Profile Completion (unified endpoint for all profile updates) ─────────────
 
 export interface ProfileCompleteRequest {
-  name: string;                    // Update user name
-  email?: string;                  // Add/update email (requires password)
-  phoneNumber?: string;            // Add/update phone (triggers OTP verification)
-  password?: string;               // Set/update password (min 8 chars, required when adding email)
+  name: string; // Update user name
+  email?: string; // Add/update email (requires password)
+  phoneNumber?: string; // Add/update phone (triggers OTP verification)
+  password?: string; // Set/update password (min 8 chars, required when adding email)
 }
 
 export interface ProfileCompleteResponse {

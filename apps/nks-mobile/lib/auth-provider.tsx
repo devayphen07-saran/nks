@@ -1,13 +1,18 @@
 import React, { createContext, useContext, useEffect, useRef } from "react";
 import * as SplashScreen from "expo-splash-screen";
+import NetInfo from "@react-native-community/netinfo";
+import type { AuthResponse } from "@nks/api-manager";
 import { useRootDispatch, useAuth as useReduxAuth } from "../store";
-import { initializeAuth } from "../store/initializeAuth";
+import { setCredentials } from "../store/auth-slice";
+import { initializeAuth } from "../store/initialize-auth";
+import { refreshSession } from "../store/refresh-session";
+import { setupAxiosInterceptors } from "./axios-interceptors";
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
 interface AuthContextValue {
   isLoggedIn: boolean;
-  isLoading: boolean;
+  isLoading: boolean; 
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -21,9 +26,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const dispatch = useRootDispatch();
   const { isInitializing, isAuthenticated } = useReduxAuth();
   const splashHidden = useRef(false);
+  const wasOffline = useRef(false);
 
   useEffect(() => {
     dispatch(initializeAuth());
+  }, [dispatch]);
+
+  // ✅ PHASE 3: Setup Axios interceptors when provider mounts
+  // Moved from store/index.ts for graceful error handling
+  // Interceptors are non-critical for startup, app works without them (though no token refresh)
+  useEffect(() => {
+    try {
+      setupAxiosInterceptors((authResponse: AuthResponse) => {
+        dispatch(setCredentials(authResponse));
+      });
+      console.log("[Auth] Axios interceptors configured");
+    } catch (error) {
+      console.error("[Auth] Failed to setup Axios interceptors:", error);
+      // Non-critical — continue anyway
+    }
   }, [dispatch]);
 
   useEffect(() => {
@@ -32,6 +53,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       splashHidden.current = true;
     }
   }, [isInitializing]);
+
+  // Reconnection handler: when device goes offline→online, refresh session
+  // to sync roles, permissions, clock offset, and offline token
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      const isOnline = state.isConnected ?? false;
+
+      if (!isOnline) {
+        wasOffline.current = true;
+        return;
+      }
+
+      // Online transition detected — trigger refresh
+      if (wasOffline.current) {
+        wasOffline.current = false;
+        console.log("[Auth] Device back online — refreshing session");
+        dispatch(refreshSession());
+      }
+    });
+
+    return () => unsubscribe();
+  }, [isAuthenticated, dispatch]);
 
   return (
     <AuthContext.Provider

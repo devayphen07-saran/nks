@@ -212,6 +212,23 @@ export class SessionsRepository {
   }
 
   /**
+   * Find session by refresh token hash with exclusive lock (FOR UPDATE).
+   * Used for opaque token lookup during refresh (no UUID exposed in token).
+   */
+  async findByRefreshTokenHashForUpdate(
+    refreshTokenHash: string,
+  ): Promise<UserSession | null> {
+    const [session] = await this.db
+      .select()
+      .from(schema.userSession)
+      .where(eq(schema.userSession.refreshTokenHash, refreshTokenHash))
+      .for('update')
+      .limit(1);
+
+    return session ?? null;
+  }
+
+  /**
    * Find session by token and return a new session record.
    * Used after BetterAuth creates a session to fetch the typed row.
    */
@@ -350,5 +367,24 @@ export class SessionsRepository {
           gt(schema.userSession.expiresAt, new Date()),
         ),
       );
+  }
+
+  /**
+   * Delete old revoked sessions (older than 30 days).
+   * Prevents database bloat from session rotation while preserving recent audit trail.
+   * Returns count of deleted sessions.
+   */
+  async deleteOldRevokedSessions(olderThanDays: number = 30): Promise<number> {
+    const cutoffDate = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
+    const result = await this.db
+      .delete(schema.userSession)
+      .where(
+        and(
+          this.db.sql`${schema.userSession.refreshTokenRevokedAt} IS NOT NULL`,
+          lt(schema.userSession.refreshTokenRevokedAt, cutoffDate),
+        ),
+      );
+
+    return result.rowCount ?? 0;
   }
 }

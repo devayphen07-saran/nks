@@ -20,11 +20,18 @@ export const otpRequestLog = pgTable(
     // requestCount — how many times this identifier requested OTP in the window
     requestCount: smallint('request_count').notNull().default(1),
 
-    // windowExpiresAt — reset window expires at this time (24h from first request)
+    // windowExpiresAt — reset window expires at this time (1h from first request)
     // After expiry, requestCount resets to 0
     windowExpiresAt: timestamp('window_expires_at', {
       withTimezone: true,
     }).notNull(),
+
+    // lastAttemptAt — timestamp of most recent OTP request (for exponential backoff)
+    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+
+    // consecutiveFailures — count of failed OTP verifications (for exponential backoff)
+    // Resets to 0 on successful verification or window expiry
+    consecutiveFailures: smallint('consecutive_failures').notNull().default(0),
   },
   (table) => [
     // Fast lookup: find rate limit record by identifier hash

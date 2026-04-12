@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import { otpSchema } from "../schema/otp";
 import { verifyOtp, otpResend } from "@nks/api-manager";
 import { useRootDispatch } from "../../../store";
-import { persistLogin } from "../../../store/persistLogin";
-
-const OTP_LENGTH = 6;
-const RESEND_COOLDOWN = 30;
+import { persistLogin } from "../../../store/persist-login";
+import { ErrorHandler } from "../../../shared/errors";
+import { OTP_RATE_LIMITS } from "../../../lib/rate-limiter";
+import { OTP_LENGTH, OTP_RESEND_COOLDOWN_SECONDS } from "@nks/utils";
+import { ROUTES } from "../../../lib/routes";
 
 export function useOtpVerify() {
   const dispatch = useRootDispatch();
@@ -15,15 +16,14 @@ export function useOtpVerify() {
     reqId: string;
   }>();
 
-  // Clean up phone: remove duplicate +, ensure single +91 prefix
-  const phone = rawPhone ? rawPhone.replace(/^\++/, '+') : '';
+  // Clean up phone: remove duplicate +, ensure single prefix
+  const phone = rawPhone ? rawPhone.replace(/^\++/, "+") : "";
 
   const reqIdRef = useRef(initialReqId ?? "");
   const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(""));
-  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isResending, setIsResending] = useState(false);
-  const [countdown, setCountdown] = useState(RESEND_COOLDOWN);
+  const [countdown, setCountdown] = useState(OTP_RESEND_COOLDOWN_SECONDS);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -37,7 +37,7 @@ export function useOtpVerify() {
 
   const startCountdown = useCallback(() => {
     clearTimer();
-    setCountdown(RESEND_COOLDOWN);
+    setCountdown(OTP_RESEND_COOLDOWN_SECONDS);
     timerRef.current = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
@@ -58,6 +58,16 @@ export function useOtpVerify() {
     (otpValue: string) => {
       if (isVerifying) return;
 
+      // ✅ CRITICAL FIX #5: Rate limit OTP verification attempts
+      const rateLimitCheck = OTP_RATE_LIMITS.verify.check();
+      if (!rateLimitCheck.allowed) {
+        setErrorMessage(
+          rateLimitCheck.message || "Too many attempts. Please wait.",
+        );
+        setDigits(Array(OTP_LENGTH).fill(""));
+        return;
+      }
+
       const currentReqId = reqIdRef.current;
       if (!currentReqId) {
         setErrorMessage("Session expired. Please request a new OTP.");
@@ -73,30 +83,33 @@ export function useOtpVerify() {
       setErrorMessage(null);
       setIsVerifying(true);
 
-      dispatch(
-        verifyOtp({
-          bodyParam: { phone: phone ?? "", otp: otpValue, reqId: currentReqId },
-        }),
-      )
+      const payload = {
+        phone: phone ?? "",
+        otp: otpValue,
+        reqId: currentReqId,
+      };
+
+      dispatch(verifyOtp({ bodyParam: payload }))
         .unwrap()
         .then(async (apiResponse) => {
           const authResponse = apiResponse?.data;
 
-          if (authResponse?.data?.session?.sessionToken) {
+          if (authResponse?.session?.sessionToken) {
+            // Reset rate limiter on successful verification
+            OTP_RATE_LIMITS.verify.reset();
             await persistLogin(authResponse, dispatch);
-            router.replace(
-              "/(protected)/(workspace)/(app)/(onboarding)/account-type",
-            );
+            router.replace(ROUTES.ACCOUNT_TYPE);
           } else {
             setErrorMessage("Verification failed. Please try again.");
           }
         })
         .catch((err) => {
-          const msg =
-            err?.data?.message ??
-            err?.message ??
-            "Verification failed. Please try again.";
-          setErrorMessage(msg);
+          const appError = ErrorHandler.handle(err, {
+            phone: phone,
+            otp: "***",
+            action: "verify_otp",
+          });
+          setErrorMessage(appError.getUserMessage());
           setDigits(Array(OTP_LENGTH).fill(""));
         })
         .finally(() => setIsVerifying(false));
@@ -104,67 +117,83 @@ export function useOtpVerify() {
     [isVerifying, phone, dispatch],
   );
 
-  const handleDigitChange = (text: string, index: number) => {
-    const digit = text.replace(/[^0-9]/g, "").slice(-1);
-    const newDigits = [...digits];
-    newDigits[index] = digit;
-    setDigits(newDigits);
+  /**
+   * Update all digits at once from the hidden input's accumulated text.
+   * Avoids the stale-closure bug of updating one digit at a time.
+   */
+  const setOtpFromString = useCallback(
+    (text: string) => {
+      const cleaned = text.replace(/[^0-9]/g, "").slice(0, OTP_LENGTH);
+      const newDigits = Array.from(
+        { length: OTP_LENGTH },
+        (_, i) => cleaned[i] || "",
+      );
+      setDigits(newDigits);
+      setErrorMessage(null);
+
+      // Auto-verify when all 6 digits entered
+      if (cleaned.length === OTP_LENGTH) {
+        handleVerify(cleaned);
+      }
+    },
+    [handleVerify],
+  );
+
+  const resetOtp = useCallback(() => {
+    setDigits(Array(OTP_LENGTH).fill(""));
     setErrorMessage(null);
-
-    // Auto-verify when all digits filled
-    if (newDigits.every((d) => d !== "")) {
-      handleVerify(newDigits.join(""));
-    }
-  };
-
-  const handleKeyPress = (
-    e: { nativeEvent: { key: string } },
-    index: number,
-  ) => {
-    if (e.nativeEvent.key === "Backspace" && !digits[index] && index > 0) {
-      setFocusedIndex(index - 1);
-    }
-  };
+  }, []);
 
   const handleResend = useCallback(() => {
     if (isResending || countdown > 0) return;
 
+    // ✅ CRITICAL FIX #5: Rate limit OTP resend attempts
+    const rateLimitCheck = OTP_RATE_LIMITS.resend.check();
+    if (!rateLimitCheck.allowed) {
+      setErrorMessage(
+        rateLimitCheck.message || "Please wait before requesting another OTP.",
+      );
+      return;
+    }
+
     setIsResending(true);
-    setErrorMessage(null);
-    setDigits(Array(OTP_LENGTH).fill(""));
+    resetOtp();
 
     dispatch(otpResend({ bodyParam: { reqId: reqIdRef.current } }))
       .unwrap()
       .then((data) => {
         const newReqId = data?.data?.reqId ?? reqIdRef.current;
         reqIdRef.current = newReqId;
+        OTP_RATE_LIMITS.resend.reset();
         startCountdown();
       })
       .catch((err) => {
-        const msg =
-          err?.data?.message ??
-          err?.message ??
-          "Failed to resend OTP. Please try again.";
-        setErrorMessage(msg);
+        const appError = ErrorHandler.handle(err, {
+          phone: phone,
+          action: "resend_otp",
+          reqId: reqIdRef.current,
+        });
+        setErrorMessage(appError.getUserMessage());
       })
       .finally(() => setIsResending(false));
-  }, [isResending, countdown, dispatch, startCountdown]);
+  }, [isResending, countdown, dispatch, startCountdown, resetOtp, phone]);
 
-  const canVerify = digits.every((d) => d !== "") && !isVerifying;
+  const canVerify = useMemo(
+    () => digits.every((d) => d !== "") && !isVerifying,
+    [digits, isVerifying],
+  );
 
   return {
     digits,
-    focusedIndex,
     countdown,
     errorMessage,
     canVerify,
     isVerifying,
     isResending,
-    handleDigitChange,
-    handleKeyPress,
+    setOtpFromString,
     handleVerify,
     handleResend,
-    setFocusedIndex,
+    resetOtp,
     phone,
     OTP_LENGTH,
   };

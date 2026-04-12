@@ -42,7 +42,7 @@ export function PhoneScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* ─── Brand Hero ─── */}
+          {/* ─── Hero Section ─── */}
           <BrandHero $topInset={insets.top}>
             <DecoRing1 />
             <DecoRing2 />
@@ -76,7 +76,7 @@ export function PhoneScreen() {
                 color={theme.colorWhite}
                 style={{ fontSize: 36, lineHeight: 42 }}
               >
-                {"Welcome to\nNamma Kadai."}
+                {`Welcome to\nNamma Kadai.`}
               </Typography.H1>
               <Typography.Body
                 color={theme.colorWhite}

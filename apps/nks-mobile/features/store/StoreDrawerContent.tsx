@@ -23,7 +23,7 @@ export function StoreDrawerContent({ navigation }: StoreDrawerContentProps) {
   const [activeRoute, setActiveRoute] = useState("store");
 
   const authState = useAuth();
-  const user = authState.authResponse?.data?.user;
+  const user = authState.authResponse?.user;
   const { activeStoreName, activeRole, menuItems, isOwner } = useActiveStoreRole();
 
   const userInitials =

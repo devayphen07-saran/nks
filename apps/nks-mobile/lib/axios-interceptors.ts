@@ -1,6 +1,8 @@
-import { API } from "@nks/api-manager";
+import { API, type AuthResponse } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
 import { offlineSession } from "./offline-session";
+import { sanitizeError } from "./log-sanitizer";
+import { refreshTokenAttempt } from "./refresh-token-attempt";
 import { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 
 // ─── Refresh Queue ──────────────────────────────────────────────────────────
@@ -21,68 +23,6 @@ function processQueue(error: unknown, token: string | null) {
   failedQueue = [];
 }
 
-/**
- * Reads the stored refresh token from SecureStore and calls POST /auth/refresh-token.
- * On success: updates in-memory token + persisted session. Returns new session token.
- * On failure: returns null.
- */
-async function attemptRefresh(): Promise<string | null> {
-  try {
-    const envelope = await tokenManager.loadSession<any>();
-    const refreshTokenValue = envelope?.data?.data?.session?.refreshToken;
-    if (!refreshTokenValue) return null;
-
-    // Call refresh endpoint directly — bypasses the request interceptor's token injection
-    // because the endpoint is public (no AuthGuard). Expired Bearer header is ignored.
-    const response = await API.post("/auth/refresh-token", {
-      refreshToken: refreshTokenValue,
-    });
-
-    const result = response.data?.data;
-    const newSessionToken = result?.sessionToken;
-    const newRefreshToken = result?.refreshToken;
-    if (!newSessionToken) return null;
-
-    // Update in-memory token
-    tokenManager.set(newSessionToken);
-
-    // Update persisted session with rotated tokens
-    if (envelope?.data) {
-      const updated = {
-        ...envelope.data,
-        data: {
-          ...envelope.data.data,
-          session: {
-            ...envelope.data.data.session,
-            sessionToken: newSessionToken,
-            ...(newRefreshToken ? { refreshToken: newRefreshToken } : {}),
-            ...(result?.expiresAt ? { expiresAt: result.expiresAt } : {}),
-            ...(result?.refreshExpiresAt
-              ? { refreshExpiresAt: result.refreshExpiresAt }
-              : {}),
-          },
-        },
-      };
-      await tokenManager.persistSession(updated);
-    }
-
-    return newSessionToken;
-  } catch (err: unknown) {
-    const axiosErr = err as AxiosError | undefined;
-
-    // Server explicitly rejected the refresh token (401/403) → return null → will logout
-    if (
-      axiosErr?.response?.status === 401 ||
-      axiosErr?.response?.status === 403
-    ) {
-      return null;
-    }
-
-    // Network error / timeout / server down → throw so interceptor keeps session alive
-    throw err;
-  }
-}
-
 // ─── Auth endpoints that should never trigger a refresh retry ────────────────
 const AUTH_ENDPOINTS = [
   "auth/login",
@@ -98,12 +38,18 @@ function isAuthEndpoint(url: string): boolean {
 
 /**
  * Sets up Axios interceptors:
- * 1. Add Authorization header with current token to all requests
- * 2. On 401: attempt token refresh with queue, retry original request on success
+ * 1. Inject Authorization header with current token on every request
+ * 2. On 401: attempt token refresh with queuing, replay original request on success
  * 3. On 403: notify app to refresh permissions in background
+ *
+ * @param onRefreshSuccess Optional callback invoked with the fresh AuthResponse after
+ *   a successful interceptor-path refresh. Use this to sync Redux state so that
+ *   auth.authResponse never holds stale session data.
  */
-export function setupAxiosInterceptors() {
-  // ─── Request Interceptor ──────────────────────────────────────────────
+export function setupAxiosInterceptors(
+  onRefreshSuccess?: (authResponse: AuthResponse) => void,
+) {
+  // ─── Request Interceptor ────────────────────────────────────────────────────
   API.interceptors.request.use(
     async (config: InternalAxiosRequestConfig) => {
       const token = tokenManager.get();
@@ -115,7 +61,7 @@ export function setupAxiosInterceptors() {
     (error: AxiosError) => Promise.reject(error),
   );
 
-  // ─── Response Interceptor ──────────────────────────────────────────────
+  // ─── Response Interceptor ───────────────────────────────────────────────────
   API.interceptors.response.use(
     (response: AxiosResponse) => response,
     async (error: AxiosError) => {
@@ -149,37 +95,54 @@ export function setupAxiosInterceptors() {
         isRefreshing = true;
 
         try {
-          const newToken = await attemptRefresh();
+          const result = await refreshTokenAttempt();
 
-          if (newToken) {
-            // Refresh succeeded — replay all queued requests
-            processQueue(null, newToken);
-            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          if (result.success && result.newToken) {
+            // Refresh succeeded — sync Redux state with fresh session data
+            if (onRefreshSuccess) {
+              try {
+                const envelope = await tokenManager.loadSession<AuthResponse>();
+                if (envelope?.data) {
+                  onRefreshSuccess(envelope.data);
+                }
+              } catch (syncErr) {
+                console.debug(
+                  "[Interceptor] Redux sync after refresh failed:",
+                  sanitizeError(syncErr),
+                );
+              }
+            }
 
-            // Extend offline session validity (reset to +7 days)
+            // Extend offline session validity
             try {
               const session = await offlineSession.load();
               if (session) {
                 await offlineSession.extendValidity(session);
               }
-            } catch (error) {
-              // Offline session extension failed — not critical
+            } catch (offlineErr) {
               console.debug(
                 "[Interceptor] Offline session extension failed:",
-                error,
+                sanitizeError(offlineErr),
               );
             }
 
+            // Replay all queued requests with the new token
+            processQueue(null, result.newToken);
+            originalRequest.headers.Authorization = `Bearer ${result.newToken}`;
             return API(originalRequest);
           }
 
-          // Refresh returned null → server rejected the refresh token → force logout
+          // Refresh failed — determine whether to logout
+          if (result.shouldLogout) {
+            processQueue(error, null);
+            tokenManager.notifyExpired();
+            return Promise.reject(error);
+          }
+
+          // Network error during refresh — keep user logged in, fail this request
           processQueue(error, null);
-          tokenManager.notifyExpired();
           return Promise.reject(error);
         } catch (refreshError) {
-          // Network error during refresh → DON'T logout, just fail the original request
-          // User stays logged in with cached session. They can retry when connectivity returns.
           processQueue(refreshError, null);
           return Promise.reject(refreshError);
         } finally {
@@ -187,7 +150,7 @@ export function setupAxiosInterceptors() {
         }
       }
 
-      // 403: Permissions changed server-side → background refresh
+      // 403: Permissions changed server-side → background permission refresh
       if (status === 403) {
         tokenManager.notifyRefresh();
       }

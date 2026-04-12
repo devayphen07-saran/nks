@@ -1,10 +1,5 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
-import {
-  EmailValidator,
-  OtpRequestValidator,
-} from './validators';
-import { SanitizerValidator } from '../../../common/validators/sanitizer.validator';
 import { Msg91Service } from './msg91.service';
 import { SendOtpDto, VerifyOtpDto } from '../dto/otp.dto';
 import { VerifyEmailOtpDto } from '../dto/email-verify.dto';
@@ -57,14 +52,9 @@ export class OtpService {
    * @returns OTP send response from MSG91
    */
   async sendOtp(dto: SendOtpDto) {
-    let { phone } = dto;
+    const { phone } = dto;
 
-    // Sanitize phone number
-    phone = SanitizerValidator.sanitizePhoneNumber(phone);
-
-    // TODO: Re-enable phone validation after fixing format issues
-    // PhoneValidator.validate(phone);
-
+    // Phone already validated by ZodValidationPipe at controller level
     // Check rate limit — throws 429 if exceeded with retry-after message
     await this.rateLimitService.checkAndRecordRequest(phone);
 
@@ -79,92 +69,73 @@ export class OtpService {
     }
 
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    const reqId = response.reqId ?? response.message;
+
+    // Store reqId in OTP record — required for verification to prevent replay
     await this.otpRepository.insertOtpRecord(
       phone,
       'PHONE_VERIFY',
       'MSG91_MANAGED',
       expiresAt,
+      reqId,
     );
 
-    // MSG91 returns reqId in the "message" field on success: { type: "success", message: "<reqId>" }
-    // Normalize to { reqId } for consistent client consumption
-    return { reqId: response.reqId ?? response.message, mobile: phone };
+    return { reqId, mobile: phone };
   }
 
   /**
-   * Verify OTP via MSG91 and find/create user.
-   * Returns minimal verification result — session creation is handled by OtpAuthOrchestrator.
+   * Verify OTP via MSG91 only — pure OTP verification logic.
+   * Does NOT find/create user (Issue #16: Separated from OtpService).
    *
-   * ARCHITECTURE: OtpService is now pure OTP verification logic.
-   * It does NOT call AuthService (breaks circular dependency).
-   * OtpAuthOrchestrator orchestrates the full flow: verify OTP → create session → build response.
+   * ARCHITECTURE: OtpService is pure OTP verification logic.
+   * User find/create is handled by UserCreationService (injected via OtpAuthOrchestrator).
+   * OtpAuthOrchestrator orchestrates: verify OTP → find/create user → create session.
    *
-   * @returns Verification result with user data (not full auth response)
+   * @returns Verification result (phone number, MSG91 response data)
    */
   async verifyOtp(dto: VerifyOtpDto): Promise<{
     verified: true;
-    userId: number;
     phone: string;
-    guuid: string;
-    user: typeof schema.users.$inferSelect;
   }> {
     const { phone, otp, reqId } = dto;
 
-    // Validate phone format
-    OtpRequestValidator.validatePhone(phone);
-
-    // Validate OTP code (6 digits)
-    OtpRequestValidator.validateOtpCode(otp);
-
-    // Validate request ID (UUID format)
-    OtpRequestValidator.validateRequestId(reqId);
-
-    // 1. Verify with MSG91
-    const response = await this.msg91.verifyOtp(reqId, otp);
-    if (response?.type !== 'success') {
-      throw new BadRequestException(response?.message || 'Invalid OTP');
-    }
-
-    // 2. Mark OTP log as used
-    await this.otpRepository.markAsUsedByIdentifierAndPurpose(
+    // All inputs already validated by ZodValidationPipe at controller level
+    // 1. Verify reqId matches stored OTP record — prevents replay attacks
+    const otpRecord = await this.otpRepository.findByIdentifierPurposeAndReqId(
       phone,
       'PHONE_VERIFY',
+      reqId,
     );
 
-    // 3. Find or create user by phone (phone is now proven via MSG91)
-    // NOTE: This logic is now in OtpService (no longer calls AuthService)
-    let user = await this.authUsersRepository.findByPhone(phone);
-
-    if (!user) {
-      // Create new user with phone number
-      user = await this.authUsersRepository.create({
-        name: `User ${phone.slice(-4)}`,
-        phoneNumber: phone,
-        phoneNumberVerified: false,
-        iamUserId: crypto.randomUUID(),
-      });
-
-      if (!user) {
-        throw new BadRequestException('Failed to create user');
-      }
-    }
-
-    // 4. Mark phone as verified after MSG91 OTP verification
-    if (!user.phoneNumberVerified) {
-      await this.authUsersRepository.verifyPhone(user.id);
-      user = { ...user, phoneNumberVerified: true };
-      this.logger.log(
-        `Phone number verified via MSG91 OTP for user ${user.id}: ${phone.slice(-4)}`,
+    if (!otpRecord) {
+      throw new BadRequestException(
+        'OTP not found or reqId mismatch (already used or invalid request)',
       );
     }
 
-    // Return minimal result — OtpAuthOrchestrator will handle session creation
+    if (otpRecord.isUsed) {
+      throw new BadRequestException('OTP already used');
+    }
+
+    if (otpRecord.expiresAt < new Date()) {
+      throw new BadRequestException('OTP expired');
+    }
+
+    // 2. Verify with MSG91
+    const response = await this.msg91.verifyOtp(reqId, otp);
+    if (response?.type !== 'success') {
+      // Track failed verification attempt for exponential backoff
+      await this.rateLimitService.trackVerificationFailure(phone);
+      throw new BadRequestException(response?.message || 'Invalid OTP');
+    }
+
+    // 3. Mark OTP log as used by reqId
+    await this.otpRepository.markAsUsedByReqId(reqId);
+
+    // Return only verification result — user find/create handled by UserCreationService
     return {
       verified: true,
-      userId: user.id,
       phone,
-      guuid: user.guuid,
-      user,
     };
   }
 
@@ -172,9 +143,7 @@ export class OtpService {
    * Send OTP to email for verification (onboarding).
    */
   async sendEmailOtp(email: string): Promise<void> {
-    // SECURITY: Validate email format using EmailValidator
-    EmailValidator.validate(email);
-
+    // Email already validated by ZodValidationPipe at controller level
     // Check rate limit
     await this.rateLimitService.checkAndRecordRequest(email);
 

@@ -27,7 +27,7 @@ interface Expense {
 
 export function PersonalDashboardScreen() {
   const { theme } = useMobileTheme();
-  const user = useAuth().authResponse?.data?.user;
+  const user = useAuth().authResponse?.user;
   const navigation = useNavigation();
 
   const [searchQuery, setSearchQuery] = useState("");

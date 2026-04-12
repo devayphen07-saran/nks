@@ -4,6 +4,8 @@ import { OtpController } from './controllers/otp.controller';
 import { AuthService } from './services/auth.service';
 import { OtpService } from './services/otp.service';
 import { OtpAuthOrchestrator } from './services/otp-auth-orchestrator.service';
+import { UserCreationService } from './services/user-creation.service';
+import { AuthFlowOrchestrator } from './services/auth-flow-orchestrator.service';
 import { Msg91Service } from './services/msg91.service';
 import { PasswordService } from './services/password.service';
 import { OtpRateLimitService } from './services/otp-rate-limit.service';
@@ -37,6 +39,8 @@ import { JWTConfigService } from '../../config/jwt.config';
     AuthService,
     OtpService,
     OtpAuthOrchestrator,
+    UserCreationService,
+    AuthFlowOrchestrator,
     PasswordService,
     PermissionsService,
 
@@ -71,6 +75,8 @@ import { JWTConfigService } from '../../config/jwt.config';
     // Core auth services
     AuthService,
     OtpService,
+    UserCreationService,
+    AuthFlowOrchestrator,
     PasswordService,
     PermissionsService,
 

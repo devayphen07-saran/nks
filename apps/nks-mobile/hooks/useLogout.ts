@@ -1,5 +1,5 @@
 import { useRootDispatch, useAuth } from "../store";
-import { logoutThunk } from "../store/logoutThunk";
+import { logoutThunk } from "../store/logout-thunk";
 
 /** Dispatch logoutThunk and optionally run a success callback. */
 export const useLogout = () => {

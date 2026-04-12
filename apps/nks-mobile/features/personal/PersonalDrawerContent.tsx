@@ -1,7 +1,6 @@
 import React, { useCallback } from "react";
-import { TouchableOpacity } from "react-native";
+import { Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useSelector } from "react-redux";
 import styled from "styled-components/native";
 import {
   Avatar,
@@ -11,7 +10,8 @@ import {
   Column,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useUserProfile } from "../../store";
+import { useAuthUser } from "../../store";
+import { useLogout } from "../../hooks/useLogout";
 import type { DrawerContentComponentProps } from "@react-navigation/drawer";
 import { router } from "expo-router";
 
@@ -27,10 +27,8 @@ interface MenuCategory {
 export function PersonalDrawerContent(props: DrawerContentComponentProps) {
   const { navigation } = props;
   const { theme } = useMobileTheme();
-
-  const {
-    getUserDetail: { response: user },
-  } = useUserProfile();
+  const user = useAuthUser();
+  const { logout } = useLogout();
 
   const menuCategories: MenuCategory[] = [
     {
@@ -61,10 +59,30 @@ export function PersonalDrawerContent(props: DrawerContentComponentProps) {
   ];
 
   const handleLogout = useCallback(() => {
-    navigation.closeDrawer();
-    // TODO: Integrate logout API call here
-    router.replace("/(auth)/phone");
-  }, [navigation]);
+    Alert.alert(
+      "Logout",
+      "Are you sure you want to log out?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Logout",
+          onPress: async () => {
+            try {
+              navigation.closeDrawer();
+              // Dispatch logoutThunk: calls signOut API, clears token + SecureStore, updates Redux
+              await logout(() => {
+                router.replace("/(auth)/phone");
+              });
+            } catch (error) {
+              console.error("[PersonalDrawer] Logout failed:", error);
+              Alert.alert("Error", "Failed to log out. Please try again.");
+            }
+          },
+          style: "destructive",
+        },
+      ]
+    );
+  }, [logout, navigation]);
 
   const handleNavigate = useCallback(
     (route: string) => {

@@ -70,8 +70,8 @@ export const tokenManager = {
 
   /**
    * Persists the auth response to SecureStore wrapped in a SessionEnvelope.
-   * If the payload exceeds MAX_BYTES, permissions and roles are stripped and
-   * fetchedAt is set to 0 so a background refresh restores them on next boot.
+   * If the payload exceeds MAX_BYTES, roles are compressed to essential fields only.
+   * fetchedAt is set to current time (not 0) to avoid treating as stale.
    */
   async persistSession(data: any): Promise<void> {
     const envelope: SessionEnvelope<any> = { data, fetchedAt: Date.now() };
@@ -82,14 +82,36 @@ export const tokenManager = {
       return;
     }
 
-    // Payload too large — strip arrays and force re-fetch on next boot
+    // CRITICAL FIX #2: Payload too large — compress roles to essential fields only
+    // Keep roleCode and storeId (needed for offline operations)
+    // Drop: storeName, isPrimary, assignedAt, expiresAt (can be fetched on refresh)
+    const compressedRoles = (data.access?.roles ?? []).map((r: any) => ({
+      roleCode: r.roleCode,
+      storeId: r.storeId,
+    }));
+
     const slim: SessionEnvelope<any> = {
       data: {
         ...data,
-        access: { ...(data.access ?? {}), permissions: [], roles: [] },
+        access: {
+          ...(data.access ?? {}),
+          roles: compressedRoles,
+          // Keep permissions if present (usually empty, but preserve if exists)
+        },
       },
-      fetchedAt: 0,
+      fetchedAt: Date.now(), // FIXED: Keep current time, not 0 (data is still fresh)
     };
+
+    const slimJson = JSON.stringify(slim);
+    if (slimJson.length > MAX_BYTES) {
+      // Still too large — strip permissions as well
+      slim.data.access.permissions = [];
+      console.warn(
+        "[Auth] Session data very large even after compression. Stripping permissions.",
+        { originalSize: json.length, compressedSize: slimJson.length },
+      );
+    }
+
     await saveSecureItem(SESSION_KEY, JSON.stringify(slim));
   },
 
