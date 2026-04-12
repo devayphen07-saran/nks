@@ -63,10 +63,11 @@ export class JWTConfigService {
   /**
    * Sign JWT with RS256 (backend only)
    * Works for both WEB and MOBILE
+   * FIX #7: TTL aligned to 15 minutes (was 1 hour)
    */
   signToken(payload: Omit<JWTPayload, 'iat' | 'exp' | 'kid'>): string {
     const now = Math.floor(Date.now() / 1000);
-    const expiresIn = 60 * 60; // 1 hour
+    const expiresIn = 15 * 60; // 15 minutes (NKS spec)
 
     const tokenPayload: JWTPayload = {
       ...payload,
@@ -87,9 +88,11 @@ export class JWTConfigService {
   }
 
   /**
-   * Sign a long-lived offline JWT for mobile offline verification.
-   * 7-day expiry — matches the OfflineSession window.
-   * Contains only identity + authorization claims, no session binding.
+   * Sign an offline JWT for mobile offline verification.
+   * FIX #12: TTL is configurable via expiresIn parameter (default: 3 days for NKS).
+   * The offline JWT's own exp claim IS the offline window boundary.
+   * Mobile does NOT need a separate grace period calculation.
+   * FIX #8: audience aligned to JWT_AUDIENCE ('nks-app'), was 'nks-offline'.
    */
   signOfflineToken(
     payload: {
@@ -99,9 +102,10 @@ export class JWTConfigService {
       stores: Array<{ id: number; name: string }>;
       activeStoreId: number | null;
     },
+    expiresIn: string = '3d',
   ): string {
     const now = Math.floor(Date.now() / 1000);
-    const expiresIn = 7 * 24 * 60 * 60; // 7 days
+    const seconds = this.parseExpiresIn(expiresIn);
 
     const tokenPayload: OfflineJWTPayload = {
       sub: payload.sub,
@@ -111,9 +115,9 @@ export class JWTConfigService {
       stores: payload.stores,
       activeStoreId: payload.activeStoreId,
       iss: 'nks-auth',
-      aud: 'nks-offline',
+      aud: 'nks-app',
       iat: now,
-      exp: now + expiresIn,
+      exp: now + seconds,
       kid: this.currentKeyId,
     };
 
@@ -125,6 +129,19 @@ export class JWTConfigService {
     } catch (error) {
       this.logger.error('Failed to sign offline JWT', error);
       throw error;
+    }
+  }
+
+  /** Parse duration strings like '3d', '12h', '30m' to seconds */
+  private parseExpiresIn(value: string): number {
+    const match = value.match(/^(\d+)([dhm])$/);
+    if (!match) throw new Error(`Invalid expiresIn format: ${value}`);
+    const num = parseInt(match[1], 10);
+    switch (match[2]) {
+      case 'd': return num * 86400;
+      case 'h': return num * 3600;
+      case 'm': return num * 60;
+      default:  return num;
     }
   }
 
@@ -140,6 +157,17 @@ export class JWTConfigService {
       this.logger.warn('JWT verification failed', error);
       throw error;
     }
+  }
+
+  /** Get the current key ID (for /nks-jwks endpoint) */
+  getCurrentKid(): string {
+    return this.currentKeyId;
+  }
+
+  /** Export the RSA public key in JWK format (for /nks-jwks endpoint) */
+  getPublicKeyAsJwk(): Record<string, any> {
+    const key = crypto.createPublicKey({ key: this.publicKey, format: 'pem' });
+    return key.export({ format: 'jwk' }) as Record<string, any>;
   }
 
   /**

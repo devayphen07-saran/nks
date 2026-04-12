@@ -32,8 +32,10 @@ export class AuthProviderRepository {
   async findIdByUserIdAndProvider(
     userId: number,
     providerId: string,
+    tx?: Db,
   ): Promise<number | null> {
-    const [provider] = await this.db
+    const conn = tx ?? this.db;
+    const [provider] = await conn
       .select({ id: schema.userAuthProvider.id })
       .from(schema.userAuthProvider)
       .where(
@@ -47,8 +49,9 @@ export class AuthProviderRepository {
     return provider?.id ?? null;
   }
 
-  async create(data: NewUserAuthProvider): Promise<UserAuthProvider | null> {
-    const [provider] = await this.db
+  async create(data: NewUserAuthProvider, tx?: Db): Promise<UserAuthProvider | null> {
+    const conn = tx ?? this.db;
+    const [provider] = await conn
       .insert(schema.userAuthProvider)
       .values(data)
       .returning();
@@ -56,8 +59,9 @@ export class AuthProviderRepository {
     return provider ?? null;
   }
 
-  async updatePassword(providerId: number, passwordHash: string): Promise<void> {
-    await this.db
+  async updatePassword(providerId: number, passwordHash: string, tx?: Db): Promise<void> {
+    const conn = tx ?? this.db;
+    await conn
       .update(schema.userAuthProvider)
       .set({ password: passwordHash })
       .where(eq(schema.userAuthProvider.id, providerId));

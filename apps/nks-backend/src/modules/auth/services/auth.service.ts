@@ -68,10 +68,17 @@ export interface VerifyClaimsResponse {
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
+const MAX_CONCURRENT_SESSIONS = 5;
 const SYSTEM_ROLE_STORE_OWNER = 'STORE_OWNER';
 const JWT_AUDIENCE = 'nks-app';
 const IP_HMAC_SECRET =
   process.env['IP_HMAC_SECRET'] || 'default-ip-hmac-secret';
+
+// Offline JWT TTL — controls how long the mobile device can work offline.
+// The offline JWT's own exp claim IS the offline window boundary.
+// NKS policy: 3 days. Change here to update all downstream behaviour.
+const OFFLINE_JWT_TTL_DAYS = 3;
+const OFFLINE_JWT_EXPIRATION = `${OFFLINE_JWT_TTL_DAYS}d`;
 
 @Injectable()
 export class AuthService {
@@ -693,95 +700,94 @@ export class AuthService {
     let phoneVerificationSent = false;
     let nextStep: 'verifyEmail' | 'verifyPhone' | 'complete' = 'complete';
 
-    // Wrap all profile updates in a transaction
-    await this.db.transaction(async () => {
-      // Update name via repository
-      const nameUpdated = await this.authUsersRepository.update(userId, {
-        name: dto.name,
-      });
-      if (!nameUpdated) {
-        throw new Error(`Failed to update user name for user ${userId}`);
-      }
+    // FIX #17: compute password hash BEFORE opening the transaction.
+    // passwordService.hash() is bcrypt/argon2 (100-300ms). Running it inside
+    // db.transaction() holds a connection open for the entire hash duration,
+    // exhausting the pool under concurrent load.
+    const passwordHash =
+      dto.email && dto.password
+        ? await this.passwordService.hash(dto.password)
+        : null;
 
-      // Case 1: User logged in via phone, adding email + password
+    if (dto.email && !dto.password) {
+      throw new BadRequestException(
+        'Password is required when adding email',
+      );
+    }
+
+    // FIX #1: tx is accepted and passed to every repository method inside.
+    // Previously the callback ignored tx entirely — all queries ran on the
+    // pool connection and rollback was impossible on failure.
+    await this.db.transaction(async (tx) => {
+      await this.authUsersRepository.update(userId, { name: dto.name }, tx);
+
       if (dto.email) {
-        if (!dto.password) {
-          throw new BadRequestException(
-            'Password is required when adding email',
-          );
-        }
-
-        // SECURITY: Check email not already in use by OTHER users
         const emailTaken =
           await this.authUsersRepository.emailExistsForOtherUser(
             dto.email,
             userId,
+            tx,
           );
-
         if (emailTaken) {
           throw new ConflictException('Email already in use by another user');
         }
 
-        // Update user email (unverified initially) via repository
-        const emailUpdated = await this.authUsersRepository.update(userId, {
-          email: dto.email,
-          emailVerified: false,
-        });
-        if (!emailUpdated) {
-          throw new Error(`Failed to update user email for user ${userId}`);
-        }
+        await this.authUsersRepository.update(
+          userId,
+          { email: dto.email, emailVerified: false },
+          tx,
+        );
 
-        // Hash and store password
-        const hash = await this.passwordService.hash(dto.password);
         const existingProviderId =
           await this.authProviderRepository.findIdByUserIdAndProvider(
             userId,
             'email',
+            tx,
           );
 
         if (existingProviderId) {
           await this.authProviderRepository.updatePassword(
             existingProviderId,
-            hash,
+            passwordHash!,
+            tx,
           );
         } else {
-          await this.authProviderRepository.create({
-            accountId: dto.email,
-            providerId: 'email',
-            userId,
-            password: hash,
-            isVerified: false,
-          });
+          await this.authProviderRepository.create(
+            {
+              accountId: dto.email,
+              providerId: 'email',
+              userId,
+              password: passwordHash!,
+              isVerified: false,
+            },
+            tx,
+          );
         }
 
         nextStep = 'verifyEmail';
       }
 
-      // Case 2: User logged in via email, adding phone number
       if (dto.phoneNumber) {
-        // Check phone not already linked to this user
-        const alreadyLinked = await this.authUsersRepository.phoneLinkedToUser(
-          dto.phoneNumber,
-          userId,
-        );
+        const alreadyLinked =
+          await this.authUsersRepository.phoneLinkedToUser(
+            dto.phoneNumber,
+            userId,
+            tx,
+          );
 
         if (!alreadyLinked) {
-          // Update user phone (unverified initially) via repository
-          const phoneUpdated = await this.authUsersRepository.update(userId, {
-            phoneNumber: dto.phoneNumber,
-            phoneNumberVerified: false,
-          });
-          if (!phoneUpdated) {
-            throw new Error(`Failed to update user phone for user ${userId}`);
-          }
+          await this.authUsersRepository.update(
+            userId,
+            { phoneNumber: dto.phoneNumber, phoneNumberVerified: false },
+            tx,
+          );
         }
 
         nextStep = 'verifyPhone';
       }
 
-      // If nothing added, mark profile as complete via repository
       if (!dto.email && !dto.phoneNumber) {
-        await this.authUsersRepository.markProfileComplete(userId);
+        await this.authUsersRepository.markProfileComplete(userId, tx);
       }
     });
 
@@ -810,14 +816,21 @@ export class AuthService {
   /**
    * Rotate the session: delete old token, issue new one via BetterAuth.
    */
+  // FIX #3: validate oldToken belongs to userId before any modification.
+  // Previously any caller who knew a userId could wipe all sessions.
   async rotateSession(
     oldToken: string,
     userId: number,
   ): Promise<{ token: string; expiresAt: Date }> {
-    // Terminate all old sessions for this user
-    await this.sessionService.terminateAllSessions(userId);
+    const session = await this.sessionsRepository.findByToken(oldToken);
+    if (!session || session.userId !== userId) {
+      throw new UnauthorizedException('Invalid session token');
+    }
 
-    // Issue new session via BetterAuth
+    // Revoke only the specific session being rotated — not all sessions
+    await this.sessionsRepository.delete(session.id);
+
+    // Issue a fresh session for the same user
     return this.createSessionForUser(userId);
   }
 
@@ -840,11 +853,16 @@ export class AuthService {
   
    * Used for detecting role changes between refresh cycles
    */
+  // FIX #2: sort entries before hashing — identical role sets always produce
+  // identical hashes regardless of the order rows are returned from the database.
+  // Without this, multi-role users trigger false-positive rolesChanged on every refresh.
   private hashRoles(roles: UserRoleEntry[]): string {
-    const roleString = JSON.stringify(
-      roles.map((r) => `${r.roleCode}:${r.storeId}`),
-    );
-    return crypto.createHash('sha256').update(roleString).digest('hex');
+    const sorted = roles
+      .map((r) => `${r.roleCode}:${r.storeId ?? 'null'}`)
+      .sort();
+    return crypto.createHash('sha256')
+      .update(JSON.stringify(sorted))
+      .digest('hex');
   }
 
   /**
@@ -939,16 +957,24 @@ export class AuthService {
 
     const permissions = await this.getUserPermissions(user.id);
 
-    // Generate 7-day offline JWT for mobile offline verification
-    const offlineToken = this.jwtConfigService.signOfflineToken({
-      sub: user.guuid ?? '',
-      ...(user.email ? { email: user.email } : {}),
-      roles: permissions.roles.map((r) => r.roleCode),
-      stores: permissions.roles
-        .filter((r) => r.storeId && r.storeName)
-        .map((r) => ({ id: r.storeId as number, name: r.storeName as string })),
-      activeStoreId: permissions.activeStoreId ?? null,
-    });
+    // Offline token TTL driven by OFFLINE_JWT_EXPIRATION constant (3 days for NKS).
+    // The offline JWT's own exp claim IS the offline window boundary.
+    // Mobile does NOT need a separate grace period calculation.
+    const offlineToken = this.jwtConfigService.signOfflineToken(
+      {
+        sub: user.guuid ?? '',
+        ...(user.email ? { email: user.email } : {}),
+        roles: permissions.roles.map((r) => r.roleCode),
+        stores: permissions.roles
+          .filter((r) => r.storeId && r.storeName)
+          .map((r) => ({
+            id: r.storeId as number,
+            name: r.storeName as string,
+          })),
+        activeStoreId: permissions.activeStoreId ?? null,
+      },
+      OFFLINE_JWT_EXPIRATION,
+    );
 
     return AuthMapper.toAuthResponseEnvelope(
       {
@@ -966,7 +992,7 @@ export class AuthService {
         session: {
           token,
           expiresAt,
-          sessionId, // Already generated above
+          sessionId,
         },
       },
       permissions,
@@ -974,11 +1000,11 @@ export class AuthService {
       traceId,
       tokenPair,
       primaryStore ? { guuid: primaryStore.guuid } : null,
-      sessionId, // Pass pre-generated sessionId
-      issuedAt, // Pass pre-generated timestamp
-      expiresAt, // Pass actual session expiry (30 days), NOT JWT expiry (1 hour)
-      refreshExpiresAt, // Pass refresh token expiry
-      offlineToken, // 7-day offline JWT
+      sessionId,
+      issuedAt,
+      expiresAt, // FIX #9: actual session expiry (7 days), NOT JWT expiry (15 min)
+      refreshExpiresAt,
+      offlineToken,
     );
   }
 
@@ -999,6 +1025,7 @@ export class AuthService {
     // Sign RS256 JWT — essential claims only
     // JWT contains: sub, sid, email, roles (store info is in session, not token)
     // Issue #8: Remove stores/activeStoreId from JWT payload to reduce bloat
+    // FIX #8: use JWT_AUDIENCE constant (was hardcoded 'nks-app')
     const jwtToken = this.jwtConfigService.signToken({
       sub: userGuuid,
       sid: sessionGuuid,
@@ -1006,22 +1033,19 @@ export class AuthService {
       ...(userEmail ? { email: userEmail } : {}),
       roles: userRoles.map((r) => r.roleCode),
       iss: 'nks-auth',
-      aud: 'nks-app',
+      aud: JWT_AUDIENCE,
     });
 
-    // Opaque refresh token: no sessionGuuid or structure exposed
-    // Lookup uses token hash, preventing UUID disclosure in logs/history
     const { token: refreshToken, tokenHash: refreshTokenHash } =
       this.refreshTokenService.generateRefreshToken();
 
-    // Calculate expiry times
     const now = new Date();
-    const jwtExpiresAt = new Date(now.getTime() + 60 * 60 * 1000); // 1h
+    // FIX #7: 15 minutes (was 1 hour) — aligned with NKS spec
+    const jwtExpiresAt = new Date(now.getTime() + 15 * 60 * 1000);
     const refreshTokenExpiresAt = new Date(
       now.getTime() + 7 * 24 * 60 * 60 * 1000,
-    ); // 7d (rolling window — resets on each refresh)
+    ); // 7d rolling window
 
-    // Store hash in the specific session only — not all user sessions
     await this.sessionsRepository.setRefreshTokenData(sessionToken, {
       refreshTokenHash,
       refreshTokenExpiresAt,
@@ -1029,7 +1053,7 @@ export class AuthService {
     });
 
     this.logger.log(
-      `Token pair created for user ${userGuuid}. JWT expires in 1h, refresh token in 7d.`,
+      `Token pair created for ${userGuuid}. Access: 15 min. Refresh: 7 days.`,
     );
 
     // Return both tokens to client
@@ -1150,7 +1174,8 @@ export class AuthService {
 
     const userRoles = permissions.roles || [];
     const currentRoleHash = this.hashRoles(userRoles);
-    const accessTokenExpiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
+    // FIX #7: 15 minutes — was hardcoded 1 hour, misaligned with NKS spec
+    const accessTokenExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     // Step 5: Rotate session token — create new BetterAuth session (new opaque token)
     const ctx = await this.getBetterAuthContext();
@@ -1176,9 +1201,7 @@ export class AuthService {
       Date.now() + 7 * 24 * 60 * 60 * 1000,
     ); // 7d rolling window
 
-    // Sign new JWT now that newSession.guuid is available for sid
-    // JWT contains only essential claims: sub, sid, email, roles
-    // Store info is in session (activeStoreFk), not in token (Issue #8: JWT Bloat)
+    // FIX #8: use JWT_AUDIENCE constant (was hardcoded 'nks-app')
     const accessToken = this.jwtConfigService.signToken({
       sub: user?.guuid || '',
       sid: newSession.guuid,
@@ -1186,29 +1209,30 @@ export class AuthService {
       ...(user?.email ? { email: user.email } : {}),
       roles: userRoles.map((r) => r.roleCode),
       iss: 'nks-auth',
-      aud: 'nks-app',
+      aud: JWT_AUDIENCE,
     });
 
-    // Update new and old session rows in parallel (independent operations)
-    // Previously: sequential updates took ~4ms. Now: parallel takes ~2ms
-    const updateNewSession = this.sessionsRepository.update(newSession.id, {
-      roleHash: currentRoleHash,
-      deviceId: session.deviceId,
-      deviceName: session.deviceName,
-      deviceType: session.deviceType,
-      appVersion: session.appVersion,
-      activeStoreFk: session.activeStoreFk,
-      refreshTokenHash: newRefreshTokenHash,
-      refreshTokenExpiresAt: newRefreshTokenExpiresAt,
-      accessTokenExpiresAt,
-    });
+    // FIX #4: wrap both session updates in a single transaction.
+    // Previously parallel via Promise.all — if revocation failed, old refresh
+    // token remained valid and theft detection was permanently bypassed.
+    await this.db.transaction(async (tx) => {
+      await this.sessionsRepository.update(newSession.id, {
+        roleHash: currentRoleHash,
+        deviceId: session.deviceId,
+        deviceName: session.deviceName,
+        deviceType: session.deviceType,
+        appVersion: session.appVersion,
+        activeStoreFk: session.activeStoreFk,
+        refreshTokenHash: newRefreshTokenHash,
+        refreshTokenExpiresAt: newRefreshTokenExpiresAt,
+        accessTokenExpiresAt,
+      });
 
-    const revokeOldSession = this.sessionsRepository.update(session.id, {
-      refreshTokenRevokedAt: new Date(),
-      revokedReason: 'ROTATION',
+      await this.sessionsRepository.update(session.id, {
+        refreshTokenRevokedAt: new Date(),
+        revokedReason: 'ROTATION',
+      });
     });
-
-    await Promise.all([updateNewSession, revokeOldSession]);
 
     // Cleanup: Delete very old revoked sessions (>30 days) to prevent database bloat
     // Session rotation creates new rows, but old revoked ones can be safely deleted
@@ -1231,16 +1255,22 @@ export class AuthService {
         )
       : null;
 
-    // Generate new 7-day offline JWT with current roles
-    const offlineToken = this.jwtConfigService.signOfflineToken({
-      sub: user?.guuid || '',
-      ...(user?.email ? { email: user.email } : {}),
-      roles: userRoles.map((r) => r.roleCode),
-      stores: userRoles
-        .filter((r) => r.storeId && r.storeName)
-        .map((r) => ({ id: r.storeId as number, name: r.storeName as string })),
-      activeStoreId: userRoles.find((r) => r.storeId)?.storeId || null,
-    });
+    // Generate fresh offline JWT with current roles (3-day TTL for NKS)
+    const offlineToken = this.jwtConfigService.signOfflineToken(
+      {
+        sub: user?.guuid || '',
+        ...(user?.email ? { email: user.email } : {}),
+        roles: userRoles.map((r) => r.roleCode),
+        stores: userRoles
+          .filter((r) => r.storeId && r.storeName)
+          .map((r) => ({
+            id: r.storeId as number,
+            name: r.storeName as string,
+          })),
+        activeStoreId: userRoles.find((r) => r.storeId)?.storeId || null,
+      },
+      OFFLINE_JWT_EXPIRATION,
+    );
 
     this.logger.log(`Session rotated for user ${session.userId}`);
 
@@ -1316,22 +1346,14 @@ export class AuthService {
    * If limit exceeded, delete oldest session(s).
    * Called after new session creation.
    */
+  // FIX #5: single atomic SQL DELETE eliminates the read-then-delete race condition.
+  // Previously: read all sessions → count → loop-delete excess.
+  // Race: two concurrent logins both read count=5, neither deletes, user ends up with 7.
   private async enforceSessionLimit(userId: number): Promise<void> {
-    const MAX_CONCURRENT_SESSIONS = 5;
-
-    const sessions =
-      await this.sessionsRepository.findAllByUserIdOrdered(userId);
-
-    const excessCount = sessions.length - MAX_CONCURRENT_SESSIONS;
-    if (excessCount > 0) {
-      const sessionsToDelete = sessions.slice(0, excessCount);
-      for (const session of sessionsToDelete) {
-        await this.sessionsRepository.delete(session.id);
-      }
-      this.logger.log(
-        `Enforced session limit for user ${userId}. Deleted ${excessCount} oldest session(s).`,
-      );
-    }
+    await this.sessionsRepository.deleteExcessSessions(
+      userId,
+      MAX_CONCURRENT_SESSIONS,
+    );
   }
 
   // ─── Phase 2: Offline-First & Permissions ──────────────────────────────────

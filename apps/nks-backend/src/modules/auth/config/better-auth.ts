@@ -1,11 +1,9 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { bearer } from 'better-auth/plugins';
+import { bearer, jwt, admin } from 'better-auth/plugins';
+import { expo } from '@better-auth/expo';
 import * as schema from '../../../core/database/schema';
-import { userRoleMapping } from '../../../core/database/schema/auth/user-role-mapping';
-import { eq, and, isNull } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { Logger } from '@nestjs/common';
 
 export const getAuth = (db: NodePgDatabase<typeof schema>) => {
   return betterAuth({
@@ -16,8 +14,30 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
       database: { generateId: false },
     },
 
-    // Bearer token plugin for mobile Bearer auth
-    plugins: [bearer()],
+    plugins: [
+      expo(),
+      bearer(),
+      jwt({
+        jwt: {
+          issuer: process.env.BETTER_AUTH_BASE_URL!,
+          audience: process.env.BETTER_AUTH_BASE_URL!,
+          expirationTime: '15m',
+          definePayload: ({ user, session }) => ({
+            sub: user.id,
+            email: user.email,
+            role: (user as any).role ?? 'driver',
+            storeId: (session as any).activeStoreFk,
+            sessionId: session.id,
+          }),
+        },
+        jwks: {
+          keyPairConfig: { alg: 'EdDSA', crv: 'Ed25519' },
+          rotationInterval: 60 * 60 * 24 * 90,
+          gracePeriod: 60 * 60 * 24 * 30,
+        },
+      }),
+      admin({ defaultRole: 'driver' }),
+    ],
 
     database: drizzleAdapter(db, {
       provider: 'pg',
@@ -25,7 +45,6 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
         user: schema.users,
         session: schema.userSession,
         account: schema.userAuthProvider,
-        verification: schema.otpVerification,
       },
     }),
 

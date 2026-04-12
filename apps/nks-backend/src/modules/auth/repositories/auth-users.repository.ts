@@ -99,8 +99,10 @@ export class AuthUsersRepository {
   async update(
     userId: number,
     data: Partial<Omit<DbUser, 'id' | 'createdAt' | 'guuid'>>,
+    tx?: Db,
   ): Promise<DbUser | null> {
-    const [user] = await this.db
+    const conn = tx ?? this.db;
+    const [user] = await conn
       .update(schema.users)
       .set(data)
       .where(eq(schema.users.id, userId))
@@ -132,8 +134,9 @@ export class AuthUsersRepository {
   /**
    * Mark profile as complete
    */
-  async markProfileComplete(userId: number): Promise<void> {
-    await this.db
+  async markProfileComplete(userId: number, tx?: Db): Promise<void> {
+    const conn = tx ?? this.db;
+    await conn
       .update(schema.users)
       .set({ profileCompleted: true })
       .where(eq(schema.users.id, userId));
@@ -189,8 +192,10 @@ export class AuthUsersRepository {
   async emailExistsForOtherUser(
     email: string,
     excludeUserId: number,
+    tx?: Db,
   ): Promise<boolean> {
-    const [row] = await this.db
+    const conn = tx ?? this.db;
+    const [row] = await conn
       .select({ id: schema.users.id })
       .from(schema.users)
       .where(
@@ -205,8 +210,9 @@ export class AuthUsersRepository {
    * Check whether a phone number is already linked to a specific user.
    * Used in profileComplete() to skip re-setting the same phone.
    */
-  async phoneLinkedToUser(phone: string, userId: number): Promise<boolean> {
-    const [row] = await this.db
+  async phoneLinkedToUser(phone: string, userId: number, tx?: Db): Promise<boolean> {
+    const conn = tx ?? this.db;
+    const [row] = await conn
       .select({ id: schema.users.id })
       .from(schema.users)
       .where(

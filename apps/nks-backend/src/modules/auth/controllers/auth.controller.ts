@@ -197,6 +197,34 @@ export class AuthController {
     return jwks;
   }
 
+  /**
+   * RS256 JWKS endpoint for mobile offline JWT verification.
+   * Separate from Better Auth's EdDSA JWKS at /.well-known/jwks.json.
+   * Mobile fetches this because access + offline tokens are signed RS256.
+   */
+  @Get('mobile-jwks')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get RS256 JWKS for mobile offline verification',
+    description:
+      'Returns the RS256 public key in JWKS format for verifying access and offline JWTs on device. Separate from Better Auth EdDSA JWKS.',
+  })
+  getMobileJwks(@Res({ passthrough: true }) res: Response): Record<string, unknown> {
+    const publicKeyJwk = this.jwtConfigService.getPublicKeyAsJwk();
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.set('Content-Type', 'application/jwk-set+json');
+    return {
+      keys: [
+        {
+          ...publicKeyJwk,
+          kid: this.jwtConfigService.getCurrentKid(),
+          use: 'sig',
+          alg: 'RS256',
+        },
+      ],
+    };
+  }
+
   @Post('sync-time')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -339,6 +367,39 @@ export class AuthController {
   ): Promise<ApiResponse<null>> {
     await this.authService.terminateAllSessions(req.user.userId);
     return ApiResponse.ok(null, 'All sessions terminated');
+  }
+
+  /**
+   * GET /auth/session-status
+   * Mobile reconnection check — returns whether session is active or revoked.
+   * Called as the first step when a mobile device comes back online.
+   *
+   * Reference: MOBILE_OFFLINE_FLOW.md Section 15, Step 1
+   */
+  @Get('session-status')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Check session revocation status',
+    description:
+      'Returns whether the current session is active or revoked. Used by mobile reconnection handler.',
+  })
+  getSessionStatus(
+    @Req() req: AuthenticatedRequest,
+  ): ApiResponse<{ active: boolean; revoked: boolean; wipe: boolean }> {
+    const user = req.user;
+
+    // If AuthGuard passed, the session is active
+    // A revoked/expired session would have been rejected by the guard
+    return ApiResponse.ok(
+      {
+        active: true,
+        revoked: false,
+        wipe: user.isBlocked,
+      },
+      'Session active',
+    );
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { eq, and, gt, lt, asc, count } from 'drizzle-orm';
+import { eq, and, gt, lt, asc, count, sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
 import * as schema from '../../../core/database/schema';
@@ -313,6 +313,29 @@ export class SessionsRepository {
   }
 
   /**
+   * FIX #5: Atomic session limit enforcement.
+   * Single SQL DELETE removes all sessions outside the most recent N.
+   * No read/write gap — eliminates the race condition where concurrent
+   * logins both read count=5 and neither deletes.
+   */
+  async deleteExcessSessions(
+    userId: number,
+    maxAllowed: number,
+  ): Promise<void> {
+    await this.db.execute(sql`
+      DELETE FROM user_session
+      WHERE user_fk = ${userId}
+        AND id NOT IN (
+          SELECT id
+          FROM   user_session
+          WHERE  user_fk = ${userId}
+          ORDER  BY created_at DESC
+          LIMIT  ${maxAllowed}
+        )
+    `);
+  }
+
+  /**
    * Find session by numeric ID and user ID — verifies ownership.
    */
   async findByIdAndUserId(
@@ -380,7 +403,7 @@ export class SessionsRepository {
       .delete(schema.userSession)
       .where(
         and(
-          this.db.sql`${schema.userSession.refreshTokenRevokedAt} IS NOT NULL`,
+          sql`${schema.userSession.refreshTokenRevokedAt} IS NOT NULL`,
           lt(schema.userSession.refreshTokenRevokedAt, cutoffDate),
         ),
       );

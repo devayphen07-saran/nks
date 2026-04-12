@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@better-auth/cli": "^1.4.21",
+    "@better-auth/expo": "^1.6.2",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.0.1",
