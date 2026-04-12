@@ -8,6 +8,8 @@ import { ErrorHandler } from "../../../shared/errors";
 import { OTP_RATE_LIMITS } from "../../../lib/rate-limiter";
 import { OTP_LENGTH, OTP_RESEND_COOLDOWN_SECONDS } from "@nks/utils";
 import { ROUTES } from "../../../lib/routes";
+import { JWTManager } from "../../../lib/jwt-manager";
+import { registerProactiveRefresh } from "../../../lib/jwt-refresh";
 
 export function useOtpVerify() {
   const dispatch = useRootDispatch();
@@ -98,6 +100,15 @@ export function useOtpVerify() {
             // Reset rate limiter on successful verification
             OTP_RATE_LIMITS.verify.reset();
             await persistLogin(authResponse, dispatch);
+
+            // Cache NKS RS256 JWKS for offline JWT verification (non-critical)
+            const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? "";
+            const serverBase = apiUrl.replace(/\/api\/v\d+\/?$/, "");
+            JWTManager.cacheJWKS(serverBase).catch(() => {});
+
+            // Register proactive access token refresh on app foreground
+            registerProactiveRefresh();
+
             router.replace(ROUTES.ACCOUNT_TYPE);
           } else {
             setErrorMessage("Verification failed. Please try again.");
