@@ -5,8 +5,8 @@ import type { AuthResponse } from "@nks/api-manager";
 import { useRootDispatch, useAuth as useReduxAuth } from "../store";
 import { setCredentials } from "../store/auth-slice";
 import { initializeAuth } from "../store/initialize-auth";
-import { refreshSession } from "../store/refresh-session";
 import { setupAxiosInterceptors } from "./axios-interceptors";
+import { handleReconnection } from "../services/reconnection-handler";
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -67,11 +67,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Online transition detected — trigger refresh
+      // Online transition detected — run full reconnection sequence
       if (wasOffline.current) {
         wasOffline.current = false;
-        console.log("[Auth] Device back online — refreshing session");
-        dispatch(refreshSession());
+        console.log("[Auth] Device back online — running reconnection sequence");
+        handleReconnection(dispatch).catch((err) => {
+          console.error("[Auth] Reconnection failed:", err);
+        });
       }
     });
 

@@ -253,6 +253,9 @@ importers:
       '@nks/utils':
         specifier: workspace:*
         version: link:../../libs-common/utils
+      '@powersync/react-native':
+        specifier: ^1.33.1
+        version: 1.33.1(@powersync/common@1.51.0)(react-native@0.81.5(@babel/core@7.29.0)(@react-native/metro-config@0.84.1(@babel/core@7.29.0))(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
       '@react-native-async-storage/async-storage':
         specifier: 2.2.0
         version: 2.2.0(react-native@0.81.5(@babel/core@7.29.0)(@react-native/metro-config@0.84.1(@babel/core@7.29.0))(@types/react@19.1.17)(react@19.1.0))
@@ -3102,6 +3105,26 @@ packages:
   '@pkgr/core@0.2.9':
     resolution: {integrity: sha512-QNqXyfVS2wm9hweSYD2O7F0G06uurj9kZ96TRQE5Y9hU7+tgdZwIkbAKc5Ocy1HxEY2kuDQa6cQ1WRs/O5LFKA==}
     engines: {node: ^12.20.0 || ^14.18.0 || >=16.0.0}
+
+  '@powersync/common@1.51.0':
+    resolution: {integrity: sha512-nee5QQhPK8qLQFeocr/HDFCasdwIXhy16w29VPYOkKCed3ry5wKM9gDSh6L7E12D2rjfLrH1Z/e/uWeTC3oqfQ==}
+
+  '@powersync/react-native@1.33.1':
+    resolution: {integrity: sha512-hlhmQqe1zUHYUIi2VpY/+P7WnV/3W5yF0aQ4Jvg3Nun32RYAKgmsylDV+EUBHtDbch43gftpXzHWkDN/+kOpXA==}
+    peerDependencies:
+      '@journeyapps/react-native-quick-sqlite': ^2.5.1
+      '@powersync/common': ^1.51.0
+      react: 19.1.0
+      react-native: 0.81.5
+    peerDependenciesMeta:
+      '@journeyapps/react-native-quick-sqlite':
+        optional: true
+
+  '@powersync/react@1.10.0':
+    resolution: {integrity: sha512-orM29qocbF8zYTBM27j9nPNztyplpbNVaw8djpqxl8N2wESqHTbHOKpatg+Fa5aofgjzmrkiGwevJvCbiWYYWQ==}
+    peerDependencies:
+      '@powersync/common': ^1.51.0
+      react: 19.1.0
 
   '@prisma/client@5.22.0':
     resolution: {integrity: sha512-M0SVXfyHnQREBKxCgyo7sffrKttwE6R8PMq330MIUF0pTwjUhLbW84pFDlf06B27XyCR++VtjugEnIHdr07SVA==}
@@ -6212,6 +6235,9 @@ packages:
   etag@1.8.1:
     resolution: {integrity: sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==}
     engines: {node: '>= 0.6'}
+
+  event-iterator@2.0.0:
+    resolution: {integrity: sha512-KGft0ldl31BZVV//jj+IAIGCxkvvUkkON+ScH6zfoX+l+omX6001ggyRSpI0Io2Hlro0ThXotswCtfzS8UkIiQ==}
 
   event-target-shim@5.0.1:
     resolution: {integrity: sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==}
@@ -12847,6 +12873,22 @@ snapshots:
 
   '@pkgr/core@0.2.9': {}
 
+  '@powersync/common@1.51.0':
+    dependencies:
+      event-iterator: 2.0.0
+
+  '@powersync/react-native@1.33.1(@powersync/common@1.51.0)(react-native@0.81.5(@babel/core@7.29.0)(@react-native/metro-config@0.84.1(@babel/core@7.29.0))(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)':
+    dependencies:
+      '@powersync/common': 1.51.0
+      '@powersync/react': 1.10.0(@powersync/common@1.51.0)(react@19.1.0)
+      react: 19.1.0
+      react-native: 0.81.5(@babel/core@7.29.0)(@react-native/metro-config@0.84.1(@babel/core@7.29.0))(@types/react@19.1.17)(react@19.1.0)
+
+  '@powersync/react@1.10.0(@powersync/common@1.51.0)(react@19.1.0)':
+    dependencies:
+      '@powersync/common': 1.51.0
+      react: 19.1.0
+
   '@prisma/client@5.22.0': {}
 
   '@radix-ui/number@1.1.1': {}
@@ -16181,6 +16223,8 @@ snapshots:
   esutils@2.0.3: {}
 
   etag@1.8.1: {}
+
+  event-iterator@2.0.0: {}
 
   event-target-shim@5.0.1: {}
 
