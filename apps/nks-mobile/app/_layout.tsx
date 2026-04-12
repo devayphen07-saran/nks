@@ -11,7 +11,11 @@ import { AuthProvider } from "../lib/auth-provider";
 import { LoadingFallback } from "../components/feedback/LoadingFallback";
 import { OfflineStatusBanner } from "../components/feedback/OfflineStatusBanner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { initializePinning } from "../lib/ssl-pinning";
+
 SplashScreen.preventAutoHideAsync().catch(() => {});
+// Initialize SSL pinning before any network calls
+initializePinning().catch(() => {});
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

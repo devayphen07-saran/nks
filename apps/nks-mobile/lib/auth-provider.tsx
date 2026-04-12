@@ -7,6 +7,7 @@ import { setCredentials } from "../store/auth-slice";
 import { initializeAuth } from "../store/initialize-auth";
 import { setupAxiosInterceptors } from "./axios-interceptors";
 import { handleReconnection } from "../services/reconnection-handler";
+import { useInactivityLock } from "../hooks/useInactivityLock";
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { isInitializing, isAuthenticated } = useReduxAuth();
   const splashHidden = useRef(false);
   const wasOffline = useRef(false);
+
+  // Lock app after 5 min in background — prompts biometric on foreground
+  useInactivityLock();
 
   useEffect(() => {
     dispatch(initializeAuth());
