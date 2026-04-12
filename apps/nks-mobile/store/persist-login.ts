@@ -1,7 +1,6 @@
 import type { AuthResponse } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
 import { sessionTokenReg } from "@nks/utils";
-import { fetchJwksPublicKey } from "../lib/jwks-cache";
 import { offlineSession } from "../lib/offline-session";
 import { syncServerTime } from "../lib/server-time";
 import { setCredentials, logout } from "./auth-slice";
@@ -103,13 +102,11 @@ export async function persistLogin(
           const activeStoreRole = roles.find((r) => r.storeId === activeStoreId);
           const storeName = activeStoreRole?.storeName ?? "Store";
           const roleCodes = roles.map((r) => r.roleCode);
-          const jwksPublicKey = await fetchJwksPublicKey();
           await offlineSession.create({
             userId: parseInt(authResponse.user.id, 10) || 0,
             storeId: activeStoreId,
             storeName,
             roles: roleCodes,
-            jwksPublicKey,
             offlineToken: authResponse.offlineToken ?? "",
           });
           console.log("[Auth] Offline session created");

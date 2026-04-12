@@ -7,6 +7,8 @@ import { offlineSession } from "../lib/offline-session";
 import { sanitizeError } from "../lib/log-sanitizer";
 import { JWTManager } from "../lib/jwt-manager";
 import { OTP_RATE_LIMITS } from "../lib/rate-limiter";
+import { unregisterProactiveRefresh } from "../lib/jwt-refresh";
+import { DeviceManager } from "../lib/device-manager";
 import type { AppDispatch } from "./index";
 
 export const logoutThunk = createAsyncThunk<
@@ -30,6 +32,8 @@ export const logoutThunk = createAsyncThunk<
       await tokenManager.clearSession();
       await offlineSession.clear();
       await JWTManager.clear();
+      await DeviceManager.clear();
+      unregisterProactiveRefresh();
       // Reset OTP rate limiters so a fresh login session starts clean
       OTP_RATE_LIMITS.verify.reset();
       OTP_RATE_LIMITS.resend.reset();

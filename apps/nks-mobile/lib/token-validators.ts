@@ -13,10 +13,6 @@ import {
  * Log sanitization and safe logging live in log-sanitizer.ts.
  */
 
-// Re-export from log-sanitizer so existing callers don't break during migration.
-// TODO: Update callers to import directly from ./log-sanitizer
-export { sanitizeError, SafeLog } from "./log-sanitizer";
-
 export interface TokenValidation {
   isValid: boolean;
   errors: string[];

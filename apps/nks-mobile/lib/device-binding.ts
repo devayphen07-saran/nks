@@ -10,7 +10,10 @@ import * as crypto from "expo-crypto";
 import * as Device from "expo-device";
 import * as Application from "expo-application";
 
-const DEVICE_BINDING_SECRET = process.env["DEVICE_BINDING_SECRET"] || "default-device-binding-secret";
+const DEVICE_BINDING_SECRET = process.env["DEVICE_BINDING_SECRET"] ?? "";
+if (__DEV__ && !DEVICE_BINDING_SECRET) {
+  console.warn("[DeviceBinding] DEVICE_BINDING_SECRET is not set — HMAC tamper detection is disabled");
+}
 
 export interface DeviceIdentity {
   deviceId: string;
@@ -101,24 +104,3 @@ export function formatDeviceBindingForRequest(
   };
 }
 
-/**
- * Verify device binding signature on the client
- * (Server has its own verification using the shared secret)
- */
-export async function verifyDeviceBindingSignature(
-  identity: DeviceIdentity,
-): Promise<boolean> {
-  try {
-    // Must match generation logic exactly: signatureInput = hash only (no timestamp)
-    const signatureInput = identity.hash;
-    const signatureBase = `${DEVICE_BINDING_SECRET}:${signatureInput}`;
-    const expectedSignature = await crypto.digestStringAsync(
-      crypto.CryptoDigestAlgorithm.SHA256,
-      signatureBase,
-    );
-
-    return identity.signature === expectedSignature;
-  } catch {
-    return false;
-  }
-}

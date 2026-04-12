@@ -7,8 +7,8 @@
  *   // Query
  *   const rows = await powerSyncDb.getAll('SELECT * FROM routes WHERE deleted_at IS NULL');
  *
- *   // Write (always call assertWriteAllowed() before mutations)
- *   assertWriteAllowed();
+ *   // Write (always await assertWriteAllowed() before mutations — it is async)
+ *   await assertWriteAllowed(['CASHIER', 'STORE_MANAGER', 'STORE_OWNER']);
  *   await powerSyncDb.execute('INSERT INTO routes ...', [...]);
  *
  * Connect after hydration:

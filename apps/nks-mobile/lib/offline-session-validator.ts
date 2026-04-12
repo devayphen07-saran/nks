@@ -8,8 +8,10 @@ import * as crypto from "expo-crypto";
 import { ONE_DAY_MS } from "@nks/utils";
 import type { OfflineSession } from "./offline-session";
 
-const OFFLINE_SESSION_INTEGRITY_SECRET =
-  process.env["OFFLINE_SESSION_SECRET"] || "default-offline-session-secret";
+const OFFLINE_SESSION_INTEGRITY_SECRET = process.env["OFFLINE_SESSION_SECRET"] ?? "";
+if (__DEV__ && !OFFLINE_SESSION_INTEGRITY_SECRET) {
+  console.warn("[OfflineSession] OFFLINE_SESSION_SECRET is not set — signature integrity checks are degraded");
+}
 
 /**
  * Check if an offline session is still valid (not expired)

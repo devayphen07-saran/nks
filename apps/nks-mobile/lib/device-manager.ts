@@ -14,8 +14,9 @@ import * as Device from "expo-device";
 import * as Application from "expo-application";
 import * as SecureStore from "expo-secure-store";
 import { createLogger } from "./logger";
+import { STORAGE_KEYS } from "./storage-keys";
 
-const FINGERPRINT_KEY = "nks.device.fingerprint";
+const FINGERPRINT_KEY = STORAGE_KEYS.DEVICE_FINGERPRINT;
 const log = createLogger("DeviceManager");
 
 export interface DeviceFingerprint {

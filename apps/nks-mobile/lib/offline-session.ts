@@ -50,8 +50,6 @@ export interface OfflineSession {
   offlineValidUntil: number;
   /** Timestamp of last successful data sync (products, customers, tax_rates) */
   lastSyncedAt: number;
-  /** Cached RSA public key from GET /.well-known/jwks.json — for offline JWT verification */
-  jwksPublicKey: string;
   /** 5-day RS256 JWT for offline identity + authorization verification */
   offlineToken: string;
   /** Timestamp when this OfflineSession was created */
@@ -75,7 +73,6 @@ export const offlineSession = {
     storeId: number;
     storeName: string;
     roles: string[];
-    jwksPublicKey: string;
     offlineToken: string;
   }): Promise<OfflineSession> {
     const now = Date.now();
@@ -88,7 +85,6 @@ export const offlineSession = {
       offlineValidUntil: now + OFFLINE_SESSION_DURATION_MS,
       lastSyncedAt: now,
       lastRoleSyncAt: now,
-      jwksPublicKey: input.jwksPublicKey,
       offlineToken: input.offlineToken,
       createdAt: now,
     };

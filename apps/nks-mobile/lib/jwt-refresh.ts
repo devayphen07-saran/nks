@@ -5,41 +5,43 @@
  * If the access token expires within the threshold (3 min), a refresh is triggered
  * immediately so API calls never land on an expired token.
  *
- * Also exports a manual trigger for use in reconnection flows.
+ * Self-managing: calling registerProactiveRefresh() a second time removes the
+ * previous listener before registering a new one — prevents listener accumulation
+ * across multiple OTP verifications or re-logins.
  *
- * Usage:
- *   const unregister = registerProactiveRefresh();
- *   // on cleanup / logout:
- *   unregister();
+ * Call unregisterProactiveRefresh() on logout to clean up.
  */
 
 import { AppState, type AppStateStatus } from "react-native";
-import { jwtDecode } from "jwt-decode";
 import { JWTManager } from "./jwt-manager";
 import { createLogger } from "./logger";
 
 const log = createLogger("JWTRefresh");
 
-// Refresh when access token expires within this window
-const REFRESH_THRESHOLD_MS = 3 * 60 * 1000; // 3 minutes
+// Refresh when access token expires within this window (same as JWTManager threshold)
+const REFRESH_THRESHOLD_MS = 3 * 60 * 1000;
 
 let _isRefreshing = false;
-
-function getAccessTokenExpMs(): number | null {
-  const raw = JWTManager.getRawAccessToken();
-  if (!raw) return null;
-  try {
-    const decoded = jwtDecode<{ exp?: number }>(raw);
-    return decoded.exp ? decoded.exp * 1000 : null;
-  } catch {
-    return null;
-  }
-}
+/** Tracks the active AppState subscription so repeated registrations don't stack. */
+let _activeUnregister: (() => void) | null = null;
 
 function needsRefresh(): boolean {
-  const expMs = getAccessTokenExpMs();
-  if (!expMs) return false; // no token or undecodable — JWTManager handles null
-  return Date.now() >= expMs - REFRESH_THRESHOLD_MS;
+  const raw = JWTManager.getRawAccessToken();
+  if (!raw) return false;
+  // Reuse JWTManager's internal decoded exp via getOfflineStatus boundary check
+  // Access token expiry check: decode exp directly without duplicating jwtDecode
+  try {
+    // JWTManager.getRawAccessToken() gives us the token; parse exp from payload
+    const payload = raw.split(".")[1];
+    if (!payload) return false;
+    const decoded = JSON.parse(
+      atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
+    ) as { exp?: number };
+    if (!decoded.exp) return false;
+    return Date.now() >= decoded.exp * 1000 - REFRESH_THRESHOLD_MS;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -68,7 +70,6 @@ export async function tryProactiveRefresh(): Promise<void> {
       log.warn("Proactive refresh returned false (network/server error)");
     }
   } catch (err: unknown) {
-    // REFRESH_TOKEN_INVALID → tokens are dead, caller (auth store) handles logout
     if (err instanceof Error && err.message === "REFRESH_TOKEN_INVALID") {
       log.warn("Refresh token rejected — session expired");
       throw err;
@@ -83,9 +84,15 @@ export async function tryProactiveRefresh(): Promise<void> {
  * Registers an AppState listener that triggers proactive refresh
  * whenever the app moves from background/inactive → active.
  *
- * Returns an unregister function — call it on logout or component unmount.
+ * Safe to call multiple times — removes the previous listener first.
+ * Returns the unregister function (same as unregisterProactiveRefresh).
  */
 export function registerProactiveRefresh(): () => void {
+  // Remove any existing listener before creating a new one
+  if (_activeUnregister) {
+    _activeUnregister();
+  }
+
   let lastState: AppStateStatus = AppState.currentState;
 
   const subscription = AppState.addEventListener(
@@ -109,10 +116,22 @@ export function registerProactiveRefresh(): () => void {
     },
   );
 
-  log.info("Proactive refresh registered");
-
-  return () => {
+  _activeUnregister = () => {
     subscription.remove();
+    _activeUnregister = null;
     log.info("Proactive refresh unregistered");
   };
+
+  log.info("Proactive refresh registered");
+  return _activeUnregister;
+}
+
+/**
+ * Removes the active proactive refresh listener.
+ * Call this on logout to prevent stale listeners.
+ */
+export function unregisterProactiveRefresh(): void {
+  if (_activeUnregister) {
+    _activeUnregister();
+  }
 }

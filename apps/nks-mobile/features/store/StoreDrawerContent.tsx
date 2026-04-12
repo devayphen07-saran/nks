@@ -11,6 +11,7 @@ import {
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
 import { useAuth } from "../../store";
+import { useLogout } from "../../hooks/useLogout";
 import { useActiveStoreRole } from "./hooks/useActiveStoreRole";
 import type { DrawerContentComponentProps } from "@react-navigation/drawer";
 import type { MenuItem } from "./constants/drawer-menu-config";
@@ -24,7 +25,8 @@ export function StoreDrawerContent({ navigation }: StoreDrawerContentProps) {
 
   const authState = useAuth();
   const user = authState.authResponse?.user;
-  const { activeStoreName, activeRole, menuItems, isOwner } = useActiveStoreRole();
+  const { activeStoreName, activeRole, menuItems } = useActiveStoreRole();
+  const { logout } = useLogout();
 
   const userInitials =
     user?.name
@@ -58,9 +60,8 @@ export function StoreDrawerContent({ navigation }: StoreDrawerContentProps) {
 
   const handleLogout = useCallback(() => {
     navigation.closeDrawer();
-    // TODO: Integrate logout API call here
-    router.replace("/(auth)/phone");
-  }, [navigation, router]);
+    logout(() => router.replace("/(auth)/phone"));
+  }, [navigation, router, logout]);
 
   const renderMenuItem = (item: MenuItem) => {
     const isActive = activeRoute === item.route;

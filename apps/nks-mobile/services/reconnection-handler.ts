@@ -21,8 +21,9 @@
 
 import { tokenManager } from "@nks/mobile-utils";
 import type { AuthResponse } from "@nks/api-manager";
-import { setUnauthenticated } from "../store/auth-slice";
+import { setCredentials, setUnauthenticated } from "../store/auth-slice";
 import { JWTManager } from "../lib/jwt-manager";
+import { offlineSession } from "../lib/offline-session";
 import { powerSyncDb } from "../lib/powersync-db";
 import { powerSyncConnector } from "../lib/powersync-connector";
 import { fetchWithTimeout } from "../lib/fetch-with-timeout";
@@ -50,6 +51,7 @@ async function performRemoteWipe(dispatch: AppDispatch): Promise<void> {
   await JWTManager.clear();
   tokenManager.clear();
   await tokenManager.clearSession().catch(() => {});
+  await offlineSession.clear().catch(() => {});
   dispatch(setUnauthenticated());
   log.info("Session cleared after remote wipe");
 }
@@ -183,7 +185,6 @@ export async function handleReconnection(dispatch: AppDispatch): Promise<void> {
     try {
       const envelope = await tokenManager.loadSession<AuthResponse>();
       if (envelope?.data) {
-        const { setCredentials } = await import("../store/auth-slice");
         dispatch(setCredentials(envelope.data));
         log.info("Redux auth state restored");
       }
