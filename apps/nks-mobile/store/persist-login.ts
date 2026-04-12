@@ -11,6 +11,7 @@ import {
   analyzeStorageUsage,
 } from "../lib/token-validators";
 import { sanitizeError } from "../lib/log-sanitizer";
+import { JWTManager } from "../lib/jwt-manager";
 import type { AppDispatch } from "./index";
 
 /**
@@ -77,6 +78,19 @@ export async function persistLogin(
     // ════════════════════════════════════════════════════════════════════════════
     const activeStoreId = authResponse.access?.activeStoreId;
 
+    // Persist dual tokens (accessToken, offlineToken, refreshToken) into JWTManager
+    const jwtPersistPromise = (async () => {
+      const accessToken = authResponse.session?.jwtToken;
+      const offlineToken = authResponse.offlineToken;
+      const refreshToken = authResponse.session?.refreshToken;
+      if (accessToken && offlineToken && refreshToken) {
+        await JWTManager.persistTokens({ accessToken, offlineToken, refreshToken });
+        console.log("[Auth] JWTManager tokens persisted");
+      }
+    })().catch((err) => {
+      console.warn("[Auth] JWTManager persist failed (non-critical):", sanitizeError(err));
+    });
+
     const syncPromise = syncServerTime().then(() => {
       console.log("[Auth] Server time synced");
     }).catch((err) => {
@@ -104,7 +118,7 @@ export async function persistLogin(
         })
       : Promise.resolve();
 
-    await Promise.allSettled([syncPromise, offlinePromise]);
+    await Promise.allSettled([jwtPersistPromise, syncPromise, offlinePromise]);
 
     // ════════════════════════════════════════════════════════════════════════════
     // STATE: Update Redux store

@@ -5,6 +5,7 @@ import { logout as logoutAction } from "./auth-slice";
 import { tokenMutex } from "../lib/token-mutex";
 import { offlineSession } from "../lib/offline-session";
 import { sanitizeError } from "../lib/log-sanitizer";
+import { JWTManager } from "../lib/jwt-manager";
 import type { AppDispatch } from "./index";
 
 export const logoutThunk = createAsyncThunk<
@@ -27,6 +28,7 @@ export const logoutThunk = createAsyncThunk<
       tokenManager.clear();
       await tokenManager.clearSession();
       await offlineSession.clear();
+      await JWTManager.clear();
       dispatch(logoutAction());
       console.log("[Logout] Session and offline data cleared successfully");
     } catch (error) {

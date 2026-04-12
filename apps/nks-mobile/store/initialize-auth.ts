@@ -8,6 +8,7 @@ import { refreshSession } from "./refresh-session";
 import { sessionTokenReg } from "@nks/utils";
 import { validateAuthResponse } from "../lib/token-validators";
 import { sanitizeError } from "../lib/log-sanitizer";
+import { JWTManager } from "../lib/jwt-manager";
 import type { AppDispatch } from "./index";
 
 /**
@@ -21,6 +22,9 @@ export const initializeAuth = createAsyncThunk<
 >("auth/bootstrap", async (_, { dispatch }) => {
   try {
     console.log("[Auth:init] Starting session initialization...");
+
+    // Hydrate JWTManager (access + offline + refresh tokens) into memory
+    await JWTManager.hydrate();
 
     const envelope = await tokenManager.loadSession<AuthResponse>();
 

@@ -14,6 +14,7 @@ import {
   getDeviceIdentity,
   formatDeviceBindingForRequest,
 } from "./device-binding";
+import { JWTManager } from "./jwt-manager";
 import { AxiosError } from "axios";
 
 export interface RefreshAttemptResult {
@@ -102,6 +103,17 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
     };
 
     await tokenManager.persistSession(updated);
+
+    // ✅ Sync JWTManager dual tokens after refresh
+    if (result?.jwtToken && result?.offlineToken && result?.refreshToken) {
+      await JWTManager.persistTokens({
+        accessToken: result.jwtToken,
+        offlineToken: result.offlineToken,
+        refreshToken: result.refreshToken,
+      }).catch((err) => {
+        console.debug("[RefreshAttempt] JWTManager sync failed (non-critical):", sanitizeError(err));
+      });
+    }
 
     // ✅ Sync server time (non-critical)
     try {
