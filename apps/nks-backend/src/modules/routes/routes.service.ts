@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RouteMapper } from './mapper/route.mapper';
-import { RolesRepository } from '../roles/roles.repository';
+import { RolesService } from '../roles/roles.service';
 import { RoutesRepository } from './repositories/routes.repository';
 
 @Injectable()
@@ -8,7 +8,7 @@ export class RoutesService {
   private readonly logger = new Logger(RoutesService.name);
 
   constructor(
-    private readonly rolesRepository: RolesRepository,
+    private readonly rolesService: RolesService,
     private readonly routesRepository: RoutesRepository,
   ) {}
 
@@ -21,7 +21,7 @@ export class RoutesService {
   async getAdminRoutes(
     userId: number,
   ): Promise<{ routes: ReturnType<typeof RouteMapper.buildTree> }> {
-    const userRoles = await this.rolesRepository.findUserRoles(userId);
+    const userRoles = await this.rolesService.findUserRoles(userId);
     const roleIds = userRoles.map((r) => r.roleId);
 
     if (roleIds.length === 0) {
@@ -54,7 +54,7 @@ export class RoutesService {
     }
 
     // Check if user is the store owner
-    const isOwner = await this.rolesRepository.isStoreOwner(userId, storeId);
+    const isOwner = await this.rolesService.isStoreOwner(userId, storeId);
 
     // If store owner, return all store routes with full permissions
     if (isOwner) {
@@ -68,7 +68,7 @@ export class RoutesService {
     }
 
     // Get user's custom roles in this store
-    const storeRoles = await this.rolesRepository.getActiveRolesForStore(
+    const storeRoles = await this.rolesService.getActiveRolesForStore(
       userId,
       storeId,
     );

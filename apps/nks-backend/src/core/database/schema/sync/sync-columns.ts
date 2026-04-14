@@ -1,7 +1,7 @@
 import { integer } from 'drizzle-orm/pg-core';
 
 /**
- * Sync columns for PowerSync-compatible tables.
+ * Sync columns for offline-sync-compatible tables.
  *
  * Add these to any table that needs to sync with the mobile app.
  * The `coreEntity` base already provides `updatedAt` and `deletedAt`.

@@ -132,7 +132,7 @@ export const OTP_CONSTANTS = {
 
 export const STORE_CONSTANTS = {
   // Staff Roles (custom roles available for assignment to STAFF members)
-  STAFF_ROLES: ['STORE_MANAGER', 'CASHIER', 'DELIVERY'] as const,
+  STAFF_ROLES: ['MANAGER', 'CASHIER', 'DELIVERY'] as const,
 
   OWNER_ROLE: 'STORE_OWNER' as const,
   ADMIN_ROLE: 'SUPER_ADMIN' as const,

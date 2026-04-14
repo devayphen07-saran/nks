@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { CodesRepository } from './codes.repository';
-import { RolesRepository } from '../roles/roles.repository';
+import { RolesService } from '../roles/roles.service';
 import type {
   CodeCategoryResponseDto,
   CodeValueResponseDto,
@@ -16,7 +16,7 @@ import { toCategoryResponse, toValueResponse } from './mapper/codes.mapper';
 export class CodesService {
   constructor(
     private readonly repo: CodesRepository,
-    private readonly rolesRepository: RolesRepository,
+    private readonly rolesService: RolesService,
   ) {}
 
   async getValuesByCategory(
@@ -67,7 +67,7 @@ export class CodesService {
 
     // SECURITY: Validate store ownership if storeId is provided
     if (data.storeId && userId && !isSuperAdmin) {
-      const isOwner = await this.rolesRepository.isStoreOwner(userId, data.storeId);
+      const isOwner = await this.rolesService.isStoreOwner(userId, data.storeId);
       if (!isOwner) {
         throw new ForbiddenException(
           'You do not own this store. Only store owners can create codes for their stores.',

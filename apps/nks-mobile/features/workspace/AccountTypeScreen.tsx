@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { Platform, KeyboardAvoidingView, Alert } from "react-native";
+import { Platform, KeyboardAvoidingView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCallback } from "react";
 import styled from "styled-components/native";
@@ -10,12 +10,15 @@ import {
   Typography,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useLogout } from "../../hooks/useLogout";
+import { useLogoutConfirmation } from "../../hooks/useLogoutConfirmation";
 
 export function AccountTypeScreen() {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
-  const { logout } = useLogout();
+  const { confirmLogout } = useLogoutConfirmation();
+  const handleLogout = useCallback(() => {
+    confirmLogout(() => router.replace("/(auth)/phone"));
+  }, [confirmLogout]);
 
   const handleStore = useCallback(() => {
     router.push("/(protected)/(workspace)/(app)/(store)/list");
@@ -26,31 +29,6 @@ export function AccountTypeScreen() {
     console.log("Setting up personal account...");
     router.push("/(protected)/(workspace)/(app)/(personal)/dashboard");
   }, []);
-
-  const handleLogout = useCallback(() => {
-    Alert.alert(
-      "Logout",
-      "Are you sure you want to log out?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Logout",
-          onPress: async () => {
-            try {
-              // Dispatch logoutThunk: calls signOut API, clears token + SecureStore, updates Redux
-              await logout(() => {
-                router.replace("/(auth)/phone");
-              });
-            } catch (error) {
-              console.error("[AccountType] Logout failed:", error);
-              Alert.alert("Error", "Failed to log out. Please try again.");
-            }
-          },
-          style: "destructive",
-        },
-      ]
-    );
-  }, [logout]);
 
   return (
     <Container>

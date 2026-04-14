@@ -167,3 +167,13 @@ export const OTP_RATE_LIMITS = {
     customMessage: "Please wait before requesting another OTP.",
   }),
 };
+
+/**
+ * Resets all OTP rate limiter instances. Call on logout to prevent
+ * stale counters from leaking across user sessions.
+ */
+export function resetRateLimiters(): void {
+  OTP_RATE_LIMITS.send.reset();
+  OTP_RATE_LIMITS.verify.reset();
+  OTP_RATE_LIMITS.resend.reset();
+}

@@ -20,6 +20,14 @@ import {
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
 import { useAuth } from "../../store";
+import {
+  HeaderControls,
+  SearchRow,
+  FilterRow,
+  FilterButton,
+  FilterButtonText,
+  LoadingCard,
+} from "../shared/list-screen-styles";
 
 interface Store {
   id: number;
@@ -214,49 +222,6 @@ const StoreScreenContainer = styled.View`
   background-color: ${({ theme }) => theme.colorBgLayout};
 `;
 
-const HeaderControls = styled.View`
-  background-color: ${({ theme }) => theme.colorBgContainer};
-  padding-left: ${({ theme }) => theme.sizing.small}px;
-  padding-right: ${({ theme }) => theme.sizing.small}px;
-  padding-top: ${({ theme }) => theme.sizing.small}px;
-  padding-bottom: ${({ theme }) => theme.sizing.medium}px;
-  border-bottom-width: 1px;
-  border-bottom-color: ${({ theme }) => theme.colorBorderSecondary};
-  gap: ${({ theme }) => theme.sizing.small}px;
-  z-index: 10;
-`;
-
-const SearchRow = styled.View`
-  flex-direction: row;
-  align-items: center;
-  gap: ${({ theme }) => theme.sizing.small}px;
-`;
-
-const FilterRow = styled.View`
-  flex-direction: row;
-  align-items: center;
-  gap: ${({ theme }) => theme.sizing.xSmall}px;
-`;
-
-const FilterButton = styled.TouchableOpacity<{ active: boolean }>`
-  background-color: ${({ theme, active }) =>
-    active ? theme.colorPrimary : theme.colorBgLayout};
-  border-radius: 20px;
-  padding-top: 6px;
-  padding-bottom: 6px;
-  padding-left: 14px;
-  padding-right: 14px;
-  border-width: 1px;
-  border-color: ${({ theme, active }) =>
-    active ? theme.colorPrimary : theme.colorBorderSecondary};
-`;
-
-const FilterButtonText = styled(Typography.Caption)<{ active: boolean }>`
-  color: ${({ active, theme }) =>
-    active ? theme.colorWhite : theme.colorTextSecondary};
-  font-weight: ${({ active }) => (active ? "700" : "500")};
-`;
-
 const StoreCard = styled.TouchableOpacity`
   background-color: ${({ theme }) => theme.colorBgContainer};
   border-radius: ${({ theme }) => theme.borderRadius.large}px;
@@ -287,11 +252,3 @@ const PendingBadge = styled.View`
   padding: 3px 8px;
 `;
 
-const LoadingCard = styled.View`
-  height: 80px;
-  background-color: ${({ theme }) => theme.colorBgContainer};
-  border-radius: ${({ theme }) => theme.borderRadius.large}px;
-  margin-bottom: ${({ theme }) => theme.sizing.small}px;
-  align-items: center;
-  justify-content: center;
-`;

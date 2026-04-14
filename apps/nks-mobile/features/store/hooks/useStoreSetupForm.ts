@@ -17,8 +17,6 @@ const storeSchema = z.object({
   // Step 3: Address (India-specific)
   addressLine1: z.string().min(1, "Address is required"),
   addressLine2: z.string().optional(),
-  stateFk: z.number().min(1, "State is required"),
-  districtFk: z.number().min(1, "District is required"),
   pincode: z
     .string()
     .length(6, "Pincode must be 6 digits")
@@ -40,8 +38,6 @@ export const useStoreSetupForm = () => {
       taxNumber: "",
       addressLine1: "",
       addressLine2: "",
-      stateFk: 0,
-      districtFk: 0,
       pincode: "",
       city: "",
     },

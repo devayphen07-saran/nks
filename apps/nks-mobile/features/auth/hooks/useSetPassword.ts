@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import { router } from "expo-router";
 import { passwordSchema, type PasswordFields } from "../schema/password";

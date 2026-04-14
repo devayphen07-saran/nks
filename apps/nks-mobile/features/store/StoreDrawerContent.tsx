@@ -216,7 +216,7 @@ const StyledDivider = styled.View`
   margin-right: ${({ theme }) => theme.sizing.large}px;
   margin-top: ${({ theme }) => theme.sizing.medium}px;
   margin-bottom: ${({ theme }) => theme.sizing.medium}px;
-  opacity: 10;
+  opacity: 1;
 `;
 
 const MenuSection = styled.View`

@@ -31,7 +31,7 @@ export interface DeviceIdentity {
  * iOS: Vendor ID (persists across reinstalls on same device).
  * Android: Android ID (hardware-level, persists across reinstalls).
  */
-async function getStableDeviceId(): Promise<string> {
+export async function getStableDeviceId(): Promise<string> {
   if (Platform.OS === "ios") {
     const vendorId = await Application.getIosIdForVendorAsync();
     return vendorId ?? "unknown-ios";

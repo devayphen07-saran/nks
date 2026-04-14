@@ -285,4 +285,21 @@ export class RolesService {
     await this.rolesRepository.softDelete(id, deletedBy);
     this.logger.log(`Deleted role ${id} by user ${deletedBy}`);
   }
+
+  // ─── Authorization helpers ────────────────────────────────────────────────
+
+  /** Returns true if userId holds the STORE_OWNER role for storeId. */
+  async isStoreOwner(userId: number, storeId: number): Promise<boolean> {
+    return this.rolesRepository.isStoreOwner(userId, storeId);
+  }
+
+  /** Returns all active role assignments for a user. */
+  async findUserRoles(userId: number) {
+    return this.rolesRepository.findUserRoles(userId);
+  }
+
+  /** Returns active roles for a user scoped to a specific store. */
+  async getActiveRolesForStore(userId: number, storeId: number) {
+    return this.rolesRepository.getActiveRolesForStore(userId, storeId);
+  }
 }

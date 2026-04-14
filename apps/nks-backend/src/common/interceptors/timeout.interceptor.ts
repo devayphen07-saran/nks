@@ -14,13 +14,13 @@ import { catchError, timeout } from 'rxjs/operators';
  * If a request takes longer than the specified time (in ms),
  * it throws a RequestTimeoutException (408).
  *
- * Target: 25 seconds
+ * Target: 30 seconds (matches REQUEST_TIMEOUT_MS in app-constants.ts)
  */
 @Injectable()
 export class TimeoutInterceptor implements NestInterceptor {
   intercept(_context: ExecutionContext, next: CallHandler): Observable<any> {
     return next.handle().pipe(
-      timeout(25000), // 25 seconds
+      timeout(30000), // 30 seconds
       catchError((err) => {
         if (err instanceof TimeoutError) {
           return throwError(

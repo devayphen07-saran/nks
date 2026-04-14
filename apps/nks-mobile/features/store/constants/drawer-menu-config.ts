@@ -1,4 +1,4 @@
-export type RoleCode = 'STORE_OWNER' | 'STORE_MANAGER' | 'CASHIER' | 'DELIVERY' | 'CUSTOMER';
+export type RoleCode = 'STORE_OWNER' | 'MANAGER' | 'CASHIER' | 'DELIVERY' | 'CUSTOMER';
 
 export interface MenuItem {
   label: string;
@@ -14,7 +14,7 @@ export const ROLE_MENU_MAP: Record<RoleCode, MenuItem[]> = {
     { label: 'Staff', iconName: 'Users', route: 'staff' },
     { label: 'Settings', iconName: 'Settings', route: 'settings' },
   ],
-  STORE_MANAGER: [
+  MANAGER: [
     { label: 'Dashboard', iconName: 'LayoutDashboard', route: 'store' },
     { label: 'Products', iconName: 'Package', route: 'products' },
     { label: 'Orders', iconName: 'ShoppingCart', route: 'orders' },

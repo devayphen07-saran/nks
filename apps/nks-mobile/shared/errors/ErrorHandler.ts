@@ -227,49 +227,4 @@ export class ErrorHandler {
     );
   }
 
-  /**
-   * Handle error in UI context
-   * Returns user-friendly message and determines if retry is possible
-   */
-  static getUIMessage(error: AppError): {
-    message: string;
-    canRetry: boolean;
-    actionType?: 'retry' | 'offline' | 'login' | 'contact-support';
-  } {
-    if (error.isNetworkError()) {
-      return {
-        message: error.message,
-        canRetry: true,
-        actionType: 'retry',
-      };
-    }
-
-    if (error.isAuthError()) {
-      return {
-        message: error.message,
-        canRetry: false,
-        actionType: 'login',
-      };
-    }
-
-    if (error.isValidationError()) {
-      return {
-        message: error.message,
-        canRetry: false,
-      };
-    }
-
-    if (error.isServerError()) {
-      return {
-        message: error.message,
-        canRetry: true,
-        actionType: 'contact-support',
-      };
-    }
-
-    return {
-      message: error.message,
-      canRetry: false,
-    };
-  }
 }

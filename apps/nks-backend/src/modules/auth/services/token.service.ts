@@ -40,13 +40,14 @@ export class TokenService {
   }
 
   /**
-   * Decode token without verification (for debugging/logging only)
+   * Decode token without verification (for debugging/logging only).
+   * Returns null if the token cannot be decoded (malformed/empty).
    */
   decodeToken(token: string): JWTPayload | null {
+    if (!token) return null;
     try {
       return this.jwtConfigService.decodeToken(token);
-    } catch (error) {
-      this.logger.warn('Failed to decode token');
+    } catch {
       return null;
     }
   }

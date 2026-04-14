@@ -17,7 +17,7 @@ import { createLogger } from "./logger";
 
 const log = createLogger("BiometricGate");
 
-export class BiometricAuthError extends Error {
+class BiometricAuthError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "BiometricAuthError";
@@ -28,7 +28,7 @@ export class BiometricAuthError extends Error {
  * Returns true if the device has biometric hardware that is enrolled.
  * Falls back gracefully when hardware is absent.
  */
-export async function isBiometricAvailable(): Promise<boolean> {
+async function isBiometricAvailable(): Promise<boolean> {
   try {
     const hasHardware = await LocalAuthentication.hasHardwareAsync();
     if (!hasHardware) return false;

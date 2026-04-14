@@ -1,8 +1,8 @@
--- 018: Sync Infrastructure for PowerSync Offline-First Mobile
--- Creates idempotency_log table and configures WAL for PowerSync replication.
+-- 018: Sync Infrastructure for Offline-First Mobile
+-- Creates idempotency_log table and configures WAL for offline sync.
 
 -- Idempotency log: prevents duplicate processing during sync push retries.
--- PowerSync retries failed uploads automatically. Without this table,
+-- The mobile sync engine retries failed uploads automatically. Without this table,
 -- a crash between the mutation and the log write causes re-processing.
 -- TTL: 7 days (cleaned by pg_cron).
 CREATE TABLE IF NOT EXISTS idempotency_log (
@@ -13,9 +13,9 @@ CREATE TABLE IF NOT EXISTS idempotency_log (
 CREATE INDEX IF NOT EXISTS idempotency_log_processed_idx
   ON idempotency_log (processed_at);
 
--- WAL configuration for PowerSync logical replication.
--- PowerSync reads changes from PostgreSQL's write-ahead log to sync
--- data to mobile SQLite databases.
+-- WAL configuration (retained for future logical replication use).
+-- Logical replication would allow reading changes from PostgreSQL's write-ahead log
+-- to sync data to mobile SQLite databases.
 -- NOTE: Changing wal_level requires a PostgreSQL restart.
 -- Run these on your PostgreSQL instance (not via migration runner):
 --

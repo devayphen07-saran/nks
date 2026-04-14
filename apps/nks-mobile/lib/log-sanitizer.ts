@@ -80,27 +80,3 @@ export function sanitizeError(error: unknown): string {
   return String(error);
 }
 
-/**
- * Safe logging wrapper — automatically sanitizes all sensitive data before output.
- */
-export const SafeLog = {
-  log: (message: string, data?: unknown) => {
-    const sanitized = data ? sanitizeError(JSON.stringify(data)) : message;
-    console.log(sanitized);
-  },
-
-  warn: (message: string, data?: unknown) => {
-    const sanitized = data ? sanitizeError(JSON.stringify(data)) : message;
-    console.warn(sanitized);
-  },
-
-  error: (message: string, data?: unknown) => {
-    const sanitized = data ? sanitizeError(JSON.stringify(data)) : message;
-    console.error(sanitized);
-  },
-
-  debug: (message: string, data?: unknown) => {
-    const sanitized = data ? sanitizeError(JSON.stringify(data)) : message;
-    console.debug(sanitized);
-  },
-};

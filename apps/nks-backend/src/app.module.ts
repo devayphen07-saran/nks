@@ -14,6 +14,7 @@ import { EntityStatusModule } from './modules/entity-status/entity-status.module
 import { LoggerModule } from './core/logger/logger.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { SyncModule } from './modules/sync/sync.module';
+
 @Module({
   imports: [
     ConfigModule,

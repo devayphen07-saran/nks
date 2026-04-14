@@ -38,7 +38,7 @@ export function ProfileSetupScreen() {
     control,
     handleSubmit,
     setError,
-    formState: { isSubmitting },
+    formState: { errors, isSubmitting },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -51,16 +51,20 @@ export function ProfileSetupScreen() {
   });
 
   const onSubmit = async (data: FormData) => {
-    // TODO: Dispatch profileComplete API call
-    const fullName = `${data.firstName.trim()} ${data.lastName.trim()}`;
-    console.log("Completing profile for:", fullName, data.email);
-    Alert.alert("Success", "Profile completed successfully!", [
-      {
-        text: "OK",
-        onPress: () =>
-          router.replace("/(protected)/(workspace)/(app)/(account-type)"),
-      },
-    ]);
+    try {
+      // TODO: Dispatch profileComplete API call
+      const fullName = `${data.firstName.trim()} ${data.lastName.trim()}`;
+      console.log("Completing profile for:", fullName, data.email);
+      Alert.alert("Success", "Profile completed successfully!", [
+        {
+          text: "OK",
+          onPress: () =>
+            router.replace("/(protected)/(workspace)/(app)/(account-type)"),
+        },
+      ]);
+    } catch (err) {
+      setError("root", { message: String(err) });
+    }
   };
 
   return (
@@ -172,6 +176,12 @@ export function ProfileSetupScreen() {
               secureTextEntry
               required
             />
+
+            {errors.root?.message && (
+              <Typography.Caption color={theme.colorError}>
+                {errors.root.message}
+              </Typography.Caption>
+            )}
 
             <SubmitButton
               label="Complete Profile"

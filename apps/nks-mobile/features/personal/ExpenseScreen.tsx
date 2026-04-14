@@ -1,63 +1,26 @@
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { FlatList, View } from "react-native";
+import { FlatList } from "react-native";
 import styled from "styled-components/native";
 import { Column, Row, Typography, LucideIcon } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-
-// Mock expense data
-const mockExpenses = [
-  {
-    id: "1",
-    category: "Food",
-    amount: 450,
-    date: "2024-03-20",
-    description: "Lunch at restaurant",
-  },
-  {
-    id: "2",
-    category: "Transport",
-    amount: 150,
-    date: "2024-03-19",
-    description: "Taxi fare",
-  },
-  {
-    id: "3",
-    category: "Shopping",
-    amount: 2500,
-    date: "2024-03-18",
-    description: "Grocery shopping",
-  },
-  {
-    id: "4",
-    category: "Entertainment",
-    amount: 800,
-    date: "2024-03-17",
-    description: "Movie tickets",
-  },
-];
-
-const categoryIcons = {
-  Food: "Utensils",
-  Transport: "Car",
-  Shopping: "ShoppingBag",
-  Entertainment: "Music",
-} as const;
+import { MOCK_EXPENSES, CATEGORY_ICONS } from "./mock-data";
+import type { MockExpense } from "./mock-data";
 
 export function ExpenseScreen() {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
 
-  const totalExpense = mockExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+  const totalExpense = MOCK_EXPENSES.reduce((sum: number, exp: MockExpense) => sum + exp.amount, 0);
 
-  const renderExpenseItem = ({ item }: { item: typeof mockExpenses[0] }) => {
-    const iconName = categoryIcons[item.category as keyof typeof categoryIcons];
+  const renderExpenseItem = ({ item }: { item: MockExpense }) => {
+    const iconName = CATEGORY_ICONS[item.category];
 
     return (
       <ExpenseItem>
         <Row gap="medium" align="center" flex={1}>
           <IconCircle>
             <LucideIcon
-              name={iconName || "Wallet"}
+              name={(iconName || "Wallet") as any}
               size={20}
               color={theme.colorPrimary}
             />
@@ -68,7 +31,7 @@ export function ExpenseScreen() {
               {item.description}
             </Typography.Caption>
             <Typography.Caption type="secondary" style={{ fontSize: 11 }}>
-              {new Date(item.date).toLocaleDateString()}
+              {new Date(item.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
             </Typography.Caption>
           </Column>
           <Typography.Body weight="semiBold" color={theme.colorError}>
@@ -98,13 +61,13 @@ export function ExpenseScreen() {
       </Header>
 
       <Content>
-        {mockExpenses.length > 0 ? (
+        {MOCK_EXPENSES.length > 0 ? (
           <>
             <SectionTitle>
               <Typography.Body weight="semiBold">Recent Expenses</Typography.Body>
             </SectionTitle>
             <FlatList
-              data={mockExpenses}
+              data={MOCK_EXPENSES}
               renderItem={renderExpenseItem}
               keyExtractor={(item) => item.id}
               scrollEnabled={false}

@@ -9,6 +9,9 @@ import { API } from "@nks/api-manager";
 import { saveSecureItem, getSecureItem } from "@nks/mobile-utils";
 import { MAX_CLOCK_DRIFT_SECONDS } from "@nks/utils";
 import { STORAGE_KEYS } from "./storage-keys";
+import { createLogger } from "./logger";
+
+const log = createLogger("ServerTime");
 
 /** Cached in-memory so we don't hit SecureStore on every validation */
 let cachedOffsetSeconds: number | null = null;
@@ -17,8 +20,13 @@ let isInitialized = false;
 
 /**
  * Initialize server time from SecureStore.
- * Called on app startup to restore clock offset.
+ * Call at app startup to restore the clock offset before any token expiry checks.
+ * Safe to call multiple times — subsequent calls are no-ops.
  */
+export async function initServerTime(): Promise<void> {
+  return initializeFromStorage();
+}
+
 async function initializeFromStorage(): Promise<void> {
   if (isInitialized) return;
 
@@ -30,12 +38,12 @@ async function initializeFromStorage(): Promise<void> {
     if (syncTimeStr) lastSyncTimeSeconds = parseInt(syncTimeStr, 10);
 
     if (cachedOffsetSeconds !== null || lastSyncTimeSeconds !== null) {
-      console.log(
-        `[ServerTime] Initialized from storage: offset=${cachedOffsetSeconds}s, lastSync=${lastSyncTimeSeconds ? new Date(lastSyncTimeSeconds * 1000).toISOString() : "never"}`,
+      log.info(
+        `Initialized from storage: offset=${cachedOffsetSeconds}s, lastSync=${lastSyncTimeSeconds ? new Date(lastSyncTimeSeconds * 1000).toISOString() : "never"}`,
       );
     }
   } catch (error) {
-    console.debug("[ServerTime] Failed to initialize from storage:", error);
+    log.debug("Failed to initialize from storage:", error);
   }
 
   isInitialized = true;
@@ -67,14 +75,14 @@ export async function syncServerTime(): Promise<{
       drift = Math.abs(offset - expectedOffset);
 
       if (timeSinceLast > 0) {
-        console.debug(
-          `[ServerTime] ${timeSinceLast}s since last sync, offset changed by ${drift}s`,
+        log.debug(
+          `${timeSinceLast}s since last sync, offset changed by ${drift}s`,
         );
       }
 
       if (drift > MAX_CLOCK_DRIFT_SECONDS) {
-        console.warn(
-          `[ServerTime] DRIFT DETECTED: Offset changed by ${drift}s (was ${expectedOffset}s, now ${offset}s). ` +
+        log.warn(
+          `DRIFT DETECTED: Offset changed by ${drift}s (was ${expectedOffset}s, now ${offset}s). ` +
             `Device time may have been adjusted. Threshold: ${MAX_CLOCK_DRIFT_SECONDS}s.`,
         );
         isAcceptable = false;
@@ -87,13 +95,11 @@ export async function syncServerTime(): Promise<{
     await saveSecureItem(STORAGE_KEYS.CLOCK_OFFSET, String(offset));
     await saveSecureItem(STORAGE_KEYS.CLOCK_SYNC_TIME, String(deviceTime));
 
-    console.log(
-      `[ServerTime] Synced. Offset: ${offset}s, Drift: ${drift}s, Acceptable: ${isAcceptable}`,
-    );
+    log.info(`Synced. Offset: ${offset}s, Drift: ${drift}s, Acceptable: ${isAcceptable}`);
 
     return { offset, drift, isAcceptable };
   } catch (error) {
-    console.warn("[ServerTime] Sync failed, using cached offset:", error);
+    log.warn("Sync failed, using cached offset:", error);
     return { offset: cachedOffsetSeconds ?? 0, isAcceptable: true };
   }
 }
@@ -103,7 +109,7 @@ export async function syncServerTime(): Promise<{
  * Positive = device is behind server. Negative = device is ahead.
  * Initializes from SecureStore on first call.
  */
-export async function getClockOffsetSeconds(): Promise<number> {
+async function getClockOffsetSeconds(): Promise<number> {
   await initializeFromStorage();
   return cachedOffsetSeconds ?? 0;
 }

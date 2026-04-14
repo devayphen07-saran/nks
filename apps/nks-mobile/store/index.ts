@@ -2,15 +2,12 @@ import { configureStore } from "@reduxjs/toolkit";
 import { useDispatch, useSelector } from "react-redux";
 import { storeSlice } from "@nks/state-manager";
 import { tokenManager } from "@nks/mobile-utils";
-import {
-  authReducer,
-  selectAuthData,
-  selectUser,
-  selectSession,
-  selectAccess,
-} from "./auth-slice";
+import { authReducer } from "./auth-slice";
 import { setUnauthenticated } from "./auth-slice";
 import { refreshSession } from "./refresh-session";
+import { createLogger } from "../lib/logger";
+
+const log = createLogger("Auth");
 
 export const store = configureStore({
   reducer: {
@@ -30,8 +27,6 @@ const useRootSelector = useSelector.withTypes<RootState>();
 export const useAuth = () => useRootSelector((state: RootState) => state.auth);
 export const useAuthUser = () =>
   useRootSelector((state: RootState) => state.auth.authResponse?.user);
-export const useStore = () =>
-  useRootSelector((state: RootState) => state.store);
 
 // HIGH FIX #2: Make logout atomic — clear storage BEFORE updating Redux state
 // Prevents race condition where Redux is cleared but SecureStore still has old token
@@ -41,7 +36,7 @@ tokenManager.onExpired(async () => {
     // Actual async I/O happens but we await it here
     await tokenManager.clearSession();
   } catch (error) {
-    console.error("[Auth] Failed to clear session on expiry:", error);
+    log.error("Failed to clear session on expiry:", error);
     // Continue anyway — dispatch logout to clear Redux state
   }
 

@@ -14,6 +14,8 @@
 
 import { AppState, type AppStateStatus } from "react-native";
 import { JWTManager } from "./jwt-manager";
+import { refreshTokenAttempt } from "./refresh-token-attempt";
+import { isTokenExpired } from "./token-expiry";
 import { createLogger } from "./logger";
 
 const log = createLogger("JWTRefresh");
@@ -28,20 +30,7 @@ let _activeUnregister: (() => void) | null = null;
 function needsRefresh(): boolean {
   const raw = JWTManager.getRawAccessToken();
   if (!raw) return false;
-  // Reuse JWTManager's internal decoded exp via getOfflineStatus boundary check
-  // Access token expiry check: decode exp directly without duplicating jwtDecode
-  try {
-    // JWTManager.getRawAccessToken() gives us the token; parse exp from payload
-    const payload = raw.split(".")[1];
-    if (!payload) return false;
-    const decoded = JSON.parse(
-      atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
-    ) as { exp?: number };
-    if (!decoded.exp) return false;
-    return Date.now() >= decoded.exp * 1000 - REFRESH_THRESHOLD_MS;
-  } catch {
-    return false;
-  }
+  return isTokenExpired(raw, REFRESH_THRESHOLD_MS);
 }
 
 /**
@@ -63,15 +52,18 @@ export async function tryProactiveRefresh(): Promise<void> {
   log.info("Access token near expiry — refreshing proactively");
 
   try {
-    const ok = await JWTManager.refreshFromServer();
-    if (ok) {
+    const result = await refreshTokenAttempt();
+    if (result.shouldLogout === true) {
+      log.warn("Refresh token rejected — session expired");
+      throw new Error("REFRESH_TOKEN_INVALID");
+    }
+    if (result.success) {
       log.info("Proactive refresh succeeded");
     } else {
       log.warn("Proactive refresh returned false (network/server error)");
     }
   } catch (err: unknown) {
     if (err instanceof Error && err.message === "REFRESH_TOKEN_INVALID") {
-      log.warn("Refresh token rejected — session expired");
       throw err;
     }
     log.error("Proactive refresh failed:", err);
@@ -131,6 +123,17 @@ export function registerProactiveRefresh(): () => void {
  * Call this on logout to prevent stale listeners.
  */
 export function unregisterProactiveRefresh(): void {
+  if (_activeUnregister) {
+    _activeUnregister();
+  }
+}
+
+/**
+ * Resets module-level refresh state. Call on logout to prevent
+ * stale flags from leaking across user sessions.
+ */
+export function resetRefreshState(): void {
+  _isRefreshing = false;
   if (_activeUnregister) {
     _activeUnregister();
   }

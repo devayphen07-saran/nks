@@ -1,14 +1,104 @@
 import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, gt, and, isNull, or } from 'drizzle-orm';
 import { InjectDb } from '../../core/database/inject-db.decorator';
 import * as schema from '../../core/database/schema';
 
 type Db = NodePgDatabase<typeof schema>;
 
+export interface RouteChangeRow {
+  id: number;
+  guuid: string;
+  parentRouteFk: number | null;
+  routeName: string;
+  routePath: string;
+  fullPath: string;
+  description: string | null;
+  iconName: string | null;
+  routeType: string;
+  routeScope: string;
+  isPublic: boolean;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+
 @Injectable()
 export class SyncRepository {
   constructor(@InjectDb() private readonly db: Db) {}
+
+  /**
+   * Verify that a user belongs to a store via store_user_mapping.
+   * Returns the numeric store ID if membership exists and is active (not soft-deleted).
+   * Returns null if user does not belong to this store.
+   */
+  async verifyStoreMembership(
+    userId: number,
+    storeGuuid: string,
+  ): Promise<number | null> {
+    const rows = await this.db
+      .select({ id: schema.store.id })
+      .from(schema.store)
+      .leftJoin(
+        schema.storeUserMapping,
+        and(
+          eq(schema.storeUserMapping.storeFk, schema.store.id),
+          eq(schema.storeUserMapping.userFk, userId),
+          isNull(schema.storeUserMapping.deletedAt),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.store.guuid, storeGuuid),
+          or(
+            eq(schema.store.ownerUserFk, userId),
+            eq(schema.storeUserMapping.userFk, userId),
+          ),
+        ),
+      )
+      .limit(1);
+
+    return rows.length > 0 ? rows[0].id : null;
+  }
+
+  /**
+   * Fetch routes changed since a given timestamp.
+   * Queries routes WHERE updated_at > cursorMs (millisecond epoch).
+   * Fetches limit+1 rows to determine hasMore flag.
+   * Returns full rows including deleted_at field (null = active, non-null = soft-deleted).
+   */
+  async getRouteChanges(
+    cursorMs: number,
+    limit: number,
+  ): Promise<RouteChangeRow[]> {
+    const cursorDate = new Date(cursorMs);
+
+    const rows = await this.db
+      .select({
+        id: schema.routes.id,
+        guuid: schema.routes.guuid,
+        parentRouteFk: schema.routes.parentRouteFk,
+        routeName: schema.routes.routeName,
+        routePath: schema.routes.routePath,
+        fullPath: schema.routes.fullPath,
+        description: schema.routes.description,
+        iconName: schema.routes.iconName,
+        routeType: schema.routes.routeType,
+        routeScope: schema.routes.routeScope,
+        isPublic: schema.routes.isPublic,
+        isActive: schema.routes.isActive,
+        createdAt: schema.routes.createdAt,
+        updatedAt: schema.routes.updatedAt,
+        deletedAt: schema.routes.deletedAt,
+      })
+      .from(schema.routes)
+      .where(gt(schema.routes.updatedAt, cursorDate))
+      .orderBy(schema.routes.updatedAt)
+      .limit(limit + 1);
+
+    return rows as RouteChangeRow[];
+  }
 
   /**
    * Check if an idempotency key has already been processed.

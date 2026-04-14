@@ -29,6 +29,14 @@ const envSchema = z.object({
   MSG91_AUTH_KEY: z.string().min(1, 'MSG91_AUTH_KEY is required'),
   MSG91_WIDGET_ID: z.string().min(1, 'MSG91_WIDGET_ID is required'),
 
+  // ── HMAC Secrets ─────────────────────────────────────────────────────────
+  OTP_HMAC_SECRET: z
+    .string()
+    .min(32, 'OTP_HMAC_SECRET must be at least 32 characters'),
+  IP_HMAC_SECRET: z
+    .string()
+    .min(32, 'IP_HMAC_SECRET must be at least 32 characters'),
+
   // ── CORS ──────────────────────────────────────────────────────────────────
   ALLOWED_ORIGINS: z.string().optional(),
 

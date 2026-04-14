@@ -40,7 +40,7 @@ export * from './plans';
 // Audit
 export * from './audit-log';
 
-// Sync (PowerSync idempotency, offline sync support)
+// Sync (idempotency log, offline sync support)
 export * from './sync';
 
 // Standalone

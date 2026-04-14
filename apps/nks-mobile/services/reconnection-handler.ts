@@ -2,14 +2,14 @@
  * Reconnection Handler — 5-step sequence when device comes back online.
  *
  * Step 1: Revocation check    GET /api/v1/auth/session-status
- *         └── revoked → performRemoteWipe() → powerSyncDb.disconnectAndClear()
+ *         └── revoked → performRemoteWipe() → clearAllTables()
  *
  * Step 2: Token refresh       POST /api/auth/refresh-token (via JWTManager)
  *         └── REFRESH_TOKEN_INVALID → logout
  *
  * Step 3: JWKS refresh        GET /api/v1/auth/mobile-jwks (via JWTManager.cacheJWKS)
  *
- * Step 4: Sync catch-up       powerSyncDb.triggerCatchUp() + waitForSyncComplete()
+ * Step 4: Sync catch-up       runSync(storeGuuid) — pull changes, push mutations
  *
  * Step 5: Redux state update  dispatch(setCredentials) to keep React tree fresh
  *
@@ -24,28 +24,27 @@ import type { AuthResponse } from "@nks/api-manager";
 import { setCredentials, setUnauthenticated } from "../store/auth-slice";
 import { JWTManager } from "../lib/jwt-manager";
 import { offlineSession } from "../lib/offline-session";
-import { powerSyncDb } from "../lib/powersync-db";
-import { powerSyncConnector } from "../lib/powersync-connector";
+import { clearAllTables } from "../lib/local-db";
+import { runSync } from "../lib/sync-engine";
 import { fetchWithTimeout } from "../lib/fetch-with-timeout";
 import { createLogger } from "../lib/logger";
+import { refreshTokenAttempt } from "../lib/refresh-token-attempt";
 import type { AppDispatch } from "../store";
 
 const log = createLogger("ReconnectionHandler");
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
 
-// Maximum time to wait for PowerSync to finish downloading (ms)
-const SYNC_TIMEOUT_MS = 30_000;
-
 // ─── Remote wipe ─────────────────────────────────────────────────────────────
 
 async function performRemoteWipe(dispatch: AppDispatch): Promise<void> {
-  log.warn("Remote wipe triggered — disconnecting and clearing PowerSync data");
+  log.warn("Remote wipe triggered — clearing local data");
+
   try {
-    await powerSyncDb.disconnectAndClear();
-    log.info("PowerSync data wiped");
+    await clearAllTables();
+    log.info("Local database wiped");
   } catch (err) {
-    log.error("PowerSync wipe failed:", err);
+    log.error("Database wipe failed (non-blocking):", err);
   }
 
   await JWTManager.clear();
@@ -59,8 +58,11 @@ async function performRemoteWipe(dispatch: AppDispatch): Promise<void> {
 // ─── Step 1: Revocation check ────────────────────────────────────────────────
 
 async function checkSessionRevocation(): Promise<{ revoked: boolean; wipe: boolean }> {
-  const accessToken = JWTManager.getRawAccessToken();
-  if (!accessToken) return { revoked: false, wipe: false };
+  // Use the opaque BetterAuth session token (not the JWT access token).
+  // Backend GET /auth/session-status queries user_session.token which stores
+  // the opaque session token, not the JWT.
+  const sessionToken = tokenManager.get();
+  if (!sessionToken) return { revoked: false, wipe: false };
 
   try {
     const res = await fetchWithTimeout(
@@ -68,7 +70,7 @@ async function checkSessionRevocation(): Promise<{ revoked: boolean; wipe: boole
       {
         method: "GET",
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${sessionToken}`,
           "Content-Type": "application/json",
         },
       },
@@ -89,28 +91,6 @@ async function checkSessionRevocation(): Promise<{ revoked: boolean; wipe: boole
   } catch (err) {
     log.warn("session-status check error (non-blocking):", err);
     return { revoked: false, wipe: false };
-  }
-}
-
-// ─── Step 4: Wait for sync complete ──────────────────────────────────────────
-
-async function waitForSyncComplete(): Promise<void> {
-  const abort = new AbortController();
-  const timer = setTimeout(() => {
-    abort.abort();
-    log.warn("waitForSyncComplete timed out — continuing anyway");
-  }, SYNC_TIMEOUT_MS);
-
-  try {
-    await powerSyncDb.waitForStatus(
-      (s) => s.connected && !s.dataFlowStatus?.downloading,
-      abort.signal,
-    );
-    log.info("Sync catch-up complete");
-  } catch {
-    // AbortError from timeout — already logged above
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -145,22 +125,14 @@ export async function handleReconnection(dispatch: AppDispatch): Promise<void> {
 
     // ── Step 2: Token refresh ───────────────────────────────────────────────
     log.info("Step 2: refreshing tokens...");
-    try {
-      const ok = await JWTManager.refreshFromServer();
-      if (!ok) {
-        log.warn("Token refresh returned false — tokens may be stale");
-        // Continue anyway — access token might still be valid for JWKS + sync
-      }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.message === "REFRESH_TOKEN_INVALID") {
-        log.warn("Refresh token invalid — logging out");
-        await JWTManager.clear();
-        tokenManager.clear();
-        await tokenManager.clearSession().catch(() => {});
-        dispatch(setUnauthenticated());
-        return;
-      }
-      log.warn("Token refresh error (non-blocking):", err);
+    const refreshResult = await refreshTokenAttempt();
+    if (refreshResult.shouldLogout === true) {
+      log.warn("Refresh token invalid — logging out");
+      dispatch(setUnauthenticated());
+      return;
+    }
+    if (!refreshResult.success) {
+      log.warn("Token refresh returned false — tokens may be stale, continuing anyway");
     }
 
     // ── Step 3: JWKS refresh ────────────────────────────────────────────────
@@ -170,14 +142,19 @@ export async function handleReconnection(dispatch: AppDispatch): Promise<void> {
       log.warn("JWKS refresh failed (non-blocking):", err);
     });
 
-    // ── Step 4: PowerSync catch-up ──────────────────────────────────────────
-    log.info("Step 4: triggering PowerSync catch-up...");
+    // ── Step 4: Sync catch-up ──────────────────────────────────────────────
+    log.info("Step 4: running sync...");
     try {
-      // Ensure connector is connected before triggering catch-up
-      await powerSyncDb.connect(powerSyncConnector);
-      await waitForSyncComplete();
+      const envelope = await tokenManager.loadSession<AuthResponse>();
+      const storeGuuid = envelope?.data?.session?.defaultStore?.guuid;
+
+      if (storeGuuid) {
+        await runSync(storeGuuid);
+      } else {
+        log.warn("Step 4: No store GUUID — skipping sync");
+      }
     } catch (err) {
-      log.warn("PowerSync catch-up failed (non-blocking):", err);
+      log.warn("Step 4: Sync failed (non-blocking):", err);
     }
 
     // ── Step 5: Restore Redux auth state ────────────────────────────────────

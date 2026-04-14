@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as jose from 'jose';
+import type { RouteChangeRow } from './sync.repository';
 import { SyncRepository } from './sync.repository';
 
 interface SyncOperation {
@@ -10,7 +10,21 @@ interface SyncOperation {
   opData: Record<string, any>;
 }
 
+export interface SyncChange {
+  table: string;
+  id: number;
+  operation: 'upsert' | 'delete';
+  data: Record<string, unknown> | null;
+}
+
+export interface ChangesResponse {
+  nextCursor: number;
+  hasMore: boolean;
+  changes: SyncChange[];
+}
+
 const VALID_OPS = new Set(['PUT', 'PATCH', 'DELETE']);
+const DEFAULT_SYNC_LIMIT = 500;
 
 @Injectable()
 export class SyncService {
@@ -19,7 +33,7 @@ export class SyncService {
   constructor(private readonly syncRepository: SyncRepository) {}
 
   /**
-   * Process a batch of sync push operations from PowerSync.
+   * Process a batch of sync push operations from the mobile offline sync queue.
    *
    * Each operation is wrapped in a transaction with its idempotency
    * log entry so a crash between the mutation and the log write
@@ -63,6 +77,86 @@ export class SyncService {
   }
 
   /**
+   * Fetch changes since a given cursor for pull-based sync.
+   *
+   * Validates user membership in the store, then fetches route changes
+   * since the cursor timestamp. Maps rows to { operation, data } format
+   * where deleted_at IS NOT NULL → { operation: 'delete', data: null },
+   * else { operation: 'upsert', data: fullRow }.
+   *
+   * Returns nextCursor (max updatedAt as ms epoch) and hasMore flag.
+   */
+  async getChanges(
+    userId: number,
+    cursorMs: number,
+    storeGuuid: string,
+  ): Promise<ChangesResponse> {
+    // Verify user belongs to this store
+    const storeId = await this.syncRepository.verifyStoreMembership(
+      userId,
+      storeGuuid,
+    );
+
+    if (!storeId) {
+      // User does not belong to this store — return empty response
+      return {
+        nextCursor: cursorMs,
+        hasMore: false,
+        changes: [],
+      };
+    }
+
+    const limit = DEFAULT_SYNC_LIMIT;
+
+    // Fetch routes (limit+1 to detect hasMore)
+    const routeRows = await this.syncRepository.getRouteChanges(
+      cursorMs,
+      limit,
+    );
+
+    const hasMore = routeRows.length > limit;
+    const rows = hasMore ? routeRows.slice(0, limit) : routeRows;
+
+    // Map to SyncChange format
+    const changes: SyncChange[] = rows.map((row: RouteChangeRow) => ({
+      table: 'routes',
+      id: row.id,
+      operation: row.deletedAt ? 'delete' : 'upsert',
+      data: row.deletedAt
+        ? null
+        : ({
+            id: row.id,
+            guuid: row.guuid,
+            parentRouteFk: row.parentRouteFk,
+            routeName: row.routeName,
+            routePath: row.routePath,
+            fullPath: row.fullPath,
+            description: row.description,
+            iconName: row.iconName,
+            routeType: row.routeType,
+            routeScope: row.routeScope,
+            isPublic: row.isPublic,
+            isActive: row.isActive,
+            createdAt: row.createdAt.toISOString(),
+            updatedAt: row.updatedAt.toISOString(),
+            deletedAt: null,
+          } as Record<string, unknown>),
+    }));
+
+    // nextCursor = max updatedAt in this batch as milliseconds
+    const nextCursor =
+      rows.length > 0
+        ? rows[rows.length - 1].updatedAt.getTime()
+        : cursorMs;
+
+    this.logger.debug(
+      `Changes: ${changes.length} row(s), hasMore=${hasMore}, nextCursor=${nextCursor}`,
+    );
+
+    return { nextCursor, hasMore, changes };
+  }
+
+  /**
    * Route a single sync operation to the correct domain handler.
    *
    * Domain-specific table handlers will be added here when syncable
@@ -83,37 +177,6 @@ export class SyncService {
     );
   }
 
-  /**
-   * Generate a short-lived JWT for PowerSync service authentication.
-   *
-   * PowerSync requires its own JWT with a specific audience matching
-   * the PowerSync instance URL. Separate from NKS access/offline tokens.
-   */
-  async generatePowerSyncToken(
-    userGuuid: string,
-    email: string,
-  ): Promise<{ token: string; expiresAt: number }> {
-    const privateKeyPem = process.env['POWERSYNC_PRIVATE_KEY'];
-    if (!privateKeyPem) {
-      throw new Error('POWERSYNC_PRIVATE_KEY environment variable is not set');
-    }
-
-    const privateKey = await jose.importPKCS8(privateKeyPem, 'RS256');
-
-    const token = await new jose.SignJWT({ email })
-      .setProtectedHeader({ alg: 'RS256', kid: 'powersync-key-1' })
-      .setSubject(userGuuid)
-      .setIssuedAt()
-      .setExpirationTime('5m')
-      .setAudience(process.env['POWERSYNC_URL'] ?? '')
-      .sign(privateKey);
-
-    const expiresAt = Date.now() + 5 * 60 * 1000;
-
-    this.logger.log(`PowerSync token issued for user ${userGuuid}`);
-
-    return { token, expiresAt };
-  }
 
   /**
    * Field-level merge using per-field timestamps.

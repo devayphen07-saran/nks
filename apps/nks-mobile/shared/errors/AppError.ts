@@ -39,57 +39,6 @@ export class AppError extends Error {
   }
 
   /**
-   * Check if this error is a specific code
-   */
-  isCode(code: ErrorCode): boolean {
-    return this.code === code;
-  }
-
-  /**
-   * Check if this is a network error
-   */
-  isNetworkError(): boolean {
-    return [
-      ErrorCode.NETWORK_ERROR,
-      ErrorCode.TIMEOUT_ERROR,
-      ErrorCode.CONNECTION_LOST,
-    ].includes(this.code);
-  }
-
-  /**
-   * Check if this is an authentication error
-   */
-  isAuthError(): boolean {
-    return [
-      ErrorCode.AUTH_ERROR,
-      ErrorCode.UNAUTHORIZED,
-      ErrorCode.SESSION_EXPIRED,
-      ErrorCode.INVALID_CREDENTIALS,
-    ].includes(this.code);
-  }
-
-  /**
-   * Check if this is a validation error
-   */
-  isValidationError(): boolean {
-    return [
-      ErrorCode.VALIDATION_ERROR,
-      ErrorCode.INVALID_PHONE,
-      ErrorCode.INVALID_OTP,
-      ErrorCode.INVALID_PASSWORD,
-    ].includes(this.code);
-  }
-
-  /**
-   * Check if this is a server error
-   */
-  isServerError(): boolean {
-    return [ErrorCode.SERVER_ERROR, ErrorCode.SERVICE_UNAVAILABLE].includes(
-      this.code,
-    );
-  }
-
-  /**
    * Get user-facing message
    * Use this to display to users
    */

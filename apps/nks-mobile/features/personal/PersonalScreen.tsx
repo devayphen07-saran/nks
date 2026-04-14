@@ -13,19 +13,14 @@ import { useMobileTheme } from "@nks/mobile-theme";
 import { useAuth } from "../../store";
 import { useLogout } from "../../hooks/useLogout";
 import { WelcomeBanner, ExpenseRow } from "./components";
-import type { ExpenseItem } from "./components/ExpenseRow";
+import { RECENT_EXPENSE_ITEMS } from "./mock-data";
 
 export function PersonalScreen() {
   const { theme } = useMobileTheme();
   const user = useAuth().authResponse?.user;
   const { logout } = useLogout();
 
-  const recentExpenses: ExpenseItem[] = [
-    { id: 1, title: "Grocery Store", amount: "-₹1,250", category: "Food", date: "Today" },
-    { id: 2, title: "Gas Station", amount: "-₹3,500", category: "Travel", date: "Yesterday" },
-    { id: 3, title: "Subscription", amount: "-₹499", category: "Entertainment", date: "Mar 22" },
-    { id: 4, title: "Salary Deposit", amount: "+₹45,000", category: "Income", date: "Mar 20" },
-  ];
+  const recentExpenses = RECENT_EXPENSE_ITEMS;
 
   const leftElement = (
     <LucideIcon name="User" size={24} color={theme.colorText} />

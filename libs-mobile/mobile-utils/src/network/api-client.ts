@@ -36,16 +36,3 @@ export const apiPut = <T>(url: string, data?: any): Promise<T> => {
   return apiClient.put(url, data).then((res) => res.data);
 };
 
-/**
- * Utility for making typed PATCH requests
- */
-export const apiPatch = <T>(url: string, data?: any): Promise<T> => {
-  return apiClient.patch(url, data).then((res) => res.data);
-};
-
-/**
- * Utility for making typed DELETE requests
- */
-export const apiDelete = <T>(url: string): Promise<T> => {
-  return apiClient.delete(url).then((res) => res.data);
-};

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectDb } from '../../core/database/inject-db.decorator';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../core/database/schema';
@@ -122,16 +122,16 @@ export class RoleEntityPermissionRepository {
   /**
    * Create or update entity permission for a role.
    * Accepts entityCode string and looks up entity_type to find FK.
-   * @throws NotFoundException if entity type not found
+   * @returns false if entity type not found, true on success
    */
   async upsertPermission(
     roleId: number,
     entityCode: string,
     permission: Partial<EntityPermission>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const entityTypeId = await this.resolveEntityTypeId(entityCode);
     if (!entityTypeId) {
-      throw new NotFoundException(`Entity type '${entityCode}' not found`);
+      return false;
     }
 
     const [existing] = await this.db
@@ -175,6 +175,7 @@ export class RoleEntityPermissionRepository {
         isSystem: false,
       });
     }
+    return true;
   }
 
   /**
@@ -220,12 +221,12 @@ export class RoleEntityPermissionRepository {
 
   /**
    * Soft-delete permission.
-   * @throws NotFoundException if entity type not found
+   * Returns false if entity type not found; the caller is responsible for throwing.
    */
-  async deletePermission(roleId: number, entityCode: string): Promise<void> {
+  async deletePermission(roleId: number, entityCode: string): Promise<boolean> {
     const entityTypeId = await this.resolveEntityTypeId(entityCode);
     if (!entityTypeId) {
-      throw new NotFoundException(`Entity type '${entityCode}' not found`);
+      return false;
     }
 
     await this.db
@@ -237,6 +238,7 @@ export class RoleEntityPermissionRepository {
           eq(roleEntityPermission.entityTypeFk, entityTypeId),
         ),
       );
+    return true;
   }
 
   /** Find all permissions for a role with entity type codes. */
@@ -286,13 +288,14 @@ export class RoleEntityPermissionRepository {
       );
   }
 
-  /** Create a new entity permission using entity code (looks up FK). */
+  /** Create a new entity permission using entity code (looks up FK). Returns null if entity type not found. */
   async create(
     roleId: number,
     entityCode: string,
     data: Partial<EntityPermission>,
-  ): Promise<RoleEntityPermissionRow> {
-    const entityTypeId = await this.resolveEntityTypeIdOrThrow(entityCode);
+  ): Promise<RoleEntityPermissionRow | null> {
+    const entityTypeId = await this.resolveEntityTypeId(entityCode);
+    if (!entityTypeId) return null;
 
     const [created] = await this.db
       .insert(roleEntityPermission)
@@ -341,17 +344,6 @@ export class RoleEntityPermissionRepository {
       .where(eq(entityType.code, entityCode))
       .limit(1);
     return row?.id ?? null;
-  }
-
-  /** Resolve entity_type FK by code. Throws NotFoundException if not found. */
-  private async resolveEntityTypeIdOrThrow(
-    entityCode: string,
-  ): Promise<number> {
-    const id = await this.resolveEntityTypeId(entityCode);
-    if (!id) {
-      throw new NotFoundException(`Entity type '${entityCode}' not found`);
-    }
-    return id;
   }
 
   /**

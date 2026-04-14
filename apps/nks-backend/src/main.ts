@@ -93,7 +93,7 @@ async function bootstrap() {
   app.useGlobalInterceptors(
     new LoggingInterceptor(), // logs method, path, status, and duration
     new TransformInterceptor(), // wraps all raw returns in ApiResponse<T>
-    new TimeoutInterceptor(), // enforces 25s limit
+    new TimeoutInterceptor(), // enforces 30s limit (REQUEST_TIMEOUT_MS)
   );
 
   await app.listen(port);

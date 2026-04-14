@@ -49,7 +49,7 @@ export interface UserRoleEntry {
     | "SUPER_ADMIN"
     | "STORE_OWNER"
     | "STAFF"
-    | "STORE_MANAGER"
+    | "MANAGER"
     | "CASHIER"
     | "DELIVERY"
     | "CUSTOMER";

@@ -45,19 +45,34 @@ export class JWTConfigService {
   private readonly logger = new Logger(JWTConfigService.name);
   private privateKey: string;
   private publicKey: string;
-  private currentKeyId = '2026-key-1';
+  private currentKeyId: string = '';
   private fallbackKeys: FallbackKey[] = [];
-  private readonly FALLBACK_KEY_DURATION_DAYS = 7;
+  private readonly FALLBACK_KEY_DURATION_DAYS = 30; // 30-day grace period for offline clients
 
   constructor() {
     try {
       this.privateKey = RSAKeyManager.getPrivateKey();
       this.publicKey = RSAKeyManager.getPublicKey();
       this.logger.debug('✅ RSA keys loaded');
+
+      // Compute kid as SHA-256 thumbprint of public key (RFC 7638)
+      // This allows kid to automatically change on key rotation without hardcoding
+      this.currentKeyId = this.computeKeyThumbprint(this.publicKey);
+      this.logger.debug(`✅ Current key ID computed: ${this.currentKeyId.substring(0, 8)}...`);
     } catch (error) {
       this.logger.error('Failed to load RSA keys', error);
       throw error;
     }
+  }
+
+  /**
+   * Compute SHA-256 thumbprint of RSA public key for kid field.
+   * Enables automatic key rotation detection without hardcoded values.
+   */
+  private computeKeyThumbprint(publicKeyPem: string): string {
+    const key = crypto.createPublicKey({ key: publicKeyPem, format: 'pem' });
+    const derBuffer = key.export({ format: 'der', type: 'spki' });
+    return crypto.createHash('sha256').update(derBuffer).digest('hex');
   }
 
   /**
@@ -172,14 +187,15 @@ export class JWTConfigService {
 
   /**
    * Get JWKS (for mobile to download)
-   * Returns active key + fallback keys from past 7 days
+   * Returns active key + fallback keys from past 30 days
    * WEB: Optional, MOBILE: Required (for offline JWT verification)
    *
    * Key Rotation Strategy:
-   * 1. Active key: Used for new token signatures
-   * 2. Fallback keys: Kept for 7 days to allow graceful rotation
+   * 1. Active key: Used for new token signatures (kid = SHA-256 thumbprint of public key)
+   * 2. Fallback keys: Kept for 30 days to allow graceful rotation for offline clients
+   *    (offline JWT TTL = 3 days, so 30-day grace = 27-day buffer post-rotation)
    * 3. Cache: 1 hour (max-age=3600) for fast emergency rotation propagation
-   * 4. If key is compromised: Generate new key, add to JWKS, remove old after 7 days
+   * 4. If key is compromised: Generate new key, add to JWKS, remove old after 30 days
    */
   getPublicKeyAsJWKS(): Record<string, any> {
     // Clean up expired fallback keys

@@ -1,4 +1,4 @@
-import { Platform, KeyboardAvoidingView, TextInput } from "react-native";
+import { Platform, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
@@ -13,14 +13,23 @@ import {
 import { useMobileTheme } from "@nks/mobile-theme";
 import { maskPhone } from "@nks/utils";
 import { useOtpVerify } from "./hooks/useOtpVerify";
-
-const CARD_SHADOW = {
-  shadowColor: "#000000",
-  shadowOffset: { width: 0, height: -4 },
-  shadowOpacity: 0.08,
-  shadowRadius: 20,
-  elevation: 8,
-} as const;
+import {
+  CARD_SHADOW,
+  Container,
+  KeyboardAvoiding,
+  PageScroll,
+  BrandHero,
+  DecoRing1,
+  DecoRing2,
+  DecoRing3,
+  DecoRing4,
+  BrandMark,
+  HeroText,
+  FormCard as BaseFormCard,
+  FormContent,
+  ErrorBanner,
+  ErrorText,
+} from "./components/auth-screen-styles";
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -218,108 +227,12 @@ export function OtpScreen() {
   );
 }
 
-// ─── Styled Components ────────────────────────────────────────────────────────
+// ─── Screen-specific Styled Components ────────────────────────────────────────
 
-const Container = styled.View`
-  flex: 1;
-  background-color: ${({ theme }) => theme.colorBgContainer};
-`;
-
-const KeyboardAvoiding = styled(KeyboardAvoidingView)`
-  flex: 1;
-`;
-
-const PageScroll = styled.ScrollView`
-  flex: 1;
-`;
-
-const BrandHero = styled.View<{ $topInset: number }>`
-  background-color: ${({ theme }) => theme.colorPrimary};
-  padding-top: ${({ $topInset, theme }) => $topInset + theme.sizing.large}px;
-  padding-left: ${({ theme }) => theme.sizing.xLarge}px;
-  padding-right: ${({ theme }) => theme.sizing.xLarge}px;
-  padding-bottom: ${({ theme }) => theme.sizing.xLarge * 2 + 8}px;
-  overflow: hidden;
-  justify-content: space-between;
-  min-height: 220px;
-`;
-
-const DecoRing1 = styled.View`
-  position: absolute;
-  width: 220px;
-  height: 220px;
-  border-radius: 110px;
-  border-width: 1.5px;
-  border-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.1;
-  top: -70px;
-  right: -50px;
-`;
-
-const DecoRing2 = styled.View`
-  position: absolute;
-  width: 130px;
-  height: 130px;
-  border-radius: 65px;
-  border-width: 1px;
-  border-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.07;
-  bottom: 40px;
-  left: -20px;
-`;
-
-const DecoRing3 = styled.View`
-  position: absolute;
-  width: 300px;
-  height: 300px;
-  border-radius: 150px;
-  background-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.03;
-  top: -100px;
-  left: -100px;
-`;
-
-const DecoRing4 = styled.View`
-  position: absolute;
-  width: 180px;
-  height: 180px;
-  border-radius: 90px;
-  border-width: 1px;
-  border-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.05;
-  bottom: -40px;
-  right: 20px;
-`;
-
-const BrandMark = styled.View`
-  width: 40px;
-  height: 40px;
-  border-radius: ${({ theme }) => theme.borderRadius.regular}px;
-  background-color: ${({ theme }) => theme.colorWhite};
-  align-items: center;
-  justify-content: center;
-`;
-
-const HeroText = styled(Column)`
-  margin-top: ${({ theme }) => theme.sizing.xLarge}px;
-`;
-
-const FormCard = styled(Column)<{ $bottomInset: number }>`
-  background-color: ${({ theme }) => theme.colorBgContainer};
-  border-top-left-radius: ${({ theme }) => theme.borderRadius.xxLarge}px;
-  border-top-right-radius: ${({ theme }) => theme.borderRadius.xxLarge}px;
-  padding-left: ${({ theme }) => theme.sizing.xLarge}px;
-  padding-right: ${({ theme }) => theme.sizing.xLarge}px;
-  padding-top: ${({ theme }) => theme.sizing.xLarge}px;
-  padding-bottom: ${({ theme, $bottomInset }) =>
-    theme.sizing.medium + $bottomInset}px;
-  margin-top: -${({ theme }) => theme.borderRadius.xxLarge}px;
-  flex: 1;
-  justify-content: space-between;
+// FormCard with position: relative for the hidden input overlay
+const FormCard = styled(BaseFormCard)`
   position: relative;
 `;
-
-const FormContent = styled(Column)``;
 
 // ─── Hidden Input (Production-Standard Pattern) ───
 const HiddenInputContainer = styled.View`
@@ -372,22 +285,6 @@ const OtpBox = styled.TouchableOpacity<{
 const OtpDigit = styled(Typography.H3)`
   font-size: 24px;
   color: ${({ theme }) => theme.colorText};
-`;
-
-const ErrorBanner = styled(Row)`
-  background-color: ${({ theme }) => theme.colorErrorBg};
-  border-radius: ${({ theme }) => theme.borderRadius.regular}px;
-  padding-left: ${({ theme }) => theme.sizing.small}px;
-  padding-right: ${({ theme }) => theme.sizing.small}px;
-  padding-top: ${({ theme }) => theme.sizing.xSmall}px;
-  padding-bottom: ${({ theme }) => theme.sizing.xSmall}px;
-  border-width: 1px;
-  border-color: ${({ theme }) => theme.colorErrorBorder};
-`;
-
-const ErrorText = styled(Typography.Caption)`
-  color: ${({ theme }) => theme.colorErrorText};
-  flex: 1;
 `;
 
 const ResendRow = styled(Row)``;

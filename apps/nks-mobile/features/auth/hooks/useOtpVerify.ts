@@ -204,7 +204,6 @@ export function useOtpVerify() {
     setOtpFromString,
     handleVerify,
     handleResend,
-    resetOtp,
     phone,
     OTP_LENGTH,
   };

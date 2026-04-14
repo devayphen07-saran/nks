@@ -4,7 +4,7 @@ import { sql } from 'drizzle-orm';
 /**
  * Idempotency log for sync push deduplication.
  *
- * PowerSync retries failed uploads automatically. Without this table,
+ * The mobile sync engine retries failed uploads automatically. Without this table,
  * a crash between the route mutation and the log write causes
  * re-processing on retry — duplicate inserts or extra version increments.
  *

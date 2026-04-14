@@ -23,7 +23,7 @@ import type { AuthenticatedRequest } from './auth.guard';
  *
  * Usage:
  *   @UseGuards(AuthGuard, RBACGuard)
- *   @Roles('STORE_OWNER', 'STORE_MANAGER')
+ *   @Roles('STORE_OWNER', 'MANAGER')
  *   @RequireEntityPermission('INVOICE', 'create')
  *   async createInvoice() {}
  */

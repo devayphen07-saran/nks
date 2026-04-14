@@ -7,14 +7,14 @@
  *   assertWriteAllowed(['CASHIER']);     // also throws if role missing
  *
  * The offline window is determined by the offline token's `exp` claim.
- * Once expired, all PowerSync writes are blocked until the user reconnects
+ * Once expired, all offline writes are blocked until the user reconnects
  * and obtains a fresh offline token from the server.
  */
 
 import { JWTManager } from "./jwt-manager";
 import { offlineSession } from "./offline-session";
 
-export class OfflineSessionExpiredError extends Error {
+class OfflineSessionExpiredError extends Error {
   readonly code = "OFFLINE_SESSION_EXPIRED";
 
   constructor() {
@@ -25,7 +25,7 @@ export class OfflineSessionExpiredError extends Error {
   }
 }
 
-export class InsufficientRoleError extends Error {
+class InsufficientRoleError extends Error {
   readonly code = "INSUFFICIENT_ROLE";
 
   constructor(required: string[]) {
@@ -55,20 +55,17 @@ export async function assertWriteAllowed(requiredRoles?: string[]): Promise<void
   }
 
   if (requiredRoles && requiredRoles.length > 0) {
+    // load() performs HMAC integrity verification internally —
+    // tampered sessions (e.g. role escalation) are rejected and return null.
     const session = await offlineSession.load();
-    const userRoles: string[] = session?.roles ?? [];
-    const hasRole = requiredRoles.some((r) => userRoles.includes(r));
+    if (!session) {
+      throw new InsufficientRoleError(requiredRoles);
+    }
+
+    const hasRole = requiredRoles.some((r) => session.roles.includes(r));
     if (!hasRole) {
       throw new InsufficientRoleError(requiredRoles);
     }
   }
 }
 
-/**
- * Returns true if offline writes are currently allowed.
- * Non-throwing, synchronous version (JWT expiry check only).
- */
-export function isWriteAllowed(): boolean {
-  const status = JWTManager.getOfflineStatus();
-  return status.mode !== "offline_expired";
-}

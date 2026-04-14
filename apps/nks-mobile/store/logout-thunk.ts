@@ -6,10 +6,18 @@ import { tokenMutex } from "../lib/token-mutex";
 import { offlineSession } from "../lib/offline-session";
 import { sanitizeError } from "../lib/log-sanitizer";
 import { JWTManager } from "../lib/jwt-manager";
-import { OTP_RATE_LIMITS } from "../lib/rate-limiter";
-import { unregisterProactiveRefresh } from "../lib/jwt-refresh";
+import { resetRateLimiters } from "../lib/rate-limiter";
+import { resetRefreshState } from "../lib/jwt-refresh";
+import { resetInterceptorState } from "../lib/axios-interceptors";
+import { resetSyncState } from "../lib/sync-engine";
 import { DeviceManager } from "../lib/device-manager";
+import { createLogger } from "../lib/logger";
+import { clearAllTables } from "../lib/local-db";
+import { deleteDbKey } from "../lib/db-key";
+import { IS_SHARED_DEVICE } from "../lib/device-config";
 import type { AppDispatch } from "./index";
+
+const log = createLogger("Logout");
 
 export const logoutThunk = createAsyncThunk<
   void,
@@ -24,8 +32,7 @@ export const logoutThunk = createAsyncThunk<
       try {
         await dispatch(signOut({}));
       } catch (error) {
-        // Log sanitized error, continue with logout anyway
-        console.error("[Logout] Sign-out API failed:", sanitizeError(error));
+        log.error("Sign-out API failed:", sanitizeError(error));
       }
 
       tokenManager.clear();
@@ -33,16 +40,28 @@ export const logoutThunk = createAsyncThunk<
       await offlineSession.clear();
       await JWTManager.clear();
       await DeviceManager.clear();
-      unregisterProactiveRefresh();
+      resetRefreshState();
+      resetInterceptorState();
+      resetSyncState();
+
+      // Clear all synced data from local database
+      await clearAllTables();
+
+      // For shared devices, also delete the encryption key so next user cannot access cached data
+      if (IS_SHARED_DEVICE) {
+        try {
+          await deleteDbKey();
+        } catch (err) {
+          log.error("Failed to delete DB key on shared device:", err);
+        }
+      }
+
       // Reset OTP rate limiters so a fresh login session starts clean
-      OTP_RATE_LIMITS.verify.reset();
-      OTP_RATE_LIMITS.resend.reset();
-      OTP_RATE_LIMITS.send.reset();
+      resetRateLimiters();
       dispatch(logoutAction());
-      console.log("[Logout] Session and offline data cleared successfully");
+      log.info("Session and offline data cleared successfully");
     } catch (error) {
-      // Log sanitized error
-      console.error("[Logout] Failed to clear session:", sanitizeError(error));
+      log.error("Failed to clear session:", sanitizeError(error));
       // Dispatch logout anyway to update Redux state
       dispatch(logoutAction());
       throw error;

@@ -107,4 +107,11 @@ export class StatusService {
 
     await this.repository.softDelete(existing.id, deletedBy);
   }
+
+  // ─── Internal lookup (used by other modules via StatusService) ───────────────
+
+  /** Resolves a status by GUUID. Returns null if not found. */
+  async findByGuuid(guuid: string): Promise<Status | null> {
+    return this.repository.findByGuuid(guuid);
+  }
 }

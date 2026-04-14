@@ -5,11 +5,15 @@ import { offlineSession } from "../lib/offline-session";
 import { getServerAdjustedNow } from "../lib/server-time";
 import { setCredentials, setUnauthenticated } from "./auth-slice";
 import { refreshSession } from "./refresh-session";
+import { clearAuthState } from "./clear-auth-state";
 import { sessionTokenReg } from "@nks/utils";
 import { validateAuthResponse } from "../lib/token-validators";
 import { sanitizeError } from "../lib/log-sanitizer";
 import { JWTManager } from "../lib/jwt-manager";
+import { createLogger } from "../lib/logger";
 import type { AppDispatch } from "./index";
+
+const log = createLogger("Auth:init");
 
 /**
  * CRITICAL FIX #2: Initialize auth with comprehensive validation.
@@ -21,7 +25,7 @@ export const initializeAuth = createAsyncThunk<
   { dispatch: AppDispatch }
 >("auth/bootstrap", async (_, { dispatch }) => {
   try {
-    console.log("[Auth:init] Starting session initialization...");
+    log.info("Starting session initialization...");
 
     // Hydrate JWTManager (access + offline + refresh tokens) into memory
     await JWTManager.hydrate();
@@ -29,24 +33,22 @@ export const initializeAuth = createAsyncThunk<
     const envelope = await tokenManager.loadSession<AuthResponse>();
 
     if (!envelope?.data) {
-      console.log("[Auth:init] No stored session found");
+      log.info("No stored session found");
       dispatch(setUnauthenticated());
       return;
     }
 
     // ✅ CRITICAL FIX #2: Validate session structure BEFORE using tokens
-    console.log("[Auth:init] Validating stored session structure...");
+    log.info("Validating stored session structure...");
     const validation = validateAuthResponse(envelope.data);
 
     if (!validation.isValid) {
-      console.error("[Auth:init] Stored session validation failed:", validation.errors);
-      await tokenManager.clearSession();
-      await offlineSession.clear().catch(() => {});
-      dispatch(setUnauthenticated());
+      log.error("Stored session validation failed:", validation.errors);
+      await clearAuthState(dispatch, setUnauthenticated);
       return;
     }
 
-    console.log("[Auth:init] Session validation passed");
+    log.info("Session validation passed");
 
     // Validate session has not expired before restoring (uses server-adjusted time)
     const sessionExpiresAt = envelope.data.session.expiresAt;
@@ -54,12 +56,11 @@ export const initializeAuth = createAsyncThunk<
       const expiryTime = new Date(sessionExpiresAt).getTime();
       const now = await getServerAdjustedNow();
       if (expiryTime < now) {
-        console.warn("[Auth:init] Stored session has expired", {
+        log.warn("Stored session has expired", {
           expiresAt: sessionExpiresAt,
           now: new Date(now).toISOString(),
         });
-        await tokenManager.clearSession();
-        dispatch(setUnauthenticated());
+        await clearAuthState(dispatch, setUnauthenticated);
         return;
       }
     }
@@ -67,20 +68,17 @@ export const initializeAuth = createAsyncThunk<
     // Validate token format one more time
     const sessionToken = envelope.data.session.sessionToken;
     if (!sessionTokenReg.test(sessionToken)) {
-      console.error(
-        "[Auth:init] Session token format invalid, clearing session"
-      );
-      await tokenManager.clearSession();
-      dispatch(setUnauthenticated());
+      log.error("Session token format invalid, clearing session");
+      await clearAuthState(dispatch, setUnauthenticated);
       return;
     }
 
     // ✅ CRITICAL FIX #2: Only NOW set in-memory token after all validation passes
     tokenManager.set(sessionToken);
-    console.log("[Auth:init] In-memory token restored");
+    log.info("In-memory token restored");
 
     dispatch(setCredentials(envelope.data));
-    console.log("[Auth:init] Credentials restored to Redux");
+    log.info("Credentials restored to Redux");
 
     // Restore offline session for offline POS capability
     try {
@@ -91,52 +89,43 @@ export const initializeAuth = createAsyncThunk<
           const roleStatus = offlineSession.isRolesStale(session);
           const statusMsg = offlineSession.getStatus(session);
 
-          console.log(
-            "[Auth:init] OfflineSession restored",
-            {
-              userId: session.userId,
-              storeId: session.storeId,
-              expiresIn: Math.round((session.offlineValidUntil - Date.now()) / 60000) + "min",
-              rolesStale: roleStatus.isStale,
-              roleReason: roleStatus.reason,
-              status: statusMsg.message,
-            }
-          );
+          log.info("OfflineSession restored", {
+            userId: session.userId,
+            storeId: session.storeId,
+            expiresIn: Math.round((session.offlineValidUntil - Date.now()) / 60000) + "min",
+            rolesStale: roleStatus.isStale,
+            roleReason: roleStatus.reason,
+            status: statusMsg.message,
+          });
 
           // Warn if roles are stale
           if (roleStatus.isStale) {
-            console.warn(
-              `[Auth:init] Roles may be outdated: ${roleStatus.reason}. ` +
+            log.warn(
+              `Roles may be outdated: ${roleStatus.reason}. ` +
               `User should sync online to verify current permissions.`
             );
           }
         } else {
-          console.warn("[Auth:init] OfflineSession expired", {
+          log.warn("OfflineSession expired", {
             userId: session.userId,
             expiredAt: new Date(session.offlineValidUntil).toISOString(),
           });
         }
       }
     } catch (error) {
-      console.debug("[Auth:init] Failed to restore offline session:", sanitizeError(error));
+      log.debug("Failed to restore offline session:", sanitizeError(error));
     }
 
     // Check if session is stale and needs refresh
     const isStale = Date.now() - envelope.fetchedAt > SESSION_STALE_MS;
     if (isStale) {
-      console.log(
-        "[Auth:init] Session is stale, dispatching refresh (will happen in background)"
-      );
+      log.info("Session is stale, dispatching refresh (will happen in background)");
       dispatch(refreshSession());
     }
 
-    console.log("[Auth:init] Initialization complete");
+    log.info("Initialization complete");
   } catch (e) {
-    console.error("[Auth:init] Initialization error:", sanitizeError(e));
-    // On any error, force logout
-    tokenManager.clear();
-    await tokenManager.clearSession().catch(() => {});
-    await offlineSession.clear().catch(() => {});
-    dispatch(setUnauthenticated());
+    log.error("Initialization error:", sanitizeError(e));
+    await clearAuthState(dispatch, setUnauthenticated);
   }
 });

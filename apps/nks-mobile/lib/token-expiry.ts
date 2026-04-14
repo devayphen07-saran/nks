@@ -7,12 +7,37 @@ import type { AuthResponse } from "@nks/api-manager";
 import type { SessionEnvelope } from "@nks/mobile-utils";
 import { ONE_HOUR_MS } from "@nks/utils";
 import { getServerAdjustedNow } from "./server-time";
+import { createLogger } from "./logger";
 
-export interface TokenExpiryInfo {
+const log = createLogger("TokenExpiry");
+
+interface TokenExpiryInfo {
   isExpired: boolean;
   expiresAt: string | null;
   expiresIn: number; // Milliseconds remaining
   reason?: "EXPIRED" | "NO_EXPIRY_INFO" | "VALID";
+}
+
+/**
+ * Synchronously checks if a JWT is expired (or about to expire within thresholdMs).
+ * Decodes the exp claim directly from the payload — no async, no server-time adjustment.
+ * Use this for proactive refresh checks where latency matters.
+ *
+ * @param token - Raw JWT string
+ * @param thresholdMs - Treat as expired if expiry is within this many ms (default 0)
+ */
+export function isTokenExpired(token: string, thresholdMs = 0): boolean {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return true;
+    const decoded = JSON.parse(
+      atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
+    ) as { exp?: number };
+    if (!decoded.exp) return true;
+    return Date.now() >= decoded.exp * 1000 - thresholdMs;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -62,11 +87,8 @@ export const validateTokenExpiry = async (
       expiresIn,
       reason: "VALID",
     };
-  } catch (error) {
-    console.error(
-      "[TokenValidation] Failed to parse expiry timestamp:",
-      expiresAt,
-    );
+  } catch {
+    log.error("Failed to parse expiry timestamp:", expiresAt);
     return {
       isExpired: true,
       expiresAt,
@@ -128,7 +150,7 @@ export async function validateTokensBeforeRefresh(
   }
 
   if (refreshExpiry.expiresIn < ONE_HOUR_MS) {
-    console.warn("[TokenValidation] Refresh token expiring soon", {
+    log.warn("Refresh token expiring soon", {
       expiresInSeconds: Math.round(refreshExpiry.expiresIn / 1000),
     });
   }
@@ -139,4 +161,3 @@ export async function validateTokensBeforeRefresh(
     refreshExpiresAt,
   };
 }
-

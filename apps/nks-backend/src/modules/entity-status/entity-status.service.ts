@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { EntityStatusRepository } from './entity-status.repository';
-import { StatusRepository } from '../status/status.repository';
+import { StatusService } from '../status/status.service';
 import type { AssignStatusDto, EntityStatusResponse } from './dto/entity-status.dto';
 import { toEntityStatusResponse } from './mapper/entity-status.mapper';
 import { EntityCodeValidator } from './validators';
@@ -8,8 +8,8 @@ import { EntityCodeValidator } from './validators';
 @Injectable()
 export class EntityStatusService {
   constructor(
-    private readonly repository:       EntityStatusRepository,
-    private readonly statusRepository: StatusRepository,
+    private readonly repository:    EntityStatusRepository,
+    private readonly statusService: StatusService,
   ) {}
 
   async getStatusesForEntity(entityCode: string): Promise<EntityStatusResponse[]> {
@@ -29,7 +29,7 @@ export class EntityStatusService {
     EntityCodeValidator.validate(code);
 
     // Resolve guuid → row
-    const statusRow = await this.statusRepository.findByGuuid(dto.statusGuuid);
+    const statusRow = await this.statusService.findByGuuid(dto.statusGuuid);
     if (!statusRow) {
       throw new NotFoundException(`Status '${dto.statusGuuid}' not found`);
     }
@@ -52,7 +52,7 @@ export class EntityStatusService {
     // SECURITY: Validate entity code format using EntityCodeValidator
     EntityCodeValidator.validate(code);
 
-    const statusRow = await this.statusRepository.findByGuuid(statusGuuid);
+    const statusRow = await this.statusService.findByGuuid(statusGuuid);
     if (!statusRow) {
       throw new NotFoundException(`Status '${statusGuuid}' not found`);
     }

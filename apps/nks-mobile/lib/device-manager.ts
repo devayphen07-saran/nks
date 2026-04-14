@@ -8,13 +8,13 @@
  * Depends on: expo-crypto, expo-device, expo-application
  */
 
-import { Platform } from "react-native";
 import * as Crypto from "expo-crypto";
 import * as Device from "expo-device";
 import * as Application from "expo-application";
 import * as SecureStore from "expo-secure-store";
 import { createLogger } from "./logger";
 import { STORAGE_KEYS } from "./storage-keys";
+import { getStableDeviceId } from "./device-binding";
 
 const FINGERPRINT_KEY = STORAGE_KEYS.DEVICE_FINGERPRINT;
 const log = createLogger("DeviceManager");
@@ -29,17 +29,17 @@ export interface DeviceFingerprint {
 let _cached: DeviceFingerprint | null = null;
 
 async function generateFingerprint(): Promise<DeviceFingerprint> {
-  const platform = Platform.OS;
+  const deviceId = await getStableDeviceId();
   const model = Device.modelName ?? "unknown";
   const appVersion = Application.nativeApplicationVersion ?? "0.0.0";
 
-  const raw = `${platform}:${model}:${appVersion}`;
+  const raw = `${deviceId}:${model}:${appVersion}`;
   const value = await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
     raw,
   );
 
-  return { value, platform, model, appVersion };
+  return { value, platform: deviceId, model, appVersion };
 }
 
 async function persistFingerprint(fp: DeviceFingerprint): Promise<void> {
@@ -76,39 +76,6 @@ export const DeviceManager = {
     _cached = fp;
     log.info(`Generated fingerprint: ${fp.value.slice(0, 12)}...`);
     return fp;
-  },
-
-  /**
-   * Verifies the current fingerprint against the persisted one.
-   * Returns false if the device identity changed (reinstall, restore, etc).
-   */
-  async verifyFingerprint(): Promise<boolean> {
-    try {
-      const persisted = await loadPersistedFingerprint();
-      if (!persisted) {
-        // First run — generate and persist
-        await DeviceManager.getFingerprint();
-        return true;
-      }
-
-      const current = await generateFingerprint();
-      const match = persisted.value === current.value;
-
-      if (!match) {
-        log.warn(
-          `Fingerprint mismatch — device identity changed. ` +
-            `Persisted: ${persisted.value.slice(0, 12)}, Current: ${current.value.slice(0, 12)}`,
-        );
-        // Update persisted to current (e.g., after app update changes appVersion)
-        await persistFingerprint(current);
-        _cached = current;
-      }
-
-      return true; // Always true — fingerprint is informational, not a hard gate
-    } catch (err) {
-      log.error("verifyFingerprint failed:", err);
-      return true; // Don't block startup on fingerprint errors
-    }
   },
 
   /**

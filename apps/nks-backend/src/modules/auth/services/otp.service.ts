@@ -24,7 +24,7 @@ import { AuthUsersRepository } from '../repositories/auth-users.repository';
  * - Designed for short-lived tokens
  * - Standard for TOTP/HOTP schemes (RFC 6238)
  */
-const OTP_HMAC_SECRET = process.env['OTP_HMAC_SECRET'] || 'default-otp-secret';
+const OTP_HMAC_SECRET = process.env['OTP_HMAC_SECRET']!;
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_EMAIL_DIGITS = 6;
 
@@ -148,7 +148,7 @@ export class OtpService {
     await this.rateLimitService.checkAndRecordRequest(email);
 
     // Generate 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = crypto.randomInt(100000, 1000000).toString();
 
     // Hash with HMAC-SHA256 before persisting — the plaintext OTP never touches the database
     const otpHash = this.hashOtp(otp);

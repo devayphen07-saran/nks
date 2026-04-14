@@ -33,7 +33,7 @@ export interface PublicSession {
   createdAt: Date;
 }
 
-const MAX_SESSIONS_PER_USER = 10;
+const MAX_SESSIONS_PER_USER = 5;
 
 /**
  * SessionService
@@ -198,20 +198,14 @@ export class SessionService {
   }
 
   /**
-   * Enforce session limit per user
-   * If user has MAX_SESSIONS, remove oldest before creating new one
+   * Enforce session limit per user.
+   * Uses atomic SQL to delete excess sessions in a single query,
+   * preventing race conditions from concurrent logins.
    */
   private async enforceSessionLimit(userId: number): Promise<void> {
-    const activeSessions =
-      await this.sessionsRepository.findActiveByUserId(userId);
-
-    if (activeSessions.length >= MAX_SESSIONS_PER_USER) {
-      // Remove oldest session
-      const oldest = activeSessions[0];
-      await this.sessionsRepository.delete(oldest.id);
-      this.logger.debug(
-        `Session limit enforced: removed oldest for user ${userId}`,
-      );
-    }
+    await this.sessionsRepository.deleteExcessSessions(
+      userId,
+      MAX_SESSIONS_PER_USER - 1, // -1 to make room for the new session about to be created
+    );
   }
 }

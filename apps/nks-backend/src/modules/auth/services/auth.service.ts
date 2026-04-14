@@ -5,6 +5,8 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  InternalServerErrorException,
+  NotFoundException,
   Logger,
 } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -41,7 +43,6 @@ import { JWTConfigService } from '../../../config/jwt.config';
 import { RoutesService } from '../../routes/routes.service';
 import { AuditService, AuditEventType } from '../../audit/audit.service';
 import { RefreshTokenService } from './refresh-token.service';
-import { AuthFlowOrchestrator } from './auth-flow-orchestrator.service';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -71,8 +72,7 @@ const LOCKOUT_MINUTES = 15;
 const MAX_CONCURRENT_SESSIONS = 5;
 const SYSTEM_ROLE_STORE_OWNER = 'STORE_OWNER';
 const JWT_AUDIENCE = 'nks-app';
-const IP_HMAC_SECRET =
-  process.env['IP_HMAC_SECRET'] || 'default-ip-hmac-secret';
+const IP_HMAC_SECRET = process.env['IP_HMAC_SECRET']!;
 
 // Offline JWT TTL — controls how long the mobile device can work offline.
 // The offline JWT's own exp claim IS the offline window boundary.
@@ -99,7 +99,6 @@ export class AuthService {
     private readonly routesService: RoutesService,
     private readonly auditService: AuditService,
     private readonly refreshTokenService: RefreshTokenService,
-    private readonly authFlowOrchestrator: AuthFlowOrchestrator,
   ) {}
 
   /**
@@ -150,6 +149,9 @@ export class AuthService {
 
       // Get user guuid + email for JWT
       const user = await this.authUsersRepository.findEmailAndGuuid(userId);
+      if (!user?.guuid) {
+        throw new InternalServerErrorException('User record missing guuid — cannot sign JWT');
+      }
 
       // Calculate and store role hash for detecting changes
       const roleHash = this.hashRoles(userRoles);
@@ -320,8 +322,8 @@ export class AuthService {
           failedLoginAttempts: 0,
         });
         if (!unlocked) {
-          throw new Error(
-            `Failed to update user lockout status for user ${user.id}`,
+          throw new InternalServerErrorException(
+            'Failed to update user lockout status',
           );
         }
         this.logger.log(
@@ -359,8 +361,8 @@ export class AuthService {
           : {}),
       });
       if (!updated) {
-        throw new Error(
-          `Failed to update failed login attempts for user ${user.id}`,
+        throw new InternalServerErrorException(
+          'Failed to update failed login attempts',
         );
       }
       void this.auditService.log({
@@ -388,7 +390,9 @@ export class AuthService {
       lastActiveAt: new Date(),
     });
     if (!loginReset) {
-      throw new Error(`Failed to reset lockout state for user ${user.id}`);
+      throw new InternalServerErrorException(
+        'Failed to reset lockout state',
+      );
     }
     await this.authUsersRepository.recordLogin(user.id);
 
@@ -404,8 +408,16 @@ export class AuthService {
       resourceId: user.id,
     });
 
-    // Unified auth flow: create session + tokens + build response
-    return this.authFlowOrchestrator.executeAuthFlow(user, deviceInfo);
+    // Create session + tokens + build response
+    const session = await this.createSessionForUser(user.id, deviceInfo);
+    const tokenPair = await this.createTokenPair(
+      user.guuid || '',
+      session.token,
+      session.userRoles,
+      session.userEmail,
+      session.sessionGuuid,
+    );
+    return this.buildAuthResponse(user, session.token, session.expiresAt, tokenPair);
   }
 
   /**
@@ -479,8 +491,16 @@ export class AuthService {
       throw new ConflictException('Email already in use');
     }
 
-    // Unified auth flow: create session + tokens + build response
-    return this.authFlowOrchestrator.executeAuthFlow(user, deviceInfo);
+    // Create session + tokens + build response
+    const session = await this.createSessionForUser(user.id, deviceInfo);
+    const tokenPair = await this.createTokenPair(
+      user.guuid || '',
+      session.token,
+      session.userRoles,
+      session.userEmail,
+      session.sessionGuuid,
+    );
+    return this.buildAuthResponse(user, session.token, session.expiresAt, tokenPair);
   }
 
   /**
@@ -572,6 +592,35 @@ export class AuthService {
     // Delegate to SessionService to invalidate session by token
     // AuthGuard already validated this token
     await this.sessionService.invalidateSessionByToken(token);
+  }
+
+  /**
+   * Check session revocation status without AuthGuard.
+   * Used by the mobile reconnection handler (GET /auth/session-status).
+   */
+  async checkSessionStatus(
+    token: string,
+  ): Promise<{ active: boolean; revoked: boolean; wipe: boolean }> {
+    const session = await this.sessionsRepository.findByToken(token);
+
+    if (!session) {
+      return { active: false, revoked: true, wipe: false };
+    }
+
+    if (session.expiresAt < new Date()) {
+      return { active: false, revoked: true, wipe: false };
+    }
+
+    // Session exists and is not expired — check if user is blocked
+    const user = await this.authUsersRepository.findById(
+      Number(session.userId),
+    );
+
+    return {
+      active: true,
+      revoked: false,
+      wipe: user?.isBlocked ?? false,
+    };
   }
 
   /** Assign CUSTOMER role to a user (personal account setup). */
@@ -1172,6 +1221,10 @@ export class AuthService {
       this.authUsersRepository.findEmailAndGuuid(session.userId),
     ]);
 
+    if (!user?.guuid) {
+      throw new InternalServerErrorException('User record missing guuid — cannot sign JWT');
+    }
+
     const userRoles = permissions.roles || [];
     const currentRoleHash = this.hashRoles(userRoles);
     // FIX #7: 15 minutes — was hardcoded 1 hour, misaligned with NKS spec
@@ -1238,8 +1291,8 @@ export class AuthService {
     // Session rotation creates new rows, but old revoked ones can be safely deleted
     // after 30 days (preserves audit trail for recent theft detection)
     await this.sessionsRepository.deleteOldRevokedSessions(30).catch((err) => {
-      // Log but don't fail the refresh if cleanup fails
-      this.logger.warn(
+      // Log as error (not warn) — repeated failures may indicate DB issues
+      this.logger.error(
         `Failed to cleanup old revoked sessions: ${err.message}`,
       );
     });
@@ -1437,7 +1490,7 @@ export class AuthService {
     );
 
     if (!session) {
-      throw new Error('Session not found or does not belong to user');
+      throw new NotFoundException('Session not found or does not belong to user');
     }
 
     await this.sessionsRepository.delete(sessionIdNum);

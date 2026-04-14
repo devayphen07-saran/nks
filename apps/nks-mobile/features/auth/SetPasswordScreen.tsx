@@ -1,4 +1,4 @@
-import { Platform, KeyboardAvoidingView } from "react-native";
+import { Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import styled from "styled-components/native";
 import {
@@ -10,14 +10,21 @@ import {
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
 import { useSetPassword } from "./hooks/useSetPassword";
-
-const CARD_SHADOW = {
-  shadowColor: "#000000",
-  shadowOffset: { width: 0, height: -4 },
-  shadowOpacity: 0.08,
-  shadowRadius: 20,
-  elevation: 8,
-} as const;
+import {
+  CARD_SHADOW,
+  Container,
+  KeyboardAvoiding,
+  PageScroll,
+  BrandHero,
+  DecoRing1,
+  DecoRing2,
+  BrandMark,
+  HeroText,
+  FormCard,
+  FormContent,
+  ErrorBanner,
+  ErrorText,
+} from "./components/auth-screen-styles";
 
 export function SetPasswordScreen() {
   const { theme } = useMobileTheme();
@@ -160,84 +167,7 @@ export function SetPasswordScreen() {
   );
 }
 
-// ─── Styled Components ────────────────────────────────────────────────────────
-
-const Container = styled.View`
-  flex: 1;
-  background-color: ${({ theme }) => theme.colorBgContainer};
-`;
-
-const KeyboardAvoiding = styled(KeyboardAvoidingView)`
-  flex: 1;
-`;
-
-const PageScroll = styled.ScrollView`
-  flex: 1;
-`;
-
-const BrandHero = styled.View<{ $topInset: number }>`
-  background-color: ${({ theme }) => theme.colorPrimary};
-  padding-top: ${({ $topInset, theme }) => $topInset + theme.sizing.large}px;
-  padding-left: ${({ theme }) => theme.sizing.xLarge}px;
-  padding-right: ${({ theme }) => theme.sizing.xLarge}px;
-  padding-bottom: ${({ theme }) => theme.sizing.xLarge * 2 + 8}px;
-  overflow: hidden;
-  justify-content: space-between;
-  min-height: 220px;
-`;
-
-const DecoRing1 = styled.View`
-  position: absolute;
-  width: 220px;
-  height: 220px;
-  border-radius: 110px;
-  border-width: 1.5px;
-  border-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.1;
-  top: -70px;
-  right: -50px;
-`;
-
-const DecoRing2 = styled.View`
-  position: absolute;
-  width: 130px;
-  height: 130px;
-  border-radius: 65px;
-  border-width: 1px;
-  border-color: ${({ theme }) => theme.colorWhite};
-  opacity: 0.07;
-  bottom: 40px;
-  left: -20px;
-`;
-
-const BrandMark = styled.View`
-  width: 40px;
-  height: 40px;
-  border-radius: ${({ theme }) => theme.borderRadius.regular}px;
-  background-color: ${({ theme }) => theme.colorWhite};
-  align-items: center;
-  justify-content: center;
-`;
-
-const HeroText = styled(Column)`
-  margin-top: ${({ theme }) => theme.sizing.xLarge}px;
-`;
-
-const FormCard = styled(Column)<{ $bottomInset: number }>`
-  background-color: ${({ theme }) => theme.colorBgContainer};
-  border-top-left-radius: ${({ theme }) => theme.borderRadius.xxLarge}px;
-  border-top-right-radius: ${({ theme }) => theme.borderRadius.xxLarge}px;
-  padding-left: ${({ theme }) => theme.sizing.xLarge}px;
-  padding-right: ${({ theme }) => theme.sizing.xLarge}px;
-  padding-top: ${({ theme }) => theme.sizing.xLarge}px;
-  padding-bottom: ${({ theme, $bottomInset }) =>
-    theme.sizing.medium + $bottomInset}px;
-  margin-top: -${({ theme }) => theme.borderRadius.xxLarge}px;
-  flex: 1;
-  justify-content: space-between;
-`;
-
-const FormContent = styled(Column)``;
+// ─── Screen-specific Styled Components ────────────────────────────────────────
 
 const FieldLabel = styled(Typography.Caption)`
   margin-left: 3px;
@@ -272,22 +202,6 @@ const EyeButton = styled.TouchableOpacity`
   padding-right: ${({ theme }) => theme.sizing.small}px;
   padding-top: ${({ theme }) => theme.sizing.small}px;
   padding-bottom: ${({ theme }) => theme.sizing.small}px;
-`;
-
-const ErrorBanner = styled(Row)`
-  background-color: ${({ theme }) => theme.colorErrorBg};
-  border-radius: ${({ theme }) => theme.borderRadius.regular}px;
-  padding-left: ${({ theme }) => theme.sizing.small}px;
-  padding-right: ${({ theme }) => theme.sizing.small}px;
-  padding-top: ${({ theme }) => theme.sizing.xSmall}px;
-  padding-bottom: ${({ theme }) => theme.sizing.xSmall}px;
-  border-width: 1px;
-  border-color: ${({ theme }) => theme.colorErrorBorder};
-`;
-
-const ErrorText = styled(Typography.Caption)`
-  color: ${({ theme }) => theme.colorErrorText};
-  flex: 1;
 `;
 
 const SkipButton = styled.TouchableOpacity`

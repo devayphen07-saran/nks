@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import type { AuthResponseEnvelope } from '../dto';
 import { AuthService } from './auth.service';
 
@@ -11,7 +11,10 @@ import { AuthService } from './auth.service';
  */
 @Injectable()
 export class AuthFlowOrchestrator {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    @Inject(forwardRef(() => AuthService))
+    private readonly authService: AuthService,
+  ) {}
 
   /**
    * Unified auth flow: create session + generate tokens + build auth envelope.

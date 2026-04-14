@@ -1,4 +1,5 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { TooManyRequestsException } from '../../../common/exceptions/too-many-requests.exception';
 import * as crypto from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { OtpRateLimitRepository } from '../repositories/otp-rate-limit.repository';
@@ -60,7 +61,7 @@ export class OtpRateLimitService {
   /**
    * Check if identifier can request OTP.
    * Enforces rate limit (5/hour) and exponential backoff.
-   * Throws HttpException(429) if rate limit or backoff applies.
+   * Throws TooManyRequestsException(429) if rate limit or backoff applies.
    */
   async checkAndRecordRequest(identifier: string): Promise<void> {
     const now = new Date();
@@ -92,14 +93,10 @@ export class OtpRateLimitService {
         const secondsLeft = Math.ceil(
           (backoffDelayMs - timeSinceLastAttempt) / 1000,
         );
-        throw new HttpException(
-          {
-            message: `Too many failed attempts. Try again in ${secondsLeft} second${secondsLeft !== 1 ? 's' : ''}.`,
-            retryAfter: secondsLeft,
-            failureCount: existing.consecutiveFailures,
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
+        throw new TooManyRequestsException({
+          message: `Too many failed attempts. Try again in ${secondsLeft} second${secondsLeft !== 1 ? 's' : ''}.`,
+          meta: { retryAfter: secondsLeft, failureCount: existing.consecutiveFailures },
+        });
       }
     }
 
@@ -109,13 +106,10 @@ export class OtpRateLimitService {
         const minutesLeft = Math.ceil(
           (existing.windowExpiresAt.getTime() - now.getTime()) / 60000,
         );
-        throw new HttpException(
-          {
-            message: `Rate limit exceeded (${this.MAX_REQUESTS_PER_HOUR} requests per hour). Try again in ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}.`,
-            retryAfter: minutesLeft * 60,
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
+        throw new TooManyRequestsException({
+          message: `Rate limit exceeded (${this.MAX_REQUESTS_PER_HOUR} requests per hour). Try again in ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}.`,
+          meta: { retryAfter: minutesLeft * 60 },
+        });
       }
 
       // Increment request counter and update last attempt time

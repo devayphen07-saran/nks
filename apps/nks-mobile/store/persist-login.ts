@@ -4,6 +4,7 @@ import { sessionTokenReg } from "@nks/utils";
 import { offlineSession } from "../lib/offline-session";
 import { syncServerTime } from "../lib/server-time";
 import { setCredentials, logout } from "./auth-slice";
+import { clearAuthState } from "./clear-auth-state";
 import {
   validateAuthResponse,
   validateRefreshTokenFormat,
@@ -11,7 +12,10 @@ import {
 } from "../lib/token-validators";
 import { sanitizeError } from "../lib/log-sanitizer";
 import { JWTManager } from "../lib/jwt-manager";
+import { createLogger } from "../lib/logger";
 import type { AppDispatch } from "./index";
+
+const log = createLogger("Auth");
 
 /**
  * Persist login session to SecureStore, in-memory, and Redux.
@@ -48,17 +52,15 @@ export async function persistLogin(
 
     // Analyze storage usage (Issue 1.1)
     const storageAnalysis = analyzeStorageUsage(authResponse);
-    console.log(
-      `[Auth] Session valid. Size: ${storageAnalysis.sizeBytes}b (${storageAnalysis.usagePercent}%)`
-    );
+    log.info(`Session valid. Size: ${storageAnalysis.sizeBytes}b (${storageAnalysis.usagePercent}%)`);
     if (storageAnalysis.message) {
-      console.warn(`[Auth] ${storageAnalysis.message}`);
+      log.warn(storageAnalysis.message);
     }
 
     // ════════════════════════════════════════════════════════════════════════════
     // PERSIST: Write to SecureStore (atomic operation)
     // ════════════════════════════════════════════════════════════════════════════
-    console.log("[Auth] Persisting session to SecureStore...");
+    log.info("Persisting session to SecureStore...");
     await tokenManager.persistSession(authResponse);
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -69,7 +71,7 @@ export async function persistLogin(
       throw new Error(`Session token format invalid: length ${sessionToken.length}`);
     }
     tokenManager.set(sessionToken);
-    console.log("[Auth] In-memory token set");
+    log.info("In-memory token set");
 
     // ════════════════════════════════════════════════════════════════════════════
     // NON-CRITICAL: Sync server time + create offline session in parallel
@@ -84,16 +86,16 @@ export async function persistLogin(
       const refreshToken = authResponse.session?.refreshToken;
       if (accessToken && offlineToken && refreshToken) {
         await JWTManager.persistTokens({ accessToken, offlineToken, refreshToken });
-        console.log("[Auth] JWTManager tokens persisted");
+        log.info("JWTManager tokens persisted");
       }
     })().catch((err) => {
-      console.warn("[Auth] JWTManager persist failed (non-critical):", sanitizeError(err));
+      log.warn("JWTManager persist failed (non-critical):", sanitizeError(err));
     });
 
     const syncPromise = syncServerTime().then(() => {
-      console.log("[Auth] Server time synced");
+      log.info("Server time synced");
     }).catch((err) => {
-      console.warn("[Auth] Server time sync failed (non-critical):", sanitizeError(err));
+      log.warn("Server time sync failed (non-critical):", sanitizeError(err));
     });
 
     const offlinePromise = activeStoreId
@@ -109,9 +111,9 @@ export async function persistLogin(
             roles: roleCodes,
             offlineToken: authResponse.offlineToken ?? "",
           });
-          console.log("[Auth] Offline session created");
+          log.info("Offline session created");
         })().catch((err) => {
-          console.warn("[Auth] Offline session failed (non-critical):", sanitizeError(err));
+          log.warn("Offline session failed (non-critical):", sanitizeError(err));
         })
       : Promise.resolve();
 
@@ -121,17 +123,13 @@ export async function persistLogin(
     // STATE: Update Redux store
     // ════════════════════════════════════════════════════════════════════════════
     dispatch(setCredentials(authResponse));
-    console.log("[Auth] Session persisted successfully");
+    log.info("Session persisted successfully");
   } catch (error) {
     // ════════════════════════════════════════════════════════════════════════════
     // CLEANUP: On any failure, clear all auth state
     // ════════════════════════════════════════════════════════════════════════════
-    console.error("[Auth] Persistence failed, clearing all auth state:", sanitizeError(error));
-
-    tokenManager.clear();
-    await tokenManager.clearSession().catch(() => {});
-    await offlineSession.clear().catch(() => {});
-    dispatch(logout());
+    log.error("Persistence failed, clearing all auth state:", sanitizeError(error));
+    await clearAuthState(dispatch, logout);
 
     // Provide clear error to user
     const message = error instanceof Error ? error.message : "Unknown error";

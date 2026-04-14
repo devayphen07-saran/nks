@@ -7,7 +7,10 @@ import { setCredentials } from "../store/auth-slice";
 import { initializeAuth } from "../store/initialize-auth";
 import { setupAxiosInterceptors } from "./axios-interceptors";
 import { handleReconnection } from "../services/reconnection-handler";
+import { createLogger } from "./logger";
 import { useInactivityLock } from "../hooks/useInactivityLock";
+
+const log = createLogger("AuthProvider");
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -44,9 +47,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setupAxiosInterceptors((authResponse: AuthResponse) => {
         dispatch(setCredentials(authResponse));
       });
-      console.log("[Auth] Axios interceptors configured");
+      log.info("[Auth] Axios interceptors configured");
     } catch (error) {
-      console.error("[Auth] Failed to setup Axios interceptors:", error);
+      log.error("[Auth] Failed to setup Axios interceptors:", error);
       // Non-critical — continue anyway
     }
   }, [dispatch]);
@@ -74,9 +77,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Online transition detected — run full reconnection sequence
       if (wasOffline.current) {
         wasOffline.current = false;
-        console.log("[Auth] Device back online — running reconnection sequence");
+        log.info("[Auth] Device back online — running reconnection sequence");
         handleReconnection(dispatch).catch((err) => {
-          console.error("[Auth] Reconnection failed:", err);
+          log.error("[Auth] Reconnection failed:", err);
         });
       }
     });

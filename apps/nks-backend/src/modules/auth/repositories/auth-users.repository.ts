@@ -156,20 +156,6 @@ export class AuthUsersRepository {
   }
 
   /**
-   * Find user by phone
-   */
-  async findByPhoneOrNull(phone: string): Promise<DbUser | null> {
-    return this.findByPhone(phone);
-  }
-
-  /**
-   * Find user by email
-   */
-  async findByEmailOrNull(email: string): Promise<DbUser | null> {
-    return this.findByEmail(email);
-  }
-
-  /**
    * Fetch only email + guuid for a user by ID.
    * Used for JWT signing — avoids loading full user row.
    */

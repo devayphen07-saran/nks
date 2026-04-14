@@ -1,5 +1,4 @@
 import React, { useCallback } from "react";
-import { Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import styled from "styled-components/native";
 import {
@@ -11,7 +10,7 @@ import {
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
 import { useAuthUser } from "../../store";
-import { useLogout } from "../../hooks/useLogout";
+import { useLogoutConfirmation } from "../../hooks/useLogoutConfirmation";
 import type { DrawerContentComponentProps } from "@react-navigation/drawer";
 import { router } from "expo-router";
 
@@ -28,7 +27,7 @@ export function PersonalDrawerContent(props: DrawerContentComponentProps) {
   const { navigation } = props;
   const { theme } = useMobileTheme();
   const user = useAuthUser();
-  const { logout } = useLogout();
+  const { confirmLogout } = useLogoutConfirmation();
 
   const menuCategories: MenuCategory[] = [
     {
@@ -59,30 +58,9 @@ export function PersonalDrawerContent(props: DrawerContentComponentProps) {
   ];
 
   const handleLogout = useCallback(() => {
-    Alert.alert(
-      "Logout",
-      "Are you sure you want to log out?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Logout",
-          onPress: async () => {
-            try {
-              navigation.closeDrawer();
-              // Dispatch logoutThunk: calls signOut API, clears token + SecureStore, updates Redux
-              await logout(() => {
-                router.replace("/(auth)/phone");
-              });
-            } catch (error) {
-              console.error("[PersonalDrawer] Logout failed:", error);
-              Alert.alert("Error", "Failed to log out. Please try again.");
-            }
-          },
-          style: "destructive",
-        },
-      ]
-    );
-  }, [logout, navigation]);
+    navigation.closeDrawer();
+    confirmLogout(() => router.replace("/(auth)/phone"));
+  }, [confirmLogout, navigation]);
 
   const handleNavigate = useCallback(
     (route: string) => {

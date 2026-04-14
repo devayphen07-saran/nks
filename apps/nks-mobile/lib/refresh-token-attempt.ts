@@ -10,12 +10,11 @@ import { offlineSession } from "./offline-session";
 import { syncServerTime } from "./server-time";
 import { validateTokensBeforeRefresh } from "./token-expiry";
 import { sanitizeError } from "./log-sanitizer";
-import {
-  getDeviceIdentity,
-  formatDeviceBindingForRequest,
-} from "./device-binding";
+import { createLogger } from "./logger";
 import { JWTManager } from "./jwt-manager";
 import { AxiosError } from "axios";
+
+const log = createLogger("RefreshTokenAttempt");
 
 export interface RefreshAttemptResult {
   success: boolean;
@@ -41,7 +40,7 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
     const validation = await validateTokensBeforeRefresh(envelope);
 
     if (!validation.canRefresh) {
-      console.warn("[RefreshAttempt] Cannot refresh session", {
+      log.warn("[RefreshAttempt] Cannot refresh session", {
         error: validation.error,
         details: validation.details,
       });
@@ -54,30 +53,16 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
 
     const refreshTokenValue = validation.refreshToken;
 
-    // Get device binding if available
-    let deviceBinding: Record<string, string | number> | undefined;
-    try {
-      const identity = await getDeviceIdentity();
-      deviceBinding = formatDeviceBindingForRequest(identity);
-    } catch (error) {
-      // Device binding unavailable (Expo Go) — continue without it
-      console.debug(
-        "[RefreshAttempt] Device binding unavailable:",
-        sanitizeError(error),
-      );
-    }
-
     // Call refresh API
     const response = await API.post("/auth/refresh-token", {
       refreshToken: refreshTokenValue,
-      ...(deviceBinding && { deviceBinding }),
     });
 
     const result = response.data?.data;
     const newSessionToken = result?.sessionToken;
 
     if (!newSessionToken || !envelope?.data) {
-      console.warn("[RefreshAttempt] Malformed refresh response");
+      log.warn("[RefreshAttempt] Malformed refresh response");
       return {
         success: false,
         error: "Malformed response",
@@ -111,7 +96,7 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
         offlineToken: result.offlineToken,
         refreshToken: result.refreshToken,
       }).catch((err) => {
-        console.debug("[RefreshAttempt] JWTManager sync failed (non-critical):", sanitizeError(err));
+        log.debug("[RefreshAttempt] JWTManager sync failed (non-critical):", sanitizeError(err));
       });
     }
 
@@ -119,7 +104,7 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
     try {
       await syncServerTime();
     } catch (error) {
-      console.debug(
+      log.debug(
         "[RefreshAttempt] Server time sync failed:",
         sanitizeError(error),
       );
@@ -139,24 +124,24 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
             roleCodes,
             result?.offlineToken,
           );
-          console.log(
+          log.info(
             "[RefreshAttempt] Offline session roles updated and validity extended",
           );
         } else {
           // No role data, just extend validity
           await offlineSession.extendValidity(session);
-          console.log("[RefreshAttempt] Offline session validity extended");
+          log.info("[RefreshAttempt] Offline session validity extended");
         }
       }
     } catch (error) {
-      console.debug(
+      log.debug(
         "[RefreshAttempt] Offline session update failed:",
         sanitizeError(error),
       );
       // Non-critical — continue anyway
     }
 
-    console.log("[RefreshAttempt] Token refreshed successfully");
+    log.info("[RefreshAttempt] Token refreshed successfully");
     return {
       success: true,
       newToken: newSessionToken,
@@ -167,7 +152,7 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
 
     // Server explicitly rejected the refresh token (401/403) → must logout
     if (status === 401 || status === 403) {
-      console.warn(
+      log.warn(
         "[RefreshAttempt] Refresh token rejected by server (401/403)",
       );
       return {
@@ -178,7 +163,7 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
     }
 
     // Network error / timeout / server down → don't logout, user stays logged in with cached session
-    console.error("[RefreshAttempt] Refresh failed:", sanitizeError(error));
+    log.error("[RefreshAttempt] Refresh failed:", sanitizeError(error));
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

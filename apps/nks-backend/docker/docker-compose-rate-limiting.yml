@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  # ─── Nginx Reverse Proxy (Rate Limiting) ───────────────────────────────────
+  # Acts as reverse proxy with rate limiting rules
+  # Line of defense #2 (after NestJS ThrottlerModule)
+  nginx:
+    image: nginx:alpine
+    container_name: nks-nginx
+    ports:
+      - '80:80'
+      - '443:443'  # HTTPS (add SSL cert)
+    volumes:
+      # Mount Nginx configuration
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+      # Error response files
+      - ./errors:/usr/share/nginx/html/errors:ro
+
+      # Logs
+      - nginx_logs:/var/log/nginx
+
+    environment:
+      - TZ=UTC
+    restart: unless-stopped
+    networks:
+      - nks-network
+    depends_on:
+      - nks-backend
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost/health']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ─── NestJS Backend Application ──────────────────────────────────────────
+  # Runs on internal port 4000 (not exposed to host)
+  # Protected by Nginx rate limiting
+  nks-backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: nks-backend
+    expose:
+      - '4000'  # Only expose to Nginx, not to host
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - REFRESH_TOKEN_SECRET=${REFRESH_TOKEN_SECRET}
+
+      # ─── Rate Limiting Configuration (NestJS ThrottlerModule) ──────────────
+      - THROTTLE_ENABLED=true          # Enable NestJS rate limiting
+      - THROTTLE_TTL=300               # 5 minute window
+      - THROTTLE_LIMIT=50              # 50 requests per window
+
+    restart: unless-stopped
+    networks:
+      - nks-network
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:4000/api/v1/lookups/countries']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  # ─── PostgreSQL Database ───────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: nks-postgres
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+      - TZ=UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - nks-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER}']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+# ─── Volumes ────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  nginx_logs:
+    driver: local
+
+# ─── Networks ───────────────────────────────────────────────────────────────
+networks:
+  nks-network:
+    driver: bridge
+
+# ─── Usage ──────────────────────────────────────────────────────────────────
+# 1. Set environment variables in .env file:
+#    DATABASE_URL=postgresql://user:pass@postgres:5432/nks_db
+#    JWT_SECRET=your-secret-key
+#    REFRESH_TOKEN_SECRET=your-refresh-secret
+#    DB_USER=postgres
+#    DB_PASSWORD=postgres
+#    DB_NAME=nks_db
+#
+# 2. Start services:
+#    docker-compose -f docker-compose-rate-limiting.yml up -d
+#
+# 3. Access backend:
+#    - Through Nginx (rate limited): http://localhost/api/v1/...
+#    - Direct (not recommended): http://localhost:4000/api/v1/...
+#
+# 4. Monitor rate limiting:
+#    docker logs nks-nginx | grep rate-limit
+#    docker exec nks-nginx tail -f /var/log/nginx/rate-limit.log
+#
+# 5. Stop services:
+#    docker-compose -f docker-compose-rate-limiting.yml down

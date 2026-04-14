@@ -37,6 +37,7 @@ import {
 import { ApiResponse } from '../../../common/utils/api-response';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
 import { AuthGuard } from '../../../common/guards/auth.guard';
+import { Public } from '../../../common/decorators/public.decorator';
 import { JWTConfigService } from '../../../config/jwt.config';
 import type { VerifyClaimsResponse } from '../services/auth.service';
 
@@ -374,32 +375,37 @@ export class AuthController {
    * Mobile reconnection check — returns whether session is active or revoked.
    * Called as the first step when a mobile device comes back online.
    *
+   * No AuthGuard — if the session was revoked/expired, the guard would reject
+   * with 401 before the revocation status could be returned. Instead, we
+   * manually extract the session token and check the DB directly.
+   *
    * Reference: MOBILE_OFFLINE_FLOW.md Section 15, Step 1
    */
   @Get('session-status')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Check session revocation status',
     description:
-      'Returns whether the current session is active or revoked. Used by mobile reconnection handler.',
+      'Returns whether the current session is active or revoked. Used by mobile reconnection handler. No AuthGuard — validates session token directly.',
   })
-  getSessionStatus(
-    @Req() req: AuthenticatedRequest,
-  ): ApiResponse<{ active: boolean; revoked: boolean; wipe: boolean }> {
-    const user = req.user;
+  async getSessionStatus(
+    @Req() req: Request,
+  ): Promise<ApiResponse<{ active: boolean; revoked: boolean; wipe: boolean }>> {
+    // Extract token from Bearer header or httpOnly cookie (same as logout)
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : this.parseSessionCookie(req);
 
-    // If AuthGuard passed, the session is active
-    // A revoked/expired session would have been rejected by the guard
-    return ApiResponse.ok(
-      {
-        active: true,
-        revoked: false,
-        wipe: user.isBlocked,
-      },
-      'Session active',
-    );
+    if (!token) {
+      return ApiResponse.ok(
+        { active: false, revoked: true, wipe: false },
+        'No session token',
+      );
+    }
+
+    const result = await this.authService.checkSessionStatus(token);
+    return ApiResponse.ok(result, result.active ? 'Session active' : 'Session revoked');
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────

@@ -98,6 +98,15 @@ export function AcceptInviteScreen() {
                   Invite Token
                 </Typography.Body>
 
+                <StyledTextInput
+                  value={token}
+                  onChangeText={setToken}
+                  placeholder="Enter invite code"
+                  placeholderTextColor={theme.colorTextSecondary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+
                 {error && (
                   <ErrorText>
                     <LucideIcon

@@ -1,8 +1,26 @@
+/**
+ * App-level Axios interceptors for nks-mobile.
+ *
+ * Boundary with @nks/mobile-utils:
+ *   - mobile-utils/axios-interceptors: provides `createAxiosInstance()` — the factory
+ *     that wires up base URL, timeout, and the token-injection request interceptor.
+ *   - THIS FILE (nks-mobile/lib/axios-interceptors): sets up the 401/403 response
+ *     interceptors on the shared `API` instance. These reference app-level singletons
+ *     (tokenMutex, refreshTokenAttempt, offlineSession) that live in nks-mobile, not
+ *     in the shared library.
+ *
+ * Rule: never import nks-mobile singletons from mobile-utils, and never put app-level
+ * business logic (refresh queue, mutex, offline session) into mobile-utils.
+ */
+
 import { API, type AuthResponse } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
 import { offlineSession } from "./offline-session";
 import { sanitizeError } from "./log-sanitizer";
+import { createLogger } from "./logger";
 import { refreshTokenAttempt } from "./refresh-token-attempt";
+
+const log = createLogger("AxiosInterceptors");
 import { tokenMutex } from "./token-mutex";
 import { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 
@@ -52,6 +70,15 @@ function isAuthEndpoint(url: string): boolean {
  *   a successful interceptor-path refresh. Use this to sync Redux state so that
  *   auth.authResponse never holds stale session data.
  */
+/**
+ * Resets interceptor module state. Call on logout to prevent stale
+ * isRefreshing flag and queued requests from leaking across user sessions.
+ */
+export function resetInterceptorState(): void {
+  isRefreshing = false;
+  failedQueue = [];
+}
+
 export function setupAxiosInterceptors(
   onRefreshSuccess?: (authResponse: AuthResponse) => void,
 ) {
@@ -129,7 +156,7 @@ export function setupAxiosInterceptors(
                   onRefreshSuccess(envelope.data);
                 }
               } catch (syncErr) {
-                console.debug(
+                log.debug(
                   "[Interceptor] Redux sync after refresh failed:",
                   sanitizeError(syncErr),
                 );
@@ -143,7 +170,7 @@ export function setupAxiosInterceptors(
                 await offlineSession.extendValidity(session);
               }
             } catch (offlineErr) {
-              console.debug(
+                log.debug(
                 "[Interceptor] Offline session extension failed:",
                 sanitizeError(offlineErr),
               );
