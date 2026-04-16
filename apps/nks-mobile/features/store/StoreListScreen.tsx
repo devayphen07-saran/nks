@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   ListRenderItem,
   TouchableOpacity,
@@ -19,7 +19,8 @@ import {
   Column,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useAuth } from "../../store";
+import { useRootDispatch, useAuth } from "../../store";
+import { getMyStores } from "@nks/api-manager";
 import {
   HeaderControls,
   SearchRow,
@@ -31,25 +32,24 @@ import {
 
 interface Store {
   id: number;
+  guuid: string;
   storeName: string;
-  storeCode: string;
-  category?: string;
+  storeCode: string | null;
   isApproved: boolean;
+  isOwner: boolean;
   createdAt: string;
 }
 
 export function StoreListScreen() {
   const { theme } = useMobileTheme();
+  const dispatch = useRootDispatch();
   const authState = useAuth();
   const user = authState.authResponse?.user;
   const navigation = useNavigation();
 
-  // TODO: Connect to store state from Redux or API
-  const myStores: Store[] = [];
-  const invitedStores: Store[] = [];
-  const myStoresLoading = false;
-  const invitedStoresLoading = false;
-
+  const [myStores, setMyStores] = useState<Store[]>([]);
+  const [invitedStores, setInvitedStores] = useState<Store[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [filter, setFilter] = useState<"all" | "own" | "invited">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -57,7 +57,24 @@ export function StoreListScreen() {
     navigation.dispatch(DrawerActions.openDrawer());
   }, [navigation]);
 
-  // TODO: Dispatch getMyStores and getInvitedStores API calls on mount
+  const fetchStores = useCallback(() => {
+    setIsLoading(true);
+    dispatch(getMyStores({}))
+      .unwrap()
+      .then((res) => {
+        const data = res?.data;
+        setMyStores(data?.myStores ?? []);
+        setInvitedStores(data?.invitedStores ?? []);
+      })
+      .catch(() => {
+        // Silently fail — empty lists already shown
+      })
+      .finally(() => setIsLoading(false));
+  }, [dispatch]);
+
+  useEffect(() => {
+    fetchStores();
+  }, [fetchStores]);
 
   const displayStores =
     filter === "all"
@@ -66,31 +83,19 @@ export function StoreListScreen() {
         ? myStores
         : invitedStores;
 
-  const isLoading =
-    filter === "all"
-      ? myStoresLoading || invitedStoresLoading
-      : filter === "own"
-        ? myStoresLoading
-        : invitedStoresLoading;
-
-  const handleSelectStore = useCallback(
-    async (store: Store) => {
-      // TODO: Dispatch storeSelect API call
-      console.log("Selecting store:", store.id);
-      router.replace("/(protected)/(workspace)/(app)/(store)/store");
-    },
-    [],
+  const filteredStores = displayStores.filter(
+    (s) =>
+      s.storeName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.storeCode?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
+
+  const handleSelectStore = useCallback(async (store: Store) => {
+    router.replace("/(protected)/(workspace)/(app)/(store)/store");
+  }, []);
 
   const handleCreateStore = useCallback(() => {
     router.push("/(protected)/(workspace)/(app)/(store)/setup");
   }, []);
-
-  const filteredStores = displayStores.filter(
-    (s: any) =>
-      s.storeName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.storeCode?.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
 
   const renderItem: ListRenderItem<Store> = useCallback(
     ({ item }) => (
@@ -105,18 +110,17 @@ export function StoreListScreen() {
             </Typography.Body>
             <Typography.Caption type="secondary">
               {item.storeCode ?? "—"}
-              {item.category ? `  ·  ${item.category}` : ""}
             </Typography.Caption>
           </Column>
           {item.isApproved ? (
             <ApprovedBadge>
-              <Typography.Caption color="#16a34a" weight="semiBold">
+              <Typography.Caption color={theme.colorSuccess} weight="semiBold">
                 Active
               </Typography.Caption>
             </ApprovedBadge>
           ) : (
             <PendingBadge>
-              <Typography.Caption color="#d97706" weight="semiBold">
+              <Typography.Caption color={theme.colorWarning} weight="semiBold">
                 Pending
               </Typography.Caption>
             </PendingBadge>
@@ -129,7 +133,7 @@ export function StoreListScreen() {
         </Row>
       </StoreCard>
     ),
-    [theme],
+    [theme, handleSelectStore],
   );
 
   return (
@@ -196,14 +200,11 @@ export function StoreListScreen() {
         data={filteredStores}
         renderItem={renderItem}
         listProps={{
-          refetch: () => {
-            // TODO: Dispatch getMyStores and getInvitedStores API calls
-            console.log("Refetching stores...");
-          },
+          refetch: fetchStores,
           addNew: handleCreateStore,
         }}
         loaderProps={{
-          isLoading: isLoading,
+          isLoading,
           isFetching: false,
           loaderLength: 5,
           loadingCard: (
@@ -241,14 +242,13 @@ const StoreIconBg = styled.View`
 `;
 
 const ApprovedBadge = styled.View`
-  background-color: #dcfce7;
+  background-color: ${({ theme }) => theme.colorSuccessBg};
   border-radius: 20px;
   padding: 3px 8px;
 `;
 
 const PendingBadge = styled.View`
-  background-color: #fef3c7;
+  background-color: ${({ theme }) => theme.colorWarningBg};
   border-radius: 20px;
   padding: 3px 8px;
 `;
-

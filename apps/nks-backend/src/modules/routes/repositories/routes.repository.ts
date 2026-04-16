@@ -3,7 +3,7 @@ import { isNull, asc, eq, and, inArray, sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
 import * as schema from '../../../core/database/schema';
-import type { PartialRoute } from '../routes.types';
+import type { PartialRoute } from '../dto/routes.interface';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -15,7 +15,13 @@ export class RoutesRepository {
     const [store] = await this.db
       .select({ id: schema.store.id })
       .from(schema.store)
-      .where(eq(schema.store.guuid, guuid))
+      .where(
+        and(
+          eq(schema.store.guuid, guuid),
+          eq(schema.store.isActive, true),
+          isNull(schema.store.deletedAt),
+        ),
+      )
       .limit(1);
 
     return store ?? null;

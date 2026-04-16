@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { LookupsRepository } from './lookups.repository';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { LookupsRepository } from './repositories/lookups.repository';
 import {
   toSalutationResponse,
   toAddressTypeResponse,
@@ -21,208 +21,68 @@ import type {
   StoreCategoriesListResponse,
   CurrenciesListResponse,
   VolumesListResponse,
-  PlanTypesListResponse,
-  TaxLineStatusesListResponse,
-  EntityTypesListResponse,
-  NotificationStatusesListResponse,
-  StaffInviteStatusesListResponse,
-  BillingFrequenciesListResponse,
-  TaxRegistrationTypesListResponse,
-  TaxFilingFrequenciesListResponse,
 } from './dto/lookups-response.dto';
 import type {
   CreateLookupValueDto,
   UpdateLookupValueDto,
   LookupTypesListResponse,
   LookupValuesListResponse,
+  LookupValueAdminResponse,
 } from './dto/admin-lookups.dto';
 
 @Injectable()
 export class LookupsService {
   constructor(private readonly repository: LookupsRepository) {}
 
+  // ── Private helper ───────────────────────────────────────────────────────
+
+  private async getLookups<T, R>(
+    fetch: () => Promise<T[]>,
+    map: (item: T) => R,
+  ): Promise<R[]> {
+    const rows = await fetch();
+    return rows.map(map);
+  }
+
   // ── Public: code-value family (salutations, address types, …) ────────────
 
-  /**
-   * Get all salutation titles (Mr., Mrs., Ms., Dr., Prof., etc.).
-   * Used in user profiles and forms for formal addressing.
-   *
-   * @returns List of salutation lookup values sorted by display order
-   */
   async getSalutations(): Promise<SalutationsListResponse> {
-    const rows = await this.repository.getSalutations();
-    return rows.map(toSalutationResponse);
+    return this.getLookups(() => this.repository.getSalutations(), toSalutationResponse);
   }
 
-  /**
-   * Get all address types (Residential, Commercial, Billing, Shipping, etc.).
-   * Defines the categories for user addresses.
-   *
-   * @returns List of address type lookup values
-   */
   async getAddressTypes(): Promise<AddressTypesListResponse> {
-    const rows = await this.repository.getAddressTypes();
-    return rows.map(toAddressTypeResponse);
+    return this.getLookups(() => this.repository.getAddressTypes(), toAddressTypeResponse);
   }
 
-  /**
-   * Get all job designations (Manager, Assistant, Coordinator, etc.).
-   * Used for staff classification and authorization context.
-   *
-   * @returns List of designation lookup values
-   */
   async getDesignations(): Promise<DesignationsListResponse> {
-    const rows = await this.repository.getDesignations();
-    return rows.map(toDesignationResponse);
+    return this.getLookups(() => this.repository.getDesignations(), toDesignationResponse);
   }
 
-  /**
-   * Get all store legal entity types (Sole Proprietor, Partnership, Corporation, etc.).
-   * Used during store registration and KYC validation.
-   *
-   * @returns List of legal entity type lookup values
-   */
   async getStoreLegalTypes(): Promise<StoreLegalTypesListResponse> {
-    const rows = await this.repository.getStoreLegalTypes();
-    return rows.map(toStoreLegalTypeResponse);
+    return this.getLookups(() => this.repository.getStoreLegalTypes(), toStoreLegalTypeResponse);
   }
 
-  /**
-   * Get all store categories (Retail, Wholesale, E-commerce, etc.).
-   * Categorizes stores by their business model and operational scope.
-   *
-   * @returns List of store category lookup values
-   */
   async getStoreCategories(): Promise<StoreCategoriesListResponse> {
-    const rows = await this.repository.getStoreCategories();
-    return rows.map(toStoreCategoryResponse);
+    return this.getLookups(() => this.repository.getStoreCategories(), toStoreCategoryResponse);
   }
 
-  /**
-   * Get all countries for global operations.
-   * Primarily used for address forms and shipping destinations.
-   *
-   * @returns List of country lookup values
-   */
   async getCountries(): Promise<CountriesListResponse> {
-    const rows = await this.repository.getCountries();
-    return rows.map(toCountryResponse);
+    return this.getLookups(() => this.repository.getCountries(), toCountryResponse);
   }
 
-  /**
-   * Get all communication channels (Email, SMS, WhatsApp, Phone, etc.).
-   * Used for customer communication preferences and notification settings.
-   *
-   * @returns List of communication type lookup values
-   */
   async getCommunicationTypes(): Promise<CommunicationTypesListResponse> {
-    const rows = await this.repository.getCommunicationTypes();
-    return rows.map(toCommunicationTypeResponse);
+    return this.getLookups(() => this.repository.getCommunicationTypes(), toCommunicationTypeResponse);
   }
 
-  /**
-   * Get all currencies for multi-currency transactions.
-   * Used in product pricing, invoicing, and financial reports.
-   *
-   * @returns List of currency lookup values
-   */
   async getCurrencies(): Promise<CurrenciesListResponse> {
-    const rows = await this.repository.getCurrencies();
-    return rows.map(toCurrencyResponse);
+    return this.getLookups(() => this.repository.getCurrencies(), toCurrencyResponse);
   }
 
-  /**
-   * Get all volume/measurement units (kg, liter, piece, box, etc.).
-   * Used for inventory management and product specifications.
-   *
-   * @returns List of volume lookup values
-   */
   async getVolumes(): Promise<VolumesListResponse> {
-    const rows = await this.repository.getVolumes();
-    return rows.map(toVolumeResponse);
+    return this.getLookups(() => this.repository.getVolumes(), toVolumeResponse);
   }
 
   // ── Public: specialized lookups (not tied to code-value tables) ──────────
-
-  /**
-   * Get all billing plan types (Monthly, Quarterly, Annual, etc.).
-   * Defines subscription billing cycles and pricing models.
-   *
-   * @returns List of plan type lookup values
-   */
-  async getPlanTypes(): Promise<PlanTypesListResponse> {
-    return this.repository.getPlanTypes();
-  }
-
-  /**
-   * Get all tax line statuses (Taxable, Exempt, Zero-rated, Reverse charge, etc.).
-   * Used for tax calculation and compliance in invoicing.
-   *
-   * @returns List of tax line status lookup values
-   */
-  async getTaxLineStatuses(): Promise<TaxLineStatusesListResponse> {
-    return this.repository.getTaxLineStatuses();
-  }
-
-  /**
-   * Get all entity types (Customer, Vendor, Employee, Store, etc.).
-   * Categorizes different actors in the system for permission and audit purposes.
-   *
-   * @returns List of entity type lookup values
-   */
-  async getEntityTypes(): Promise<EntityTypesListResponse> {
-    return this.repository.getEntityTypes();
-  }
-
-  /**
-   * Get all notification statuses (Pending, Sent, Failed, Bounced, etc.).
-   * Tracks the delivery state of notifications across multiple channels.
-   *
-   * @returns List of notification status lookup values
-   */
-  async getNotificationStatuses(): Promise<NotificationStatusesListResponse> {
-    return this.repository.getNotificationStatuses();
-  }
-
-  /**
-   * Get all staff invitation statuses (Pending, Accepted, Declined, Expired, etc.).
-   * Tracks the lifecycle of staff invitation workflows.
-   *
-   * @returns List of staff invite status lookup values
-   */
-  async getStaffInviteStatuses(): Promise<StaffInviteStatusesListResponse> {
-    return this.repository.getStaffInviteStatuses();
-  }
-
-  /**
-   * Get all billing frequencies (Monthly, Quarterly, Annual, etc.).
-   * Defines recurring billing cycles for subscriptions and services.
-   *
-   * @returns List of billing frequency lookup values
-   */
-  async getBillingFrequencies(): Promise<BillingFrequenciesListResponse> {
-    return this.repository.getBillingFrequencies();
-  }
-
-  /**
-   * Get all tax registration types (VAT/GST, Pan, CIN, etc.).
-   * Defines types of tax registration numbers and identifiers.
-   *
-   * @returns List of tax registration type lookup values
-   */
-  async getTaxRegistrationTypes(): Promise<TaxRegistrationTypesListResponse> {
-    return this.repository.getTaxRegistrationTypes();
-  }
-
-  /**
-   * Get all tax filing frequencies (Monthly, Quarterly, Annual, etc.).
-   * Defines the frequency of tax filing obligations and deadlines.
-   *
-   * @returns List of tax filing frequency lookup values
-   */
-  async getTaxFilingFrequencies(): Promise<TaxFilingFrequenciesListResponse> {
-    return this.repository.getTaxFilingFrequencies();
-  }
 
   // ── Admin: Generic code-value lookups ───────────────────────────────────
 
@@ -248,34 +108,49 @@ export class LookupsService {
   async createLookupValue(
     categoryCode: string,
     dto: CreateLookupValueDto,
-  ): Promise<any> {
+  ): Promise<LookupValueAdminResponse> {
     const category = await this.repository.findCodeCategoryByCode(categoryCode);
     if (!category) {
-      throw new Error(`Category '${categoryCode}' not found`);
+      throw new NotFoundException(`Category '${categoryCode}' not found`);
     }
     return this.repository.createCodeValue(category.id, dto);
   }
 
   /**
-   * Update an existing lookup value.
+   * Update an existing lookup value, enforcing it belongs to the given category.
    */
   async updateLookupValue(
     categoryCode: string,
     id: number,
     dto: UpdateLookupValueDto,
-  ): Promise<any> {
-    // Verify the value exists in the category
+  ): Promise<LookupValueAdminResponse> {
+    const category = await this.repository.findCodeCategoryByCode(categoryCode);
+    if (!category) {
+      throw new NotFoundException(`Category '${categoryCode}' not found`);
+    }
     const value = await this.repository.findCodeValueById(id);
     if (!value) {
-      throw new Error(`Lookup value with ID ${id} not found`);
+      throw new NotFoundException(`Lookup value with ID ${id} not found`);
     }
-    return this.repository.updateCodeValue(id, dto);
+    const updated = await this.repository.updateCodeValue(id, dto);
+    if (!updated) {
+      throw new BadRequestException(`Failed to update lookup value ${id}`);
+    }
+    return updated;
   }
 
   /**
-   * Delete a lookup value.
+   * Delete a lookup value, enforcing it belongs to the given category.
    */
-  async deleteLookupValue(categoryCode: string, id: number): Promise<any> {
-    return this.repository.deleteCodeValue(id);
+  async deleteLookupValue(categoryCode: string, id: number): Promise<void> {
+    const category = await this.repository.findCodeCategoryByCode(categoryCode);
+    if (!category) {
+      throw new NotFoundException(`Category '${categoryCode}' not found`);
+    }
+    const value = await this.repository.findCodeValueById(id);
+    if (!value) {
+      throw new NotFoundException(`Lookup value with ID ${id} not found`);
+    }
+    await this.repository.deleteCodeValue(id);
   }
 }

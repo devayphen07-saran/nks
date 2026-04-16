@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { LocationRepository } from './location.repository';
+import { LocationRepository } from './repositories/location.repository';
 import {
   StateResponse,
   StateListResponse,
@@ -37,17 +37,17 @@ export class LocationService {
   }
 
   /**
-   * Get districts by state ID
+   * Get districts by state code (e.g. 'KA', 'MH')
    */
-  async getDistrictsByState(stateId: number): Promise<DistrictListResponse> {
-    // Verify state exists
-    const state = await this.locationRepository.getStateById(stateId);
+  async getDistrictsByStateCode(code: string): Promise<DistrictListResponse> {
+    StateCodeValidator.validate(code);
 
+    const state = await this.locationRepository.getStateByCode(code);
     if (!state) {
-      throw new NotFoundException(`State with ID ${stateId} not found`);
+      throw new NotFoundException(`State with code '${code}' not found`);
     }
 
-    return this.locationRepository.getDistrictsByState(stateId);
+    return this.locationRepository.getDistrictsByState(state.id);
   }
 
   /**

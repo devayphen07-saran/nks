@@ -6,35 +6,49 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { lt, sql } from 'drizzle-orm';
+import { InjectDb } from '../../core/database/inject-db.decorator';
+import * as schema from '../../core/database/schema';
+import { rateLimitEntries } from '../../core/database/schema';
+import { RATE_LIMIT_KEY } from '../decorators/rate-limit.decorator';
+
+type Db = NodePgDatabase<typeof schema>;
 
 /**
- * Rate Limiting Guard (standalone — does not require @nestjs/throttler)
+ * Rate Limiting Guard — database-backed sliding window.
  *
- * Simple in-memory IP-based rate limiter using a sliding window.
- * For production, install @nestjs/throttler and extend ThrottlerGuard instead.
+ * Uses the `rate_limit_entries` PostgreSQL table (migration 022) so that
+ * limits survive restarts and are shared across all replica instances.
  *
- * Usage:
+ * Limits: 100 requests per 15-minute window per IP.
+ * Cleanup: rows older than 1 hour are deleted on every check (fire-and-forget
+ * — does not block the request path).
+ *
+ * Must be registered as a NestJS provider (not instantiated with `new`):
+ *   providers: [RateLimitingGuard]
  *   @UseGuards(RateLimitingGuard)
- *   @Controller('auth')
- *   export class AuthController {}
+ *
+ * Note: not currently applied to any controller — register when needed.
+ * Note: if DB overhead is unacceptable, swap in @nestjs/throttler with
+ *   ThrottlerModule.forRoot([{ ttl: 900_000, limit: 100 }]), but that store
+ *   is still in-memory and resets on restart unless a Redis adapter is added.
  */
 @Injectable()
 export class RateLimitingGuard implements CanActivate {
   private readonly logger = new Logger(RateLimitingGuard.name);
 
-  /** IP addresses exempt from rate limiting */
   private readonly EXEMPT_IPS: string[] = [];
+  private readonly WINDOW_MS = 15 * 60 * 1000;       // 15 minutes
+  private readonly DEFAULT_MAX_REQUESTS = 100;
+  private readonly CLEANUP_TTL_MS = 60 * 60 * 1000;  // delete after 1 hour
 
-  /** In-memory request counts: IP → { count, windowStart } */
-  private readonly requests = new Map<
-    string,
-    { count: number; windowStart: number }
-  >();
-
-  /** Default: 100 requests per 15-minute window */
-  private readonly WINDOW_MS = 15 * 60 * 1000;
-  private readonly MAX_REQUESTS = 100;
+  constructor(
+    @InjectDb() private readonly db: Db,
+    private readonly reflector: Reflector,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
@@ -44,18 +58,54 @@ export class RateLimitingGuard implements CanActivate {
       return true;
     }
 
-    const now = Date.now();
-    const entry = this.requests.get(clientIp);
+    // Per-endpoint limit via @RateLimit(n), falls back to global default
+    const maxRequests =
+      this.reflector.getAllAndOverride<number | undefined>(RATE_LIMIT_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]) ?? this.DEFAULT_MAX_REQUESTS;
 
-    if (!entry || now - entry.windowStart > this.WINDOW_MS) {
-      this.requests.set(clientIp, { count: 1, windowStart: now });
-      return true;
-    }
+    // Key includes the route path so each endpoint has its own counter per IP
+    const key = `${clientIp}:${request.path}`;
 
-    entry.count++;
-    if (entry.count > this.MAX_REQUESTS) {
+    const now = new Date();
+    const windowCutoff = new Date(now.getTime() - this.WINDOW_MS);
+    const cleanupCutoff = new Date(now.getTime() - this.CLEANUP_TTL_MS);
+
+    // Fire-and-forget: delete expired rows without blocking the request
+    this.db
+      .delete(rateLimitEntries)
+      .where(lt(rateLimitEntries.windowStart, cleanupCutoff))
+      .catch(() => {});
+
+    // Upsert: insert first hit for this IP+path, or increment within window,
+    // or reset the window if the stored windowStart has expired.
+    const rows = await this.db
+      .insert(rateLimitEntries)
+      .values({ key, hits: 1, windowStart: now })
+      .onConflictDoUpdate({
+        target: rateLimitEntries.key,
+        set: {
+          // Reset window if expired; otherwise increment
+          hits: sql`CASE
+            WHEN ${rateLimitEntries.windowStart} < ${windowCutoff}
+            THEN 1
+            ELSE ${rateLimitEntries.hits} + 1
+          END`,
+          windowStart: sql`CASE
+            WHEN ${rateLimitEntries.windowStart} < ${windowCutoff}
+            THEN ${now}
+            ELSE ${rateLimitEntries.windowStart}
+          END`,
+        },
+      })
+      .returning({ hits: rateLimitEntries.hits });
+
+    const hits = rows[0]?.hits ?? 1;
+
+    if (hits > maxRequests) {
       this.logger.warn(
-        `Rate limit exceeded: ${clientIp} → ${request.method} ${request.path}`,
+        `Rate limit exceeded: ${clientIp} → ${request.method} ${request.path} (${hits}/${maxRequests} hits)`,
       );
       throw new HttpException('Too Many Requests', HttpStatus.TOO_MANY_REQUESTS);
     }

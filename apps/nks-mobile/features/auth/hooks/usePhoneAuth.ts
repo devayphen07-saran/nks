@@ -10,6 +10,7 @@ import {
   sanitizePhoneInput,
   INDIA_DIAL_CODE,
 } from "@nks/utils";
+import { setPendingOtpSession } from "../lib/otp-session";
 
 export function usePhoneAuth() {
   const dispatch = useRootDispatch();
@@ -32,12 +33,13 @@ export function usePhoneAuth() {
   const handleSendOtp = useCallback(() => {
     if (!canSubmit || submittingRef.current) return;
 
-    // ✅ CRITICAL FIX #5: Rate limit OTP send attempts
+    // Rate limit OTP send attempts (persisted across app restarts)
     const rateLimitCheck = OTP_RATE_LIMITS.send.check();
     if (!rateLimitCheck.allowed) {
       setErrorMessage(rateLimitCheck.message || "Please wait before requesting another OTP.");
       return;
     }
+    OTP_RATE_LIMITS.send.recordAttempt();
 
     // Validate phone format
     const validationResult = phoneSchema.safeParse({ phone: phone.trim() });
@@ -59,12 +61,8 @@ export function usePhoneAuth() {
       .then((response) => {
         const reqId = response?.data?.reqId;
         if (reqId) {
-          // Reset rate limiter on successful OTP send
-          OTP_RATE_LIMITS.send.reset();
-          router.push({
-            pathname: "/(auth)/otp",
-            params: { phone: fullPhone, reqId },
-          });
+          setPendingOtpSession(fullPhone, reqId);
+          router.push({ pathname: "/(auth)/otp" });
         } else {
           setErrorMessage("Invalid response from server");
         }

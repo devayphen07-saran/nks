@@ -6,8 +6,6 @@ import {
   Param,
   Body,
   UseGuards,
-  HttpCode,
-  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ApiResponse } from '../../common/utils/api-response';
@@ -17,7 +15,7 @@ import { RBACGuard } from '../../common/guards/rbac.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CreateRoleDto, UpdateRoleDto } from './dto';
-import type { RoleDetailResponse, RoleResponse, RoleResponseDto } from './dto/role-response.dto';
+import type { RoleDetailResponse, RoleResponseDto } from './dto/role-response.dto';
 import type { SessionUser } from 'src/modules/auth/interfaces/session-user.interface';
 
 @ApiTags('Roles')
@@ -35,7 +33,6 @@ export class RolesController {
    */
   @Post()
   @Roles('STORE_OWNER')
-  @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new role (STORE_OWNER)' })
   async createRole(
     @Body() dto: CreateRoleDto,
@@ -79,22 +76,7 @@ export class RolesController {
     @Body() dto: UpdateRoleDto,
     @CurrentUser() user: SessionUser,
   ): Promise<ApiResponse<RoleResponseDto>> {
-    const role = await this.rolesService.updateRoleByGuuid(
-      guuid,
-      dto,
-      user.userId,
-    );
-
-    if (
-      dto.entityPermissions &&
-      Object.keys(dto.entityPermissions).length > 0
-    ) {
-      await this.rolesService.updateEntityPermissions(
-        role.id,
-        dto.entityPermissions,
-      );
-    }
-
+    const role = await this.rolesService.updateRoleByGuuid(guuid, dto, user.userId);
     return ApiResponse.ok(role, 'Role updated successfully');
   }
 }

@@ -16,16 +16,16 @@ export class StoreSelectDto extends createZodDto(StoreSelectSchema) {}
  *
  * Password is required when adding email, optional otherwise.
  */
-export const ProfileCompleteSchema = z.object({
+export const OnboardingCompleteSchema = z.object({
   name: z.string().min(2), // Required - update user name
   email: z.string().email().optional(), // Optional - add/update email
   phoneNumber: z.string().optional(), // Optional - add/update phone
   password: z.string().min(8).optional(), // Optional - required if adding email
 });
 
-export class ProfileCompleteDto extends createZodDto(ProfileCompleteSchema) {}
+export class OnboardingCompleteDto extends createZodDto(OnboardingCompleteSchema) {}
 
-export class ProfileCompleteResponseDto {
+export class OnboardingCompleteResponseDto {
   // True if email was provided and needs verification OTP
   emailVerificationSent: boolean;
   // True if phone was provided and needs verification OTP

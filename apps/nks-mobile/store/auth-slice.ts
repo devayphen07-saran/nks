@@ -1,5 +1,6 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { AuthResponse } from "@nks/api-manager";
+import { initializeAuth } from "./initialize-auth";
 export interface AuthState {
   isInitializing: boolean;
   isAuthenticated: boolean;
@@ -34,14 +35,14 @@ const authSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      .addCase("auth/bootstrap/pending", (state) => {
+      .addCase(initializeAuth.pending, (state) => {
         state.isInitializing = true;
       })
-      .addCase("auth/bootstrap/fulfilled", () => {
+      .addCase(initializeAuth.fulfilled, () => {
         // isInitializing is set to false by setCredentials or setUnauthenticated
         // dispatched inside the thunk
       })
-      .addCase("auth/bootstrap/rejected", (state) => {
+      .addCase(initializeAuth.rejected, (state) => {
         state.isInitializing = false;
         state.isAuthenticated = false;
         state.authResponse = null;
@@ -51,4 +52,13 @@ const authSlice = createSlice({
 
 export const { setCredentials, logout, setUnauthenticated } = authSlice.actions;
 export const authReducer = authSlice.reducer;
+
+/**
+ * Derived selector — true when the authenticated user has the SUPER_ADMIN role.
+ * Computed from roles rather than stored as redundant state.
+ */
+export const selectIsSuperAdmin = (state: { auth: AuthState }): boolean =>
+  state.auth.authResponse?.access?.roles?.some(
+    (r) => r.roleCode === "SUPER_ADMIN",
+  ) ?? false;
 

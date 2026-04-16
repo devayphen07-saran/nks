@@ -1,106 +1,42 @@
 import { Global, Module } from '@nestjs/common';
 import { AuthController } from './controllers/auth.controller';
 import { OtpController } from './controllers/otp.controller';
-import { AuthService } from './services/auth.service';
-import { OtpService } from './services/otp.service';
-import { OtpAuthOrchestrator } from './services/otp-auth-orchestrator.service';
-import { UserCreationService } from './services/user-creation.service';
-import { AuthFlowOrchestrator } from './services/auth-flow-orchestrator.service';
-import { Msg91Service } from './services/msg91.service';
-import { PasswordService } from './services/password.service';
-import { OtpRateLimitService } from './services/otp-rate-limit.service';
-import { SessionCleanupService } from './services/session-cleanup.service';
-import { RefreshTokenService } from './services/refresh-token.service';
-import { PermissionsService } from './services/permissions.service';
-import { SessionService } from './services/session.service';
-import { TokenService } from './services/token.service';
-import { SessionsRepository } from './repositories/sessions.repository';
-import { AuthUsersRepository } from './repositories/auth-users.repository';
-import { OtpRepository } from './repositories/otp.repository';
-import { OtpRateLimitRepository } from './repositories/otp-rate-limit.repository';
-import { RefreshTokenRepository } from './repositories/refresh-token.repository';
-import { AuthProviderRepository } from './repositories/auth-provider.repository';
-import { SessionCleanupRepository } from './repositories/session-cleanup.repository';
+import { AuthCoreModule } from './auth-core.module';
+import { SecurityModule } from './services/security/security.module';
+import { ProvidersModule } from './services/providers/providers.module';
+import { AuthPermissionsModule } from './services/permissions/permissions.module';
+import { OtpModule } from './services/otp/otp.module';
+import { AuthSessionModule } from './services/session/session.module';
+import { AuthTokenModule } from './services/token/token.module';
+import { AuthFlowsModule } from './services/flows/flows.module';
 import { RolesModule } from '../roles/roles.module';
 import { RoutesModule } from '../routes/routes.module';
-import { getAuth } from './config/better-auth';
-import { BETTER_AUTH_TOKEN } from './auth.constants';
-import { DATABASE_TOKEN } from '../../core/database/database.constants';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../../core/database/schema';
-import { JWTConfigService } from '../../config/jwt.config';
 
 @Global()
 @Module({
-  imports: [RolesModule, RoutesModule],
-  controllers: [OtpController, AuthController],
-  providers: [
-    // Core auth services
-    AuthService,
-    OtpService,
-    OtpAuthOrchestrator,
-    UserCreationService,
-    AuthFlowOrchestrator,
-    PasswordService,
-    PermissionsService,
-
-    // New refactored services
-    SessionService,
-    TokenService,
-
-    // Repositories
-    SessionsRepository,
-    AuthUsersRepository,
-    OtpRepository,
-    OtpRateLimitRepository,
-    RefreshTokenRepository,
-    AuthProviderRepository,
-    SessionCleanupRepository,
-
-    // Supporting services
-    Msg91Service,
-    OtpRateLimitService,
-    SessionCleanupService,
-    RefreshTokenService,
-    JWTConfigService,
-
-    // BetterAuth factory
-    {
-      provide: BETTER_AUTH_TOKEN,
-      inject: [DATABASE_TOKEN],
-      useFactory: (db: NodePgDatabase<typeof schema>) => getAuth(db),
-    },
+  imports: [
+    RolesModule,
+    RoutesModule,
+    AuthCoreModule,
+    SecurityModule,
+    ProvidersModule,
+    AuthPermissionsModule,
+    OtpModule,
+    AuthSessionModule,
+    AuthTokenModule,
+    AuthFlowsModule,
   ],
+  controllers: [OtpController, AuthController],
   exports: [
-    // Core auth services
-    AuthService,
-    OtpService,
-    UserCreationService,
-    AuthFlowOrchestrator,
-    PasswordService,
-    PermissionsService,
-
-    // New refactored services
-    SessionService,
-    TokenService,
-
-    // Repositories
-    SessionsRepository,
-    AuthUsersRepository,
-    OtpRepository,
-    OtpRateLimitRepository,
-    RefreshTokenRepository,
-    AuthProviderRepository,
-    SessionCleanupRepository,
-
-    // Supporting services
-    OtpRateLimitService,
-    SessionCleanupService,
-    RefreshTokenService,
-    JWTConfigService,
-
-    // BetterAuth
-    BETTER_AUTH_TOKEN,
+    // Re-export submodules so all their providers are globally available
+    AuthCoreModule,
+    SecurityModule,
+    ProvidersModule,
+    AuthPermissionsModule,
+    OtpModule,
+    AuthSessionModule,
+    AuthTokenModule,
+    AuthFlowsModule,
   ],
 })
 export class AuthModule {}

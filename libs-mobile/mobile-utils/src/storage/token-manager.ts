@@ -70,49 +70,21 @@ export const tokenManager = {
 
   /**
    * Persists the auth response to SecureStore wrapped in a SessionEnvelope.
-   * If the payload exceeds MAX_BYTES, roles are compressed to essential fields only.
-   * fetchedAt is set to current time (not 0) to avoid treating as stale.
+   * The optimized AuthResponse (without metadata/profile fields) fits comfortably
+   * under the 2KB SecureStore limit for all user types.
    */
   async persistSession(data: any): Promise<void> {
     const envelope: SessionEnvelope<any> = { data, fetchedAt: Date.now() };
     const json = JSON.stringify(envelope);
 
-    if (json.length <= MAX_BYTES) {
-      await saveSecureItem(SESSION_KEY, json);
-      return;
-    }
-
-    // CRITICAL FIX #2: Payload too large — compress roles to essential fields only
-    // Keep roleCode and storeId (needed for offline operations)
-    // Drop: storeName, isPrimary, assignedAt, expiresAt (can be fetched on refresh)
-    const compressedRoles = (data.access?.roles ?? []).map((r: any) => ({
-      roleCode: r.roleCode,
-      storeId: r.storeId,
-    }));
-
-    const slim: SessionEnvelope<any> = {
-      data: {
-        ...data,
-        access: {
-          ...(data.access ?? {}),
-          roles: compressedRoles,
-          // Keep permissions if present (usually empty, but preserve if exists)
-        },
-      },
-      fetchedAt: Date.now(), // FIXED: Keep current time, not 0 (data is still fresh)
-    };
-
-    const slimJson = JSON.stringify(slim);
-    if (slimJson.length > MAX_BYTES) {
-      // Still too large — strip permissions as well
-      slim.data.access.permissions = [];
+    if (json.length > MAX_BYTES) {
       console.warn(
-        "[Auth] Session data very large even after compression. Stripping permissions.",
-        { originalSize: json.length, compressedSize: slimJson.length },
+        '[Auth] Session data exceeds SecureStore limit — this should not happen with optimized AuthResponse.',
+        { size: json.length, max: MAX_BYTES },
       );
     }
 
-    await saveSecureItem(SESSION_KEY, JSON.stringify(slim));
+    await saveSecureItem(SESSION_KEY, json);
   },
 
   /**

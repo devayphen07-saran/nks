@@ -1,5 +1,5 @@
 import type { RouteTreeDto, UserRoutesResponseDto, StoreRoutesResponseDto } from '../dto/route-response.dto';
-import type { PartialRoute } from '../routes.types';
+import type { PartialRoute } from '../dto/routes.interface';
 import type { SessionUser } from '../../auth/interfaces/session-user.interface';
 
 export class RouteMapper {

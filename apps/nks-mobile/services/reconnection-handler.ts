@@ -142,10 +142,12 @@ export async function handleReconnection(dispatch: AppDispatch): Promise<void> {
       log.warn("JWKS refresh failed (non-blocking):", err);
     });
 
+    // Load session once — used by both Step 4 (sync) and Step 5 (Redux restore)
+    const envelope = await tokenManager.loadSession<AuthResponse>().catch(() => null);
+
     // ── Step 4: Sync catch-up ──────────────────────────────────────────────
     log.info("Step 4: running sync...");
     try {
-      const envelope = await tokenManager.loadSession<AuthResponse>();
       const storeGuuid = envelope?.data?.session?.defaultStore?.guuid;
 
       if (storeGuuid) {
@@ -159,14 +161,9 @@ export async function handleReconnection(dispatch: AppDispatch): Promise<void> {
 
     // ── Step 5: Restore Redux auth state ────────────────────────────────────
     log.info("Step 5: restoring auth state...");
-    try {
-      const envelope = await tokenManager.loadSession<AuthResponse>();
-      if (envelope?.data) {
-        dispatch(setCredentials(envelope.data));
-        log.info("Redux auth state restored");
-      }
-    } catch (err) {
-      log.warn("Auth state restore failed (non-blocking):", err);
+    if (envelope?.data) {
+      dispatch(setCredentials(envelope.data));
+      log.info("Redux auth state restored");
     }
 
     log.info("Reconnection sequence complete");

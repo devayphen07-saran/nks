@@ -4,7 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
-import { CodesRepository } from './codes.repository';
+import { CodesRepository } from './repositories/codes.repository';
 import { RolesService } from '../roles/roles.service';
 import type {
   CodeCategoryResponseDto,
@@ -89,20 +89,30 @@ export class CodesService {
   async updateValue(
     id: number,
     data: { label?: string; description?: string; sortOrder?: number },
+    userId: number,
   ): Promise<CodeValueResponseDto> {
-    // SECURITY: Repository guards against system code modifications
-    // updateValue() only succeeds if isSystem = false
+    const existing = await this.repo.findValueById(id);
+    if (!existing)
+      throw new NotFoundException(`Code value ${id} not found`);
+    if (existing.isSystem)
+      throw new ForbiddenException('System values cannot be edited');
+
+    // SECURITY: If this is a store-scoped value, caller must own that store
+    if (existing.storeFk) {
+      const isOwner = await this.rolesService.isStoreOwner(userId, existing.storeFk);
+      if (!isOwner)
+        throw new ForbiddenException('You do not own this store');
+    }
+
     const updated = await this.repo.updateValue(id, data);
     if (!updated)
-      throw new BadRequestException(
-        `Value not found or is a system value — cannot edit`,
-      );
+      throw new BadRequestException('Failed to update code value');
     return updated;
   }
 
   async deleteValue(id: number, deletedBy: number): Promise<void> {
-    // SECURITY: Repository guards against system code deletion
-    // softDeleteValue() only succeeds if isSystem = false
-    await this.repo.softDeleteValue(id, deletedBy);
+    const deleted = await this.repo.softDeleteValue(id, deletedBy);
+    if (!deleted)
+      throw new NotFoundException(`Code value ${id} not found or cannot be deleted`);
   }
 }

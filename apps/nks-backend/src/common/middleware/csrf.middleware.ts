@@ -1,6 +1,8 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Request, Response, NextFunction } from 'express';
 import * as crypto from 'crypto';
+import { parseCookieHeader } from '../utils/cookie.utils';
 
 /**
  * CSRF Protection Middleware
@@ -15,12 +17,31 @@ import * as crypto from 'crypto';
  */
 @Injectable()
 export class CsrfMiddleware implements NestMiddleware {
+  constructor(private readonly configService: ConfigService) {}
+
   // Methods that require CSRF validation
   private readonly UNSAFE_METHODS = ['POST', 'PUT', 'DELETE', 'PATCH'];
 
-  // Endpoints that bypass CSRF check (login, register)
+  // Unauthenticated endpoints that bypass CSRF check.
+  // These are public routes that neither read cookies for auth nor change
+  // server-side state on behalf of a logged-in user — the classic CSRF threat.
+  //
+  // Authenticated cookie-using routes (token/verify, session DELETE) are
+  // intentionally excluded so they still require a valid CSRF token.
   private readonly CSRF_EXEMPT_ROUTES = [
-    '/api/v1/auth/',
+    '/auth/login',
+    '/auth/register',
+    '/auth/refresh-token',
+    '/auth/logout',
+    '/auth/sync-time',
+    '/auth/session-status',
+    '/auth/otp/send',
+    '/auth/otp/verify',
+    '/auth/otp/resend',
+    '/auth/otp/email/send',
+    '/auth/otp/email/verify',
+    '/auth/.well-known/jwks.json',
+    '/auth/mobile-jwks',
   ];
 
   use(req: Request, res: Response, next: NextFunction) {
@@ -46,7 +67,14 @@ export class CsrfMiddleware implements NestMiddleware {
           req.body?.csrfToken ||
           req.query.csrfToken;
 
-        if (!providedToken || providedToken !== csrfToken) {
+        const tokenMatch =
+          typeof providedToken === 'string' &&
+          providedToken.length === csrfToken.length &&
+          crypto.timingSafeEqual(
+            Buffer.from(providedToken),
+            Buffer.from(csrfToken),
+          );
+        if (!tokenMatch) {
           return res.status(403).json({
             success: false,
             message: 'CSRF token missing or invalid',
@@ -68,8 +96,8 @@ export class CsrfMiddleware implements NestMiddleware {
     if (!token) {
       token = crypto.randomBytes(32).toString('hex');
       res.cookie('csrf_token', token, {
-        httpOnly: false, // Frontend needs to read this
-        secure: process.env['NODE_ENV'] === 'production',
+        httpOnly: true, // JS cannot read — token delivered via X-CSRF-Token response header
+        secure: this.configService.get<string>('NODE_ENV') === 'production',
         sameSite: 'strict',
         maxAge: 3600 * 1000, // 1 hour
         path: '/',
@@ -79,29 +107,15 @@ export class CsrfMiddleware implements NestMiddleware {
     return token;
   }
 
-  /**
-   * Parse cookies from request header
-   */
   private parseCookies(req: Request): Record<string, string> {
-    const cookies: Record<string, string> = {};
-    const cookieHeader = req.headers.cookie || '';
-
-    cookieHeader.split(';').forEach((cookie) => {
-      const [name, value] = cookie.trim().split('=');
-      if (name && value) {
-        cookies[name] = decodeURIComponent(value);
-      }
-    });
-
-    return cookies;
+    return parseCookieHeader(req.headers.cookie ?? '');
   }
 
   /**
-   * Check if route is exempt from CSRF validation
+   * Check if route is exempt from CSRF validation.
+   * Uses exact match against the explicit allowlist — no prefix matching.
    */
   private isExemptRoute(path: string): boolean {
-    return this.CSRF_EXEMPT_ROUTES.some((exemptRoute) =>
-      path.startsWith(exemptRoute),
-    );
+    return this.CSRF_EXEMPT_ROUTES.includes(path);
   }
 }

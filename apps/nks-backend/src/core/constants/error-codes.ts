@@ -25,10 +25,32 @@ export const ErrorCodes = {
   AUTH_SESSION_NOT_FOUND: 'AUTH-NOT-FOUND-001',
   AUTH_USER_NOT_FOUND: 'AUTH-NOT-FOUND-002',
 
-  // Auth - Other Errors
-  AUTH_TOKEN_EXPIRED: 'AUTH-ERR-001',
-  AUTH_INVALID_CREDENTIALS: 'AUTH-ERR-002',
-  AUTH_REFRESH_TOKEN_REVOKED: 'AUTH-ERR-003',
+  // Auth - Account Errors
+  AUTH_ACCOUNT_BLOCKED: 'AUTH-ERR-001',
+  AUTH_ACCOUNT_LOCKED: 'AUTH-ERR-002',
+  AUTH_EMAIL_ALREADY_IN_USE: 'AUTH-ERR-003',
+  AUTH_PASSWORD_REQUIRED: 'AUTH-ERR-004',
+
+  // Auth - Session Errors
+  AUTH_TOKEN_EXPIRED: 'AUTH-ERR-010',
+  AUTH_INVALID_CREDENTIALS: 'AUTH-ERR-011',
+  AUTH_REFRESH_TOKEN_REVOKED: 'AUTH-ERR-012',
+  AUTH_INVALID_SESSION_TOKEN: 'AUTH-ERR-013',
+  AUTH_FORBIDDEN_SESSION: 'AUTH-ERR-014',
+  AUTH_INVALID_SESSION_ID: 'AUTH-ERR-015',
+  AUTH_SESSION_CREATE_FAILED: 'AUTH-ERR-016',
+  AUTH_SESSION_EXPIRED: 'AUTH-ERR-017',
+  AUTH_DEVICE_MISMATCH: 'AUTH-ERR-018',
+  AUTH_REFRESH_TOKEN_EXPIRED: 'AUTH-ERR-019',
+  AUTH_SESSION_ROTATION_FAILED: 'AUTH-ERR-020',
+  AUTH_INVALID_JWT_AUDIENCE: 'AUTH-ERR-021',
+  AUTH_SESSION_COMPROMISED: 'AUTH-ERR-022',
+  AUTH_INVALID_REFRESH_TOKEN: 'AUTH-ERR-023',
+
+  // Auth - OTP Errors
+  AUTH_OTP_NOT_FOUND: 'AUTH-ERR-030',
+  AUTH_OTP_ALREADY_USED: 'AUTH-ERR-031',
+  AUTH_OTP_EXPIRED: 'AUTH-ERR-032',
 
   // Location - Validation Errors
   LOC_INVALID_STATE_CODE: 'LOC-VAL-001',
@@ -97,13 +119,53 @@ export const ErrorMessages = {
   [ErrorCodes.AUTH_USER_NOT_FOUND]:
     'User not found.',
 
-  // Auth - Other
+  // Auth - Account
+  [ErrorCodes.AUTH_ACCOUNT_BLOCKED]:
+    'Account is blocked. Please contact support.',
+  [ErrorCodes.AUTH_ACCOUNT_LOCKED]:
+    'Account locked due to too many failed attempts. Please try again later.',
+  [ErrorCodes.AUTH_EMAIL_ALREADY_IN_USE]:
+    'Email is already in use.',
+  [ErrorCodes.AUTH_PASSWORD_REQUIRED]:
+    'Password is required when adding an email address.',
+
+  // Auth - Session
   [ErrorCodes.AUTH_TOKEN_EXPIRED]:
     'Token has expired.',
   [ErrorCodes.AUTH_INVALID_CREDENTIALS]:
     'Invalid credentials.',
   [ErrorCodes.AUTH_REFRESH_TOKEN_REVOKED]:
     'Refresh token has been revoked. All sessions terminated.',
+  [ErrorCodes.AUTH_INVALID_SESSION_TOKEN]:
+    'Invalid session token.',
+  [ErrorCodes.AUTH_FORBIDDEN_SESSION]:
+    'You can only manage your own sessions.',
+  [ErrorCodes.AUTH_INVALID_SESSION_ID]:
+    'Invalid session ID.',
+  [ErrorCodes.AUTH_SESSION_CREATE_FAILED]:
+    'Failed to create session.',
+  [ErrorCodes.AUTH_SESSION_EXPIRED]:
+    'Session has expired.',
+  [ErrorCodes.AUTH_DEVICE_MISMATCH]:
+    'Refresh token device mismatch.',
+  [ErrorCodes.AUTH_REFRESH_TOKEN_EXPIRED]:
+    'Refresh token has expired.',
+  [ErrorCodes.AUTH_SESSION_ROTATION_FAILED]:
+    'Failed to rotate session.',
+  [ErrorCodes.AUTH_INVALID_JWT_AUDIENCE]:
+    'Invalid JWT audience.',
+  [ErrorCodes.AUTH_SESSION_COMPROMISED]:
+    'Session compromised. Please log in again.',
+  [ErrorCodes.AUTH_INVALID_REFRESH_TOKEN]:
+    'Invalid refresh token.',
+
+  // Auth - OTP
+  [ErrorCodes.AUTH_OTP_NOT_FOUND]:
+    'OTP request not found or already used.',
+  [ErrorCodes.AUTH_OTP_ALREADY_USED]:
+    'OTP has already been used.',
+  [ErrorCodes.AUTH_OTP_EXPIRED]:
+    'OTP has expired.',
 
   // Location - Validation
   [ErrorCodes.LOC_INVALID_STATE_CODE]:
@@ -159,3 +221,14 @@ export const ErrorMessages = {
   [ErrorCodes.COD_VALUE_NOT_FOUND]:
     'Code value not found.',
 };
+
+/**
+ * Returns the standard { errorCode, message } exception payload for a given ErrorCodes key.
+ * Keeps the code+message pair in sync — no chance of mismatching them at call sites.
+ *
+ * Usage:  throw new UnauthorizedException(errPayload('AUTH_INVALID_CREDENTIALS'));
+ */
+export function errPayload(key: keyof typeof ErrorCodes): { errorCode: string; message: string } {
+  const errorCode = ErrorCodes[key];
+  return { errorCode, message: ErrorMessages[errorCode] };
+}

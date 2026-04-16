@@ -1,3 +1,15 @@
+// === SSL PIN ROTATION RUNBOOK ===
+// 1. Generate new pin hash from the new certificate:
+//    openssl x509 -in cert.pem -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl enc -base64
+// 2. Update EXPO_PUBLIC_SSL_PIN_2 with the new pin (keep PIN_1 as the current active pin)
+// 3. Release app update with the new backup pin
+// 4. After sufficient adoption (>90% of users on new version), swap:
+//    - Move new pin to EXPO_PUBLIC_SSL_PIN_1
+//    - Generate next backup pin for EXPO_PUBLIC_SSL_PIN_2
+// 5. Update EXPO_PUBLIC_SSL_PIN_EXPIRY to the new certificate's expiry date
+// 6. Monitor ssl-pinning-failure logs for MITM detection
+// CRITICAL: Must rotate before EXPO_PUBLIC_SSL_PIN_EXPIRY date or users get locked out
+
 /**
  * SSL Public Key Pinning — prevents MITM attacks by rejecting TLS connections
  * whose server certificate doesn't match a known public key hash.
@@ -99,7 +111,10 @@ export async function initializePinning(): Promise<void> {
     });
   } catch (err) {
     log.error("Failed to initialize SSL pinning:", err);
-    // Don't throw — pinning failure should not block app launch in development.
-    // In production, consider throwing here to enforce the security requirement.
+    // In production, SSL pinning failure is a hard security error — abort launch.
+    // In development, log and continue so Expo Go / local dev still works.
+    if (!__DEV__) {
+      throw err;
+    }
   }
 }

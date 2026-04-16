@@ -1,8 +1,9 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
+import { ErrorCodes, ErrorMessages } from '../../core/constants/error-codes';
 import { UserPreferencesValidator } from './validators';
 import { AuthorizationValidator } from '../../common/validators/authorization.validator';
 import { UserPreferencesRepository } from './repositories/user-preferences.repository';
-import type { UserPreferences } from '../../core/database/schema/user-preferences';
+import { UserPreferences } from '../../core/database/schema';
 
 @Injectable()
 export class UserPreferencesService {
@@ -44,7 +45,11 @@ export class UserPreferencesService {
     isSuperAdmin: boolean = false,
   ) {
     // Authorization check: User can only modify their own preferences unless SUPER_ADMIN
-    AuthorizationValidator.validateOwnResource(userId, modifiedBy, isSuperAdmin);
+    AuthorizationValidator.validateOwnResource(
+      userId,
+      modifiedBy,
+      isSuperAdmin,
+    );
 
     return this.userPreferencesRepository.update(userId, {
       ...data,
@@ -95,7 +100,10 @@ export class UserPreferencesService {
   ) {
     // Authorization check: User can only delete their own preferences unless SUPER_ADMIN
     if (userId !== deletedBy && !isSuperAdmin) {
-      throw new ForbiddenException('You can only delete your own preferences');
+      throw new ForbiddenException({
+        errorCode: ErrorCodes.GEN_FORBIDDEN,
+        message: ErrorMessages[ErrorCodes.GEN_FORBIDDEN],
+      });
     }
 
     return this.userPreferencesRepository.softDelete(userId, deletedBy);

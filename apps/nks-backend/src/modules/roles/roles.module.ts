@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { RolesService } from './roles.service';
-import { RolesRepository } from './roles.repository';
-import { RoleEntityPermissionRepository } from './role-entity-permission.repository';
+import { RolesRepository } from './repositories/roles.repository';
+import { RoleEntityPermissionRepository } from './repositories/role-entity-permission.repository';
 import { RolesController } from './roles.controller';
 import { RBACGuard } from '../../common/guards/rbac.guard';
 

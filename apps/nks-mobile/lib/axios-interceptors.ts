@@ -39,6 +39,12 @@ let failedQueue: Array<{
   reject: (error: unknown) => void;
 }> = [];
 
+// Track interceptor IDs so we can eject before re-registering on remount.
+// Without this, every call to setupAxiosInterceptors stacks another interceptor
+// (hot reload in dev, or React StrictMode double-mounting AuthProvider).
+let _requestInterceptorId: number | null = null;
+let _responseInterceptorId: number | null = null;
+
 function processQueue(error: unknown, token: string | null) {
   failedQueue.forEach(({ resolve, reject }) => {
     if (token) resolve(token);
@@ -82,8 +88,17 @@ export function resetInterceptorState(): void {
 export function setupAxiosInterceptors(
   onRefreshSuccess?: (authResponse: AuthResponse) => void,
 ) {
+  // Eject any previously registered interceptors before re-registering.
+  // Without this, every remount (hot reload, React StrictMode) stacks duplicates.
+  if (_requestInterceptorId !== null) {
+    API.interceptors.request.eject(_requestInterceptorId);
+  }
+  if (_responseInterceptorId !== null) {
+    API.interceptors.response.eject(_responseInterceptorId);
+  }
+
   // ─── Request Interceptor ────────────────────────────────────────────────────
-  API.interceptors.request.use(
+  _requestInterceptorId = API.interceptors.request.use(
     async (config: InternalAxiosRequestConfig) => {
       const token = tokenManager.get();
       if (token && config.headers) {
@@ -95,7 +110,7 @@ export function setupAxiosInterceptors(
   );
 
   // ─── Response Interceptor ───────────────────────────────────────────────────
-  API.interceptors.response.use(
+  _responseInterceptorId = API.interceptors.response.use(
     (response: AxiosResponse) => response,
     async (error: AxiosError) => {
       const originalRequest = error.config as InternalAxiosRequestConfig & {

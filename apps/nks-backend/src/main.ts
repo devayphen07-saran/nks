@@ -38,6 +38,7 @@ async function bootstrap() {
   // ✅ X-Frame-Options - prevents clickjacking
   // ✅ X-Content-Type-Options - prevents MIME type sniffing
   // ✅ Strict-Transport-Security - enforces HTTPS
+  // ✅ Permissions-Policy - restricts browser APIs not needed by a POS app
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -61,8 +62,25 @@ async function bootstrap() {
       },
       frameguard: { action: 'deny' }, // Prevent clickjacking
       referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+      permittedCrossDomainPolicies: false,
     }),
   );
+
+  // Permissions-Policy — deny browser APIs not needed by a POS application.
+  // Helmet does not set this header natively; applied separately.
+  app.use((_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
+    res.setHeader(
+      'Permissions-Policy',
+      'camera=(), microphone=(), geolocation=(), usb=(), payment=(), fullscreen=()',
+    );
+    next();
+  });
+
+  // ─── Trust Proxy ──────────────────────────────────────────────────────────
+  // Required behind reverse proxies (nginx, AWS ALB) for accurate IP extraction
+  // via req.ip. Without this, req.ip is the proxy's IP, breaking rate limiting
+  // and audit logs. Value '1' trusts one hop (the immediate load balancer).
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
 
   // ─── Global Prefix ────────────────────────────────────────────────────────
   app.setGlobalPrefix('api/v1');
@@ -77,7 +95,7 @@ async function bootstrap() {
 
   // ─── CSRF Protection ──────────────────────────────────────────────────────
   // ✅ Prevents cross-site request forgery attacks
-  const csrfMiddleware = new CsrfMiddleware();
+  const csrfMiddleware = new CsrfMiddleware(configService);
   app.use(csrfMiddleware.use.bind(csrfMiddleware));
 
   // ─── Swagger ──────────────────────────────────────────────────────────────

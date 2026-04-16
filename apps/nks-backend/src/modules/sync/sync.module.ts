@@ -1,13 +1,17 @@
 import { Module } from '@nestjs/common';
 import { RolesModule } from '../roles/roles.module';
+import { AuthCoreModule } from '../auth/auth-core.module';
 import { SyncController } from './sync.controller';
 import { SyncService } from './sync.service';
-import { SyncRepository } from './sync.repository';
+import { SyncRepository } from './repositories/sync.repository';
+import { RevokedDevicesRepository } from '../auth/repositories/revoked-devices.repository';
 
 @Module({
-  imports: [RolesModule],
+  imports: [RolesModule, AuthCoreModule],
   controllers: [SyncController],
-  providers: [SyncService, SyncRepository],
+  // RevokedDevicesRepository is also exported by AuthCoreModule; listed here
+  // explicitly so the provider token is unambiguous within this module.
+  providers: [SyncService, SyncRepository, RevokedDevicesRepository],
   exports: [SyncService, SyncRepository],
 })
 export class SyncModule {}

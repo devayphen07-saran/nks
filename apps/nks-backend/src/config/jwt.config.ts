@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import { RSAKeyManager } from '../core/crypto/rsa-keys';
 
 export interface JWTPayload {
@@ -49,6 +51,12 @@ export class JWTConfigService {
   private fallbackKeys: FallbackKey[] = [];
   private readonly FALLBACK_KEY_DURATION_DAYS = 30; // 30-day grace period for offline clients
 
+  /** Path where fallback key metadata is persisted across restarts */
+  private static readonly FALLBACK_KEYS_PATH = path.join(
+    process.cwd(),
+    'secrets/jwt_fallback_keys.json',
+  );
+
   constructor() {
     try {
       this.privateKey = RSAKeyManager.getPrivateKey();
@@ -58,10 +66,57 @@ export class JWTConfigService {
       // Compute kid as SHA-256 thumbprint of public key (RFC 7638)
       // This allows kid to automatically change on key rotation without hardcoding
       this.currentKeyId = this.computeKeyThumbprint(this.publicKey);
-      this.logger.debug(`✅ Current key ID computed: ${this.currentKeyId.substring(0, 8)}...`);
+      this.logger.debug(
+        `✅ Current key ID computed: ${this.currentKeyId.substring(0, 8)}...`,
+      );
+
+      // Load persisted fallback keys (survives restarts)
+      this.fallbackKeys = this.loadFallbackKeysFromDisk();
+      this.logger.debug(`✅ Loaded ${this.fallbackKeys.length} fallback key(s) from disk`);
     } catch (error) {
       this.logger.error('Failed to load RSA keys', error);
       throw error;
+    }
+  }
+
+  /** Load fallback keys from disk, filtering out expired ones. */
+  private loadFallbackKeysFromDisk(): FallbackKey[] {
+    try {
+      if (!fs.existsSync(JWTConfigService.FALLBACK_KEYS_PATH)) return [];
+      const raw = fs.readFileSync(JWTConfigService.FALLBACK_KEYS_PATH, 'utf8');
+      const parsed: Array<{
+        kid: string;
+        publicKeyPem: string;
+        jwk: Record<string, any>;
+        rotatedAt: string;
+        expiresAt: string;
+      }> = JSON.parse(raw);
+      const now = new Date();
+      return parsed
+        .map((k) => ({
+          ...k,
+          rotatedAt: new Date(k.rotatedAt),
+          expiresAt: new Date(k.expiresAt),
+        }))
+        .filter((k) => k.expiresAt > now);
+    } catch {
+      this.logger.warn('Could not read fallback keys from disk — starting fresh');
+      return [];
+    }
+  }
+
+  /** Persist fallback keys to disk so they survive restarts. */
+  private saveFallbackKeysToDisk(): void {
+    try {
+      const dir = path.dirname(JWTConfigService.FALLBACK_KEYS_PATH);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(
+        JWTConfigService.FALLBACK_KEYS_PATH,
+        JSON.stringify(this.fallbackKeys, null, 2),
+        { mode: 0o600 },
+      );
+    } catch (err) {
+      this.logger.error('Failed to persist fallback keys to disk', err);
     }
   }
 
@@ -153,30 +208,63 @@ export class JWTConfigService {
     if (!match) throw new Error(`Invalid expiresIn format: ${value}`);
     const num = parseInt(match[1], 10);
     switch (match[2]) {
-      case 'd': return num * 86400;
-      case 'h': return num * 3600;
-      case 'm': return num * 60;
-      default:  return num;
+      case 'd':
+        return num * 86400;
+      case 'h':
+        return num * 3600;
+      case 'm':
+        return num * 60;
+      default:
+        return num;
     }
   }
 
   /**
-   * Verify JWT with RS256 (backend + mobile offline)
+   * Verify JWT with RS256 (backend + mobile offline).
+   * On primary key failure, tries fallback keys by kid claim to support
+   * graceful key rotation — tokens signed with the previous key remain
+   * valid for up to 30 days after rotation.
    */
   verifyToken(token: string): JWTPayload {
     try {
       return jwt.verify(token, this.publicKey, {
         algorithms: ['RS256'],
+        issuer: 'nks-auth',
+        audience: 'nks-app',
       }) as JWTPayload;
-    } catch (error) {
-      this.logger.warn('JWT verification failed', error);
-      throw error;
+    } catch (primaryError) {
+      // Decode without verification to read the kid claim
+      const decoded = jwt.decode(token, { complete: true });
+      const kid = decoded?.header?.kid as string | undefined;
+
+      if (kid && kid !== this.currentKeyId) {
+        const fallback = this.getFallbackKey(kid);
+        if (fallback) {
+          try {
+            return jwt.verify(token, fallback.publicKeyPem, {
+              algorithms: ['RS256'],
+              issuer: 'nks-auth',
+              audience: 'nks-app',
+            }) as JWTPayload;
+          } catch (fallbackError) {
+            this.logger.warn(`JWT verification failed with fallback key (kid=${kid})`, fallbackError);
+          }
+        }
+      }
+
+      this.logger.warn('JWT verification failed', primaryError);
+      throw primaryError;
     }
   }
 
   /** Get the current key ID (for /nks-jwks endpoint) */
   getCurrentKid(): string {
     return this.currentKeyId;
+  }
+
+  /** Get the RSA public key in PEM format (for mobile JWKS endpoint) */
+  getPublicKeyPem(): string {
+    return this.publicKey;
   }
 
   /** Export the RSA public key in JWK format (for /nks-jwks endpoint) */
@@ -258,6 +346,9 @@ export class JWTConfigService {
       expiresAt,
     });
 
+    // Persist to disk so the grace period survives server restarts
+    this.saveFallbackKeysToDisk();
+
     this.logger.log(
       `Archived key ${this.currentKeyId} as fallback until ${expiresAt.toISOString()}`,
     );
@@ -306,6 +397,53 @@ export class JWTConfigService {
         expiresAt: key.expiresAt.toISOString(),
       })),
     ];
+  }
+
+  /**
+   * Verify an offline JWT (RS256) issued by signOfflineToken().
+   *
+   * Supports fallback keys so clients that received an offline token before
+   * a key rotation can still push sync operations during the 30-day grace period.
+   *
+   * Throws JsonWebTokenError / TokenExpiredError (from jsonwebtoken) on failure —
+   * callers should map these to ForbiddenException.
+   *
+   * @param token - The raw offline JWT string from the AuthResponse
+   * @returns Verified and decoded OfflineJWTPayload
+   */
+  verifyOfflineToken(token: string): OfflineJWTPayload {
+    try {
+      return jwt.verify(token, this.publicKey, {
+        algorithms: ['RS256'],
+        issuer: 'nks-auth',
+        audience: 'nks-app',
+      }) as OfflineJWTPayload;
+    } catch (primaryError) {
+      // Attempt verification with a fallback key if kid differs from current
+      const decoded = jwt.decode(token, { complete: true });
+      const kid = decoded?.header?.kid as string | undefined;
+
+      if (kid && kid !== this.currentKeyId) {
+        const fallback = this.getFallbackKey(kid);
+        if (fallback) {
+          try {
+            return jwt.verify(token, fallback.publicKeyPem, {
+              algorithms: ['RS256'],
+              issuer: 'nks-auth',
+              audience: 'nks-app',
+            }) as OfflineJWTPayload;
+          } catch (fallbackError) {
+            this.logger.warn(
+              `Offline JWT verification failed with fallback key (kid=${kid})`,
+              fallbackError,
+            );
+          }
+        }
+      }
+
+      this.logger.warn('Offline JWT verification failed', primaryError);
+      throw primaryError;
+    }
   }
 
   decodeToken(token: string): JWTPayload {

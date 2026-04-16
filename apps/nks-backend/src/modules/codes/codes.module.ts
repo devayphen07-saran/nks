@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { RolesModule } from '../roles/roles.module';
 import { CodesController } from './codes.controller';
 import { CodesService } from './codes.service';
-import { CodesRepository } from './codes.repository';
+import { CodesRepository } from './repositories/codes.repository';
 
 @Module({
   imports:     [RolesModule],

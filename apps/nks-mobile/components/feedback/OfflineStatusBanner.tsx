@@ -18,40 +18,46 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { useOfflineStatus } from "../../hooks/useOfflineStatus";
-
-const TIER_STYLES = {
-  low: {
-    container: { backgroundColor: "#FFF3CD", borderBottomColor: "#FFE69C" },
-    icon: "📶",
-    title: "Offline mode",
-    textColor: "#856404",
-  },
-  medium: {
-    container: { backgroundColor: "#FFE0B2", borderBottomColor: "#FFCC80" },
-    icon: "⏱",
-    title: "Offline expires soon",
-    textColor: "#E65100",
-  },
-  high: {
-    container: { backgroundColor: "#FFCDD2", borderBottomColor: "#EF9A9A" },
-    icon: "⚠️",
-    title: "Connect now",
-    textColor: "#B71C1C",
-  },
-  expired: {
-    container: { backgroundColor: "#F8D7DA", borderBottomColor: "#F5C6CB" },
-    icon: "🔒",
-    title: "Session expired",
-    textColor: "#721C24",
-  },
-} as const;
+import { useMobileTheme } from "@nks/mobile-theme";
 
 export function OfflineStatusBanner() {
-  const { urgency, label, mode } = useOfflineStatus();
+  const { urgency, label } = useOfflineStatus();
+  const { theme } = useMobileTheme();
 
   if (urgency === "none") return null;
 
-  const tier = TIER_STYLES[urgency];
+  const tierConfig = {
+    low: {
+      backgroundColor: theme.colorWarningBg,
+      borderBottomColor: theme.colorWarningBorder,
+      textColor: theme.colorWarning,
+      icon: "📶",
+      title: "Offline mode",
+    },
+    medium: {
+      backgroundColor: theme.colorWarningBg,
+      borderBottomColor: theme.colorWarningBorder,
+      textColor: theme.colorOrange,
+      icon: "⏱",
+      title: "Offline expires soon",
+    },
+    high: {
+      backgroundColor: theme.colorErrorBg,
+      borderBottomColor: theme.colorErrorBorder,
+      textColor: theme.colorError,
+      icon: "⚠️",
+      title: "Connect now",
+    },
+    expired: {
+      backgroundColor: theme.colorErrorBg,
+      borderBottomColor: theme.colorErrorBorder,
+      textColor: theme.colorError,
+      icon: "🔒",
+      title: "Session expired",
+    },
+  } as const;
+
+  const tier = tierConfig[urgency];
 
   const subtitle =
     urgency === "expired"
@@ -63,7 +69,15 @@ export function OfflineStatusBanner() {
           : label ?? "Data will sync when connection returns";
 
   return (
-    <View style={[styles.container, tier.container]}>
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: tier.backgroundColor,
+          borderBottomColor: tier.borderBottomColor,
+        },
+      ]}
+    >
       <Text style={[styles.title, { color: tier.textColor }]}>
         {tier.icon} {tier.title}
       </Text>

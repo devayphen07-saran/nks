@@ -25,7 +25,7 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
           definePayload: ({ user, session }) => ({
             sub: user.id,
             email: user.email,
-            role: (user as any).role ?? 'driver',
+            role: (user as any).role ?? 'user',
             storeId: (session as any).activeStoreFk,
             sessionId: session.id,
           }),
@@ -36,7 +36,7 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
           gracePeriod: 60 * 60 * 24 * 30,
         },
       }),
-      admin({ defaultRole: 'driver' }),
+      admin({ defaultRole: 'user' }),
     ],
 
     database: drizzleAdapter(db, {
@@ -109,21 +109,6 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
       },
     },
 
-    databaseHooks: {
-      // NOTE: SUPER_ADMIN assignment logic has been moved to AuthService.assignFirstUserAsSuperAdminIfNeeded()
-      // This ensures business logic is in the service layer, not in config.
-      // The hook is intentionally kept minimal - actual role assignment is handled by AuthService.
-      user: {
-        create: {
-          after: async (user) => {
-            // SECURITY NOTE: This hook is called automatically by BetterAuth after user creation.
-            // However, the actual SUPER_ADMIN role assignment is handled by AuthService.assignFirstUserAsSuperAdminIfNeeded()
-            // which is called explicitly in the register() and other user creation flows.
-            // This separation ensures: (1) business logic in service layer, (2) testability, (3) auditability
-          },
-        },
-      },
-    },
   });
 };
 

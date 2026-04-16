@@ -1,4 +1,4 @@
-import { Controller, Get, Param, UseGuards, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RoutesService } from './routes.service';
 import { RouteMapper } from './mapper/route.mapper';
@@ -16,6 +16,7 @@ import type { SessionUser } from 'src/modules/auth/interfaces/session-user.inter
 @ApiTags('Routes')
 @Controller('routes')
 @UseGuards(AuthGuard, RBACGuard)
+@ApiBearerAuth()
 export class RoutesController {
   constructor(private readonly routesService: RoutesService) {}
 
@@ -51,14 +52,6 @@ export class RoutesController {
       user.userId,
       storeGuuid,
     );
-
-    // Record-Level Security: If no routes returned, user doesn't have access
-    if (result.routes.length === 0) {
-      throw new ForbiddenException({
-        message: 'You do not have access to this store or it does not exist.',
-      });
-    }
-
     const response = RouteMapper.toStoreRoutesResponse(user, result.routes);
     return ApiResponse.ok(response, 'Store routes retrieved successfully');
   }

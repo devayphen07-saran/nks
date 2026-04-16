@@ -14,6 +14,6 @@ export const GET_ADMIN_ROUTES: APIData = new APIData(
 
 // 2. Get store-scoped routes for the calling user in a given store
 export const GET_STORE_ROUTES: APIData = new APIData(
-  "routes/store/storeGuuid",
+  "routes/store/:storeGuuid",
   APIMethod.GET
 );

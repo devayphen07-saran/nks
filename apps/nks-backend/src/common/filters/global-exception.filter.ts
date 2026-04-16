@@ -12,6 +12,7 @@ import { ZodError } from 'zod';
 import { ErrorCodeType } from '../constants/error-codes.constants';
 import { AppException } from '../exceptions/app.exception';
 import { ErrorCode } from '../constants/error-codes.constants';
+import { PG_UNIQUE_VIOLATION, PG_FOREIGN_KEY_VIOLATION } from '../constants/pg-error-codes';
 
 /**
  * Global exception filter.
@@ -210,14 +211,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let message = 'A database error occurred';
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
 
-    // 23505 – unique_violation
-    if (exception.code === '23505') {
+    if (exception.code === PG_UNIQUE_VIOLATION) {
       code = ErrorCode.DB_UNIQUE_CONSTRAINT_VIOLATION;
       message = 'A record with this value already exists';
       status = HttpStatus.CONFLICT;
     }
-    // 23503 – foreign_key_violation
-    else if (exception.code === '23503') {
+    else if (exception.code === PG_FOREIGN_KEY_VIOLATION) {
       code = ErrorCode.DB_FOREIGN_KEY_VIOLATION;
       message = 'Referenced record does not exist';
       status = HttpStatus.UNPROCESSABLE_ENTITY;

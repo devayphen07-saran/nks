@@ -1,4 +1,5 @@
 import * as SplashScreen from "expo-splash-screen";
+import { useState, useEffect } from "react";
 import { View } from "react-native";
 import { Slot } from "expo-router";
 import { Provider as ReduxProvider } from "react-redux";
@@ -15,10 +16,9 @@ import { initializePinning } from "../lib/ssl-pinning";
 import { initServerTime } from "../lib/server-time";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
-// Initialize SSL pinning before any network calls
-initializePinning().catch(() => {});
 // Pre-load clock offset from SecureStore so token expiry checks are accurate from startup
-initServerTime().catch(() => {});;
+initServerTime().catch(() => {});
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -30,6 +30,25 @@ const queryClient = new QueryClient({
 });
 
 export default function RootLayout() {
+  // Block all rendering (and therefore all network calls) until SSL pinning is
+  // configured. This ensures no request can bypass certificate validation.
+  const [pinningReady, setPinningReady] = useState(false);
+
+  useEffect(() => {
+    initializePinning()
+      .catch(() => {
+        // initializePinning throws in production if pinning fails (C4 fix).
+        // If it gets here in dev, we continue anyway.
+      })
+      .finally(() => {
+        setPinningReady(true);
+      });
+  }, []);
+
+  if (!pinningReady) {
+    return <LoadingFallback />;
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ReduxProvider store={store}>

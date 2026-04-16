@@ -33,6 +33,13 @@ const log = createLogger("JWTManager");
 // JWKS in-memory cache TTL: 1 hour — fast emergency key rotation propagation
 const JWKS_TTL_MS = 60 * 60 * 1000;
 
+// Maximum age for a stale JWKS fallback: 7 days.
+// The backend key rotation grace period is 30 days, but we use 7 days as a
+// conservative margin. If the cached key is older than this, we cannot safely
+// verify tokens offline — skip verification and rely solely on the offline
+// session's own expiry/signature instead of potentially using a revoked key.
+const JWKS_STALE_LIMIT_MS = 7 * 24 * 60 * 60 * 1000;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type OfflineMode =
@@ -80,6 +87,28 @@ function decodeExpMs(token: string): number | null {
   }
 }
 
+/**
+ * Validates that a hydrated JWKS cache entry has the expected shape and
+ * plausible content. Catches corrupted SecureStore reads before they cause
+ * opaque failures in offline JWT verification.
+ */
+function isValidJwksCache(data: JwksCache): boolean {
+  if (typeof data.publicKey !== "string" || data.publicKey.length === 0) {
+    return false;
+  }
+  // Must look like a PEM key or a base64-encoded key
+  if (
+    !data.publicKey.includes("BEGIN") &&
+    !/^[A-Za-z0-9+/=]+$/.test(data.publicKey.substring(0, 50))
+  ) {
+    return false;
+  }
+  if (typeof data.cachedAt !== "number" || data.cachedAt <= 0 || isNaN(data.cachedAt)) {
+    return false;
+  }
+  return true;
+}
+
 // ─── JWTManager ──────────────────────────────────────────────────────────────
 
 export const JWTManager = {
@@ -105,11 +134,23 @@ export const JWTManager = {
     };
 
     if (jwksCacheRaw && jwksCachedAt) {
-      _jwksCache = {
+      const candidate: JwksCache = {
         publicKey: jwksCacheRaw,
         kid: jwksKid ?? undefined,
         cachedAt: parseInt(jwksCachedAt, 10),
       };
+
+      if (isValidJwksCache(candidate)) {
+        _jwksCache = candidate;
+      } else {
+        log.warn("Corrupted JWKS cache detected — clearing");
+        _jwksCache = null;
+        await Promise.all([
+          SecureStore.deleteItemAsync(STORAGE_KEYS.JWKS_CACHE),
+          SecureStore.deleteItemAsync(STORAGE_KEYS.JWKS_CACHED_AT),
+          SecureStore.deleteItemAsync(STORAGE_KEYS.JWKS_KID),
+        ]).catch(() => {});
+      }
     }
 
     const hasOffline = !!offline;
@@ -226,7 +267,15 @@ export const JWTManager = {
       return true;
     } catch (err) {
       log.warn("JWKS fetch failed, using stale cache:", err);
-      return !!_jwksCache; // true if we have a stale fallback
+      if (!_jwksCache) return false;
+      if (Date.now() - _jwksCache.cachedAt > JWKS_STALE_LIMIT_MS) {
+        log.warn(
+          `Stale JWKS cache is older than 7 days — skipping verification. ` +
+          `Rely on offline session expiry/signature only.`,
+        );
+        return false;
+      }
+      return true;
     }
   },
 

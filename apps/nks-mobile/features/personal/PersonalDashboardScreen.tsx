@@ -24,8 +24,15 @@ import {
   FilterButtonText,
   LoadingCardInset,
 } from "../shared/list-screen-styles";
-import { MOCK_EXPENSES } from "./mock-data";
-import type { MockExpense } from "./mock-data";
+// TODO: Replace with Redux thunk dispatching to the transactions API
+interface MockExpense {
+  id: string;
+  description: string;
+  amount: number;
+  category: string;
+  date: string;
+}
+const MOCK_EXPENSES: MockExpense[] = [];
 
 export function PersonalDashboardScreen() {
   const { theme } = useMobileTheme();

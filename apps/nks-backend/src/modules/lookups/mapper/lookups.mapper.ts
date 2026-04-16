@@ -1,116 +1,23 @@
 /**
  * lookups.mapper.ts
  *
- * Named mapper functions for every lookup entity type, following the same
- * `toResponse(row)` convention used in StatusService — one function per
- * entity, grouped by family.
+ * Mappers for lookup entities that have their own dedicated tables
+ * (country, communication-type, currency, volume).
  *
- * Rules:
- *  - Each function is a pure, side-effect-free transformation.
- *  - Input types mirror the Drizzle select-result shapes from the repository.
- *  - Output types are the public-facing DTO interfaces from lookups-response.dto.ts.
+ * Code-value–backed lookups (salutation, address-type, designation,
+ * store-legal-type, store-category) live in code-value.mapper.ts.
  */
 
+export * from './code-value.mapper';
+
 import type {
-  SalutationResponse,
-  AddressTypeResponse,
-  DesignationResponse,
-  StoreLegalTypeResponse,
-  StoreCategoryResponse,
   CountryResponse,
   CommunicationTypeResponse,
   CurrencyResponse,
   VolumeResponse,
 } from '../dto/lookups-response.dto';
 
-// ── Shared base shape ────────────────────────────────────────────────────────
-// All code_value rows (salutations, address-types, designations, …) come from
-// the same table via `codeValueSelect`, so they share this interface.
-
-interface CodeValueRow {
-  id:          number;
-  code:        string;
-  label:       string;
-  description: string | null;
-  isActive:    boolean | null;
-  isHidden:    boolean | null;
-  isSystem:    boolean | null;
-  createdAt:   Date   | null;
-  updatedAt:   Date   | null;
-}
-
-// ── code_value family ────────────────────────────────────────────────────────
-
-export function toSalutationResponse(row: CodeValueRow): SalutationResponse {
-  return {
-    id:          row.id,
-    code:        row.code,
-    title:       row.label,
-    isActive:    row.isActive  ?? true,
-    isHidden:    row.isHidden  ?? false,
-    isSystem:    row.isSystem  ?? false,
-    createdAt:   row.createdAt?.toISOString() ?? '',
-    updatedAt:   row.updatedAt?.toISOString() ?? '',
-  };
-}
-
-export function toAddressTypeResponse(row: CodeValueRow): AddressTypeResponse {
-  return {
-    id:          row.id,
-    code:        row.code,
-    title:       row.label,
-    description: row.description ?? undefined,
-    isActive:    row.isActive  ?? true,
-    isHidden:    row.isHidden  ?? false,
-    isSystem:    row.isSystem  ?? false,
-    createdAt:   row.createdAt?.toISOString() ?? '',
-    updatedAt:   row.updatedAt?.toISOString() ?? '',
-  };
-}
-
-export function toDesignationResponse(row: CodeValueRow): DesignationResponse {
-  return {
-    id:          row.id,
-    code:        row.code,
-    title:       row.label,
-    description: row.description ?? undefined,
-    isActive:    row.isActive  ?? true,
-    isHidden:    row.isHidden  ?? false,
-    isSystem:    row.isSystem  ?? false,
-    createdAt:   row.createdAt?.toISOString() ?? '',
-    updatedAt:   row.updatedAt?.toISOString() ?? '',
-  };
-}
-
-export function toStoreLegalTypeResponse(row: CodeValueRow): StoreLegalTypeResponse {
-  return {
-    id:          row.id,
-    code:        row.code,
-    title:       row.label,
-    description: row.description ?? undefined,
-    isActive:    row.isActive  ?? true,
-    isHidden:    row.isHidden  ?? false,
-    isSystem:    row.isSystem  ?? false,
-    createdAt:   row.createdAt?.toISOString() ?? '',
-    updatedAt:   row.updatedAt?.toISOString() ?? '',
-  };
-}
-
-export function toStoreCategoryResponse(row: CodeValueRow): StoreCategoryResponse {
-  return {
-    id:          row.id,
-    code:        row.code,
-    title:       row.label,
-    description: row.description ?? undefined,
-    isActive:    row.isActive  ?? true,
-    isHidden:    row.isHidden  ?? false,
-    isSystem:    row.isSystem  ?? false,
-    createdAt:   row.createdAt?.toISOString() ?? '',
-    updatedAt:   row.updatedAt?.toISOString() ?? '',
-  };
-}
-
-// ── Dedicated-table entities ─────────────────────────────────────────────────
+// ── Country ──────────────────────────────────────────────────────────────────
 
 interface CountryRow {
   id:          number;
@@ -139,6 +46,8 @@ export function toCountryResponse(row: CountryRow): CountryResponse {
     updatedAt:   row.updatedAt?.toISOString() ?? '',
   };
 }
+
+// ── Communication Type ────────────────────────────────────────────────────────
 
 interface CommunicationTypeRow {
   id:              number;
@@ -172,6 +81,8 @@ export function toCommunicationTypeResponse(row: CommunicationTypeRow): Communic
   };
 }
 
+// ── Currency ──────────────────────────────────────────────────────────────────
+
 interface CurrencyRow {
   id:          number;
   code:        string;
@@ -198,6 +109,8 @@ export function toCurrencyResponse(row: CurrencyRow): CurrencyResponse {
     updatedAt:   row.updatedAt?.toISOString() ?? '',
   };
 }
+
+// ── Volume ────────────────────────────────────────────────────────────────────
 
 interface VolumeRow {
   id:          number;

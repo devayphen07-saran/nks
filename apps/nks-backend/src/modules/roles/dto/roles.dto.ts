@@ -14,7 +14,14 @@ import { z } from 'zod';
 export const CreateRoleSchema = z.object({
   storeId: z.number().int().positive('Store ID is required for all custom roles'),
   name: z.string().min(2).max(100),
-  code: z.string().min(2).max(30).toUpperCase(),
+  code: z
+    .string()
+    .min(2)
+    .max(30)
+    .toUpperCase()
+    .refine((v) => /^[A-Z0-9_]+$/.test(v), {
+      message: 'Role code may only contain uppercase letters, numbers, and underscores',
+    }),
   description: z.string().max(255).optional(),
   sortOrder: z.number().int().optional(),
 });

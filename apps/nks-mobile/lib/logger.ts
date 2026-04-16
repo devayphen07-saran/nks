@@ -2,8 +2,9 @@
  * Logger — plain factory (not a React hook) for service-level logging.
  * Safe to call in non-component contexts (stores, managers, services).
  *
- * In __DEV__ mode logs are printed to the console.
- * In production only errors are emitted (sensitive data is never logged).
+ * All log levels are gated behind __DEV__ — nothing reaches the console in
+ * production builds. Wire up a crash reporter (Sentry / Crashlytics) separately
+ * if you need production error visibility.
  */
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -33,10 +34,10 @@ export function createLogger(namespace: string): Logger {
       if (__DEV__) console.log(prefix, message, ...args);
     },
     warn(message, ...args) {
-      console.warn(prefix, message, ...args);
+      if (__DEV__) console.warn(prefix, message, ...args);
     },
     error(message, ...args) {
-      console.error(prefix, message, ...args);
+      if (__DEV__) console.error(prefix, message, ...args);
     },
   };
 }

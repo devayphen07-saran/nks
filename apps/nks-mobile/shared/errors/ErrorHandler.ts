@@ -3,6 +3,49 @@ import { AppError, isAppError } from './AppError';
 import { ErrorCode, ErrorContext } from '../types/errors';
 
 /**
+ * Maps backend `code` strings (from ApiResponse.code) to mobile ErrorCode values.
+ * Add entries here whenever the backend introduces a new error code.
+ */
+const BACKEND_ERROR_CODE_MAP: Record<string, ErrorCode> = {
+  // OTP
+  OTP_INVALID: ErrorCode.OTP_INVALID,
+  OTP_EXPIRED: ErrorCode.OTP_EXPIRED,
+  OTP_ALREADY_USED: ErrorCode.OTP_ALREADY_USED,
+  OTP_MAX_ATTEMPTS_EXCEEDED: ErrorCode.OTP_MAX_ATTEMPTS,
+  OTP_SEND_FAILED: ErrorCode.SERVER_ERROR,
+
+  // Auth / session
+  AUTH_INVALID_CREDENTIALS: ErrorCode.INVALID_CREDENTIALS,
+  AUTH_ACCOUNT_LOCKED: ErrorCode.ACCOUNT_LOCKED,
+  AUTH_ACCOUNT_DISABLED: ErrorCode.ACCOUNT_DISABLED,
+  AUTH_TOKEN_EXPIRED: ErrorCode.SESSION_EXPIRED,
+  AUTH_TOKEN_INVALID: ErrorCode.UNAUTHORIZED,
+  AUTH_TOKEN_MISSING: ErrorCode.UNAUTHORIZED,
+  AUTH_REFRESH_TOKEN_EXPIRED: ErrorCode.SESSION_EXPIRED,
+  AUTH_REFRESH_TOKEN_INVALID: ErrorCode.SESSION_EXPIRED,
+  AUTH_SESSION_NOT_FOUND: ErrorCode.SESSION_EXPIRED,
+  AUTH_SESSION_EXPIRED: ErrorCode.SESSION_EXPIRED,
+
+  // User
+  USER_ALREADY_EXISTS: ErrorCode.USER_EXISTS,
+  USER_EMAIL_ALREADY_EXISTS: ErrorCode.USER_EXISTS,
+  USER_PHONE_ALREADY_EXISTS: ErrorCode.USER_EXISTS,
+  USER_NOT_FOUND: ErrorCode.USER_NOT_FOUND,
+  USER_BLOCKED: ErrorCode.USER_BLOCKED,
+  USER_INACTIVE: ErrorCode.ACCOUNT_DISABLED,
+
+  // Generic HTTP
+  FORBIDDEN: ErrorCode.FORBIDDEN,
+  NOT_FOUND: ErrorCode.NOT_FOUND,
+  TOO_MANY_REQUESTS: ErrorCode.RATE_LIMITED,
+  VALIDATION_ERROR: ErrorCode.VALIDATION_ERROR,
+};
+
+function mapBackendCode(code: string | undefined): ErrorCode | undefined {
+  return code ? BACKEND_ERROR_CODE_MAP[code] : undefined;
+}
+
+/**
  * Centralized error handler that transforms various error types into AppError
  * Used throughout repositories and services to standardize error handling
  *
@@ -77,115 +120,50 @@ export class ErrorHandler {
       );
     }
 
+    const mapped = mapBackendCode(data?.code as string | undefined);
+
     // 400 Bad Request - Validation error
     if (status === 400) {
       return new AppError(
-        ErrorCode.VALIDATION_ERROR,
-        data?.message || 'Invalid input. Please check your data.',
+        mapped ?? ErrorCode.VALIDATION_ERROR,
+        data?.message || undefined,
         400,
-        { ...context, field: data?.field, errorDetails: error.message },
+        { ...context, field: data?.field },
       );
     }
 
-    // 401 Unauthorized - Session expired or invalid credentials
+
     if (status === 401) {
-      // Check if it's specifically invalid OTP or invalid credentials
-      const errorCode = data?.code;
-      if (errorCode === 'OTP_INVALID') {
-        return new AppError(
-          ErrorCode.OTP_INVALID,
-          'Invalid OTP. Please try again.',
-          401,
-          { ...context },
-        );
-      }
-      if (errorCode === 'OTP_EXPIRED') {
-        return new AppError(
-          ErrorCode.OTP_EXPIRED,
-          'OTP has expired. Please request a new one.',
-          401,
-          { ...context },
-        );
-      }
-      if (errorCode === 'INVALID_CREDENTIALS') {
-        return new AppError(
-          ErrorCode.INVALID_CREDENTIALS,
-          'Invalid phone number or OTP.',
-          401,
-          { ...context },
-        );
-      }
-
-      // Generic 401
-      return new AppError(
-        ErrorCode.SESSION_EXPIRED,
-        'Your session has expired. Please log in again.',
-        401,
-        { ...context },
-      );
+      return new AppError(mapped ?? ErrorCode.SESSION_EXPIRED, undefined, 401, { ...context });
     }
 
-    // 403 Forbidden - Permission denied
     if (status === 403) {
-      return new AppError(
-        ErrorCode.FORBIDDEN,
-        'You do not have permission for this action.',
-        403,
-        { ...context },
-      );
+      return new AppError(mapped ?? ErrorCode.FORBIDDEN, undefined, 403, { ...context });
     }
 
-    // 404 Not Found
     if (status === 404) {
-      return new AppError(
-        ErrorCode.NOT_FOUND,
-        'Resource not found.',
-        404,
-        { ...context },
-      );
+      return new AppError(mapped ?? ErrorCode.NOT_FOUND, undefined, 404, { ...context });
     }
 
-    // 409 Conflict - User exists, store exists, etc.
     if (status === 409) {
-      const conflictCode = data?.code;
-      if (conflictCode === 'USER_EXISTS') {
-        return new AppError(
-          ErrorCode.USER_EXISTS,
-          'User already exists.',
-          409,
-          { ...context },
-        );
-      }
-      return new AppError(
-        ErrorCode.VALIDATION_ERROR,
-        data?.message || 'Resource conflict.',
-        409,
-        { ...context },
-      );
+      return new AppError(mapped ?? ErrorCode.VALIDATION_ERROR, undefined, 409, { ...context });
     }
 
-    // 5xx Server errors
-    if (status && status >= 500) {
-      if (status === 503) {
-        return new AppError(
-          ErrorCode.SERVICE_UNAVAILABLE,
-          'Service is temporarily unavailable. Please try again later.',
-          status,
-          { ...context },
-        );
-      }
+    if (status === 429) {
+      return new AppError(ErrorCode.RATE_LIMITED, undefined, 429, { ...context });
+    }
 
+    if (status && status >= 500) {
       return new AppError(
-        ErrorCode.SERVER_ERROR,
-        'Server error. Please try again later.',
+        status === 503 ? ErrorCode.SERVICE_UNAVAILABLE : ErrorCode.SERVER_ERROR,
+        undefined,
         status,
         { ...context, endpoint: error.config?.url },
       );
     }
 
-    // Any other HTTP error
     return new AppError(
-      ErrorCode.UNKNOWN_ERROR,
+      mapped ?? ErrorCode.UNKNOWN_ERROR,
       data?.message || `HTTP Error ${status || 'Unknown'}`,
       status,
       { ...context, endpoint: error.config?.url },

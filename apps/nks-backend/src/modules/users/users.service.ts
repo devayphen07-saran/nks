@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { UsersRepository } from './users.repository';
+import { UsersRepository } from './repositories/users.repository';
 import { UserMapper } from './mapper/user.mapper';
 import type { UserResponseDto } from './dto';
 import { PaginationValidator } from './validators';

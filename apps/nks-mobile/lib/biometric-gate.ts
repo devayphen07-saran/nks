@@ -17,6 +17,13 @@ import { createLogger } from "./logger";
 
 const log = createLogger("BiometricGate");
 
+// Note: If a module-level lock flag (e.g. `let _isLocked = false`) is added here
+// for cross-component inactivity coordination, that is intentional and safe in
+// production. It may persist across hot-reloads in development (harmless — a full
+// reload or backgrounding the app resets it). React state is intentionally avoided
+// here because the lock must be visible across component trees without a shared
+// context provider.
+
 class BiometricAuthError extends Error {
   constructor(message: string) {
     super(message);

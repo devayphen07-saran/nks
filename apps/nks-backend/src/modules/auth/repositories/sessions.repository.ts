@@ -1,5 +1,5 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { eq, and, gt, lt, asc, count, sql } from 'drizzle-orm';
+import { Injectable } from '@nestjs/common';
+import { eq, and, gt, lt, asc, desc, count, sql, notInArray } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
 import * as schema from '../../../core/database/schema';
@@ -229,20 +229,6 @@ export class SessionsRepository {
   }
 
   /**
-   * Find session by token and return a new session record.
-   * Used after BetterAuth creates a session to fetch the typed row.
-   */
-  async findByTokenFull(token: string): Promise<UserSession | null> {
-    const [session] = await this.db
-      .select()
-      .from(schema.userSession)
-      .where(eq(schema.userSession.token, token))
-      .limit(1);
-
-    return session ?? null;
-  }
-
-  /**
    * Update session by session token (not ID).
    * Returns the session guuid — used in createSessionForUser to capture guuid after device update.
    */
@@ -313,26 +299,72 @@ export class SessionsRepository {
   }
 
   /**
-   * FIX #5: Atomic session limit enforcement.
-   * Single SQL DELETE removes all sessions outside the most recent N.
-   * No read/write gap — eliminates the race condition where concurrent
-   * logins both read count=5 and neither deletes.
+   * FIX #5 / Issue #16: Atomic session limit enforcement + insert in a single transaction.
+   *
+   * Wrapping DELETE + INSERT in one transaction eliminates the TOCTOU race where two
+   * concurrent logins both see "N sessions" before either writes, then both insert —
+   * ending up with N+2 sessions. With a transaction the delete and insert are
+   * serialised at the DB level: one login wins, the other sees the updated state.
+   *
+   * @param userId     - User whose sessions to cap
+   * @param maxAllowed - Maximum concurrent sessions (new session already counted in budget)
+   * @param data       - Session row to insert
+   */
+  async createWithinLimit(
+    userId: number,
+    maxAllowed: number,
+    data: NewUserSession,
+  ): Promise<UserSession | null> {
+    return this.db.transaction(async (tx) => {
+      // DELETE all sessions beyond the (maxAllowed - 1) most recent,
+      // making room for the new one we are about to insert.
+      const keepIds = tx
+        .select({ id: schema.userSession.id })
+        .from(schema.userSession)
+        .where(eq(schema.userSession.userId, userId))
+        .orderBy(desc(schema.userSession.createdAt))
+        .limit(maxAllowed - 1);
+
+      await tx
+        .delete(schema.userSession)
+        .where(
+          and(
+            eq(schema.userSession.userId, userId),
+            notInArray(schema.userSession.id, keepIds),
+          ),
+        );
+
+      const [session] = await tx
+        .insert(schema.userSession)
+        .values(data)
+        .returning();
+
+      return session ?? null;
+    });
+  }
+
+  /**
+   * @deprecated Use createWithinLimit — kept for callers that do not need limit enforcement.
    */
   async deleteExcessSessions(
     userId: number,
     maxAllowed: number,
   ): Promise<void> {
-    await this.db.execute(sql`
-      DELETE FROM user_session
-      WHERE user_fk = ${userId}
-        AND id NOT IN (
-          SELECT id
-          FROM   user_session
-          WHERE  user_fk = ${userId}
-          ORDER  BY created_at DESC
-          LIMIT  ${maxAllowed}
-        )
-    `);
+    const keepIds = this.db
+      .select({ id: schema.userSession.id })
+      .from(schema.userSession)
+      .where(eq(schema.userSession.userId, userId))
+      .orderBy(desc(schema.userSession.createdAt))
+      .limit(maxAllowed);
+
+    await this.db
+      .delete(schema.userSession)
+      .where(
+        and(
+          eq(schema.userSession.userId, userId),
+          notInArray(schema.userSession.id, keepIds),
+        ),
+      );
   }
 
   /**

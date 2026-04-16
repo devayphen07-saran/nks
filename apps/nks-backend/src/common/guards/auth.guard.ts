@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import { InjectDb } from '../../core/database/inject-db.decorator';
 import * as schema from '../../core/database/schema';
 import { userRoleMapping } from '../../core/database/schema/auth/user-role-mapping';
@@ -16,6 +16,10 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import type { Request } from 'express';
 import { SessionUser, SessionUserRole } from 'src/modules/auth/interfaces/session-user.interface';
 import { fireAndForgetWithRetry } from '../utils/retry';
+import { extractCookieValue } from '../utils/cookie.utils';
+import { LAST_ACTIVE_THROTTLE_MS } from '../../modules/auth/auth.constants';
+import { SessionsRepository } from '../../modules/auth/repositories/sessions.repository';
+import { JtiBlocklistService } from '../../modules/auth/services/token/jti-blocklist.service';
 
 /** Extend Express Request with strongly-typed user fields. */
 export interface AuthenticatedRequest extends Request {
@@ -40,6 +44,8 @@ export class AuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     @InjectDb() private readonly db: NodePgDatabase<typeof schema>,
+    private readonly sessionsRepository: SessionsRepository,
+    private readonly jtiBlocklist: JtiBlocklistService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -62,7 +68,7 @@ export class AuthGuard implements CanActivate {
     //    - Authorization header (mobile): Bearer <token>
     //    - nks_session cookie (web): parsed by cookie-parser middleware
     const authHeader = request.headers.authorization || '';
-    const bearerToken = authHeader.replace('Bearer ', '').trim();
+    const bearerToken = authHeader.replace(/^Bearer\s+/i, '').trim();
 
     // ✅ Try parsed cookies first (cookie-parser middleware)
     const nksSessionCookie =
@@ -100,12 +106,46 @@ export class AuthGuard implements CanActivate {
       });
     }
 
-    // 4. Fetch user data
-    const [dbUser] = await this.db
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.id, dbSession.userId))
-      .limit(1);
+    // 3b. Check JTI blocklist — rejects tokens that were revoked mid-flight
+    // (e.g., session terminated while a 15-min JWT was still in flight).
+    if (dbSession.jti && await this.jtiBlocklist.isBlocked(dbSession.jti)) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.AUTH_TOKEN_INVALID,
+        message: 'Token has been revoked.',
+      });
+    }
+
+    // 4. Fetch user and roles in parallel — both depend only on dbSession.userId
+    const [userRows, roleRows] = await Promise.all([
+      this.db
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.id, dbSession.userId))
+        .limit(1),
+      this.db
+        .select({
+          roleCode: schema.roles.code,
+          storeFk: userRoleMapping.storeFk,
+          storeName: schema.store.storeName,
+          isPrimary: userRoleMapping.isPrimary,
+          assignedAt: userRoleMapping.assignedAt,
+          expiresAt: userRoleMapping.expiresAt,
+        })
+        .from(userRoleMapping)
+        .innerJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
+        .leftJoin(schema.store, eq(userRoleMapping.storeFk, schema.store.id))
+        .where(
+          and(
+            eq(userRoleMapping.userFk, dbSession.userId),
+            eq(userRoleMapping.isActive, true),
+            isNull(userRoleMapping.deletedAt),
+            // Exclude roles whose temporary grant has expired
+            or(isNull(userRoleMapping.expiresAt), gt(userRoleMapping.expiresAt, new Date())),
+          ),
+        ),
+    ]);
+
+    const [dbUser] = userRows;
 
     if (!dbUser) {
       throw new UnauthorizedException({
@@ -154,33 +194,13 @@ export class AuthGuard implements CanActivate {
     };
     const u = user as BetterAuthUser;
 
-    // Query roles directly from user_role_mapping — single source of truth
-    const roleRows = await this.db
-      .select({
-        roleCode: schema.roles.code,
-        storeFk: userRoleMapping.storeFk,
-        storeName: schema.store.storeName,
-        isPrimary: userRoleMapping.isPrimary,
-        assignedAt: userRoleMapping.assignedAt,
-      })
-      .from(userRoleMapping)
-      .innerJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
-      .leftJoin(schema.store, eq(userRoleMapping.storeFk, schema.store.id))
-      .where(
-        and(
-          eq(userRoleMapping.userFk, dbSession.userId),
-          eq(userRoleMapping.isActive, true),
-          isNull(userRoleMapping.deletedAt),
-        ),
-      );
-
     const roles: SessionUserRole[] = roleRows.map((r) => ({
       roleCode: r.roleCode,
       storeId: r.storeFk ?? null,
       storeName: r.storeName ?? null,
       isPrimary: r.isPrimary,
       assignedAt: r.assignedAt.toISOString(),
-      expiresAt: null,
+      expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
     }));
     const primaryRole = roleRows.find((r) => r.isPrimary)?.roleCode ?? roleRows[0]?.roleCode ?? null;
     const isSuperAdmin = roles.some((r) => r.roleCode === 'SUPER_ADMIN');
@@ -212,9 +232,7 @@ export class AuthGuard implements CanActivate {
     if (u.isBlocked) {
       // CRITICAL: Delete sessions BEFORE throwing error (synchronous, not fire-and-forget)
       try {
-        await this.db
-          .delete(schema.userSession)
-          .where(eq(schema.userSession.userId, Number(u.id)));
+        await this.sessionsRepository.deleteAllForUser(Number(u.id));
         this.logger.warn(`Deleted all sessions for blocked user ${u.id}`);
       } catch (err) {
         this.logger.error(
@@ -235,21 +253,25 @@ export class AuthGuard implements CanActivate {
       expiresAt: sessionData.expiresAt,
     };
 
-    // 6. Update lastActiveAt on every authenticated request (non-critical, fire-and-forget)
-    fireAndForgetWithRetry(
-      async () => {
-        await this.db
-          .update(schema.users)
-          .set({ lastActiveAt: new Date() })
-          .where(eq(schema.users.id, Number(user.id)));
-      },
-      {
-        maxRetries: 3,
-        initialDelayMs: 500,
-        logger: this.logger,
-        logLabel: `Update lastActiveAt for user ${user.id}`,
-      },
-    );
+    // 6. Update lastActiveAt — throttled to once every 5 minutes to avoid
+    //    a DB write on every single authenticated request.
+    const lastActive = user.lastActiveAt ? new Date(user.lastActiveAt).getTime() : 0;
+    if (Date.now() - lastActive > LAST_ACTIVE_THROTTLE_MS) {
+      fireAndForgetWithRetry(
+        async () => {
+          await this.db
+            .update(schema.users)
+            .set({ lastActiveAt: new Date() })
+            .where(eq(schema.users.id, Number(user.id)));
+        },
+        {
+          maxRetries: 3,
+          initialDelayMs: 500,
+          logger: this.logger,
+          logLabel: `Update lastActiveAt for user ${user.id}`,
+        },
+      );
+    }
 
     return true;
   }
@@ -259,11 +281,6 @@ export class AuthGuard implements CanActivate {
    * (cookie-parser middleware should handle this, but this is a fallback)
    */
   private extractNksSessionCookie(request: Request): string | undefined {
-    const cookieHeader = request.headers.cookie ?? '';
-    return cookieHeader
-      .split(';')
-      .map((c) => c.trim())
-      .find((c) => c.startsWith('nks_session='))
-      ?.split('=')[1];
+    return extractCookieValue(request.headers.cookie ?? '', 'nks_session');
   }
 }

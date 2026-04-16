@@ -13,7 +13,10 @@ import { useMobileTheme } from "@nks/mobile-theme";
 import { useAuth } from "../../store";
 import { useLogout } from "../../hooks/useLogout";
 import { WelcomeBanner, ExpenseRow } from "./components";
-import { RECENT_EXPENSE_ITEMS } from "./mock-data";
+import type { ExpenseItem } from "./components/ExpenseRow";
+
+// TODO: Replace with Redux thunk dispatching to the transactions API
+const RECENT_EXPENSE_ITEMS: ExpenseItem[] = [];
 
 export function PersonalScreen() {
   const { theme } = useMobileTheme();

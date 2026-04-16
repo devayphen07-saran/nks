@@ -68,7 +68,10 @@ export async function initializeDatabase(): Promise<void> {
       throw new Error('Invalid encryption key format — expected 64-char hex string');
     }
 
-    // CRITICAL: Set encryption key FIRST before any other operations
+    // CRITICAL: Set encryption key FIRST before any other operations.
+    // SECURITY: String interpolation is safe here ONLY because encryptionKey has
+    // been validated above to match /^[0-9a-f]{64}$/i — pure hex, no SQL-injectable
+    // characters. Do NOT interpolate any other variable into PRAGMA statements.
     await _db.execAsync(`PRAGMA key = '${encryptionKey}'`);
 
     // Verify integrity

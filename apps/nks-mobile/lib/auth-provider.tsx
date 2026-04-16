@@ -31,6 +31,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { isInitializing, isAuthenticated } = useReduxAuth();
   const splashHidden = useRef(false);
   const wasOffline = useRef(false);
+  // Ref so the NetInfo listener always sees current auth state without
+  // re-subscribing (and re-running the cleanup) on every login/logout cycle.
+  const isAuthenticatedRef = useRef(isAuthenticated);
+  isAuthenticatedRef.current = isAuthenticated;
 
   // Lock app after 5 min in background — prompts biometric on foreground
   useInactivityLock();
@@ -62,10 +66,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [isInitializing]);
 
   // Reconnection handler: when device goes offline→online, refresh session
-  // to sync roles, permissions, clock offset, and offline token
+  // to sync roles, permissions, clock offset, and offline token.
+  // Deps: [dispatch] only — isAuthenticated is read via ref so the listener
+  // is never torn down and re-created on login/logout state changes.
   useEffect(() => {
-    if (!isAuthenticated) return;
-
     const unsubscribe = NetInfo.addEventListener((state) => {
       const isOnline = state.isConnected ?? false;
 
@@ -74,10 +78,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Online transition detected — run full reconnection sequence
-      if (wasOffline.current) {
+      // Online transition detected — run full reconnection sequence (auth only)
+      if (wasOffline.current && isAuthenticatedRef.current) {
         wasOffline.current = false;
         log.info("[Auth] Device back online — running reconnection sequence");
+        // Fire-and-forget: if this fails, the next foreground event or API 401
+        // will trigger a fresh refresh. Awaiting here would block the UI thread
+        // on a potentially slow network immediately after reconnection.
         handleReconnection(dispatch).catch((err) => {
           log.error("[Auth] Reconnection failed:", err);
         });
@@ -85,7 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsubscribe();
-  }, [isAuthenticated, dispatch]);
+  }, [dispatch]);
 
   return (
     <AuthContext.Provider

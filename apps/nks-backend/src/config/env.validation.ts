@@ -36,6 +36,12 @@ const envSchema = z.object({
   IP_HMAC_SECRET: z
     .string()
     .min(32, 'IP_HMAC_SECRET must be at least 32 characters'),
+  OTP_IDENTIFIER_PEPPER: z
+    .string()
+    .min(16, 'OTP_IDENTIFIER_PEPPER must be at least 16 characters'),
+  OFFLINE_SESSION_HMAC_SECRET: z
+    .string()
+    .min(32, 'OFFLINE_SESSION_HMAC_SECRET must be at least 32 characters'),
 
   // ── CORS ──────────────────────────────────────────────────────────────────
   ALLOWED_ORIGINS: z.string().optional(),

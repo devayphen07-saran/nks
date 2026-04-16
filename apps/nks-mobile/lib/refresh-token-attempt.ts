@@ -123,6 +123,7 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
             session,
             roleCodes,
             result?.offlineToken,
+            result?.offlineSessionSignature,
           );
           log.info(
             "[RefreshAttempt] Offline session roles updated and validity extended",

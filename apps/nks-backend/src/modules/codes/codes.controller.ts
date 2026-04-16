@@ -11,39 +11,67 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CodesService } from './codes.service';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import type { AuthenticatedRequest } from '../../common/guards/auth.guard';
+import { RBACGuard } from '../../common/guards/rbac.guard';
 import { ApiResponse } from '../../common/utils/api-response';
 import {
-  CreateCodeCategoryDto,
-  CreateCodeValueDto,
   UpdateCodeValueDto,
+  CreateCodeCategoryDto,
+  CreateCodeCategorySchema,
+  CreateCodeValueDto,
+  CreateCodeValueSchema,
   GetCodeValuesQuerySchema,
   GetCodeValuesQueryDto,
 } from './dto/codes-request.dto';
-import {
-  CodeCategoryResponseDto,
-  CodeValueResponseDto,
-} from './dto/codes-response.dto';
+import { CodeCategoryResponseDto, CodeValueResponseDto } from './dto/codes-response.dto';
 
 @ApiTags('Codes')
 @Controller('codes')
+@UseGuards(AuthGuard)
+@ApiBearerAuth()
 export class CodesController {
   constructor(private readonly service: CodesService) {}
 
-  // ── Public read endpoints ─────────────────────────────────────────────────
-
   @Get('categories')
-  @Public()
-  @ApiOperation({ summary: 'List all code categories' })
+  @UseGuards(RBACGuard)
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'List all code categories (SUPER_ADMIN only)' })
   async getCategories(): Promise<ApiResponse<CodeCategoryResponseDto[]>> {
     const data = await this.service.getAllCategories();
-    return ApiResponse.ok(data, 'Categories fetched');
+    return ApiResponse.ok(data, 'Code categories fetched');
+  }
+
+  @Post('categories')
+  @UseGuards(RBACGuard)
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create a new code category (SUPER_ADMIN only)' })
+  async createCategory(
+    @Body(new ZodValidationPipe(CreateCodeCategorySchema)) dto: CreateCodeCategoryDto,
+  ): Promise<ApiResponse<CodeCategoryResponseDto>> {
+    const data = await this.service.createCategory(dto);
+    return ApiResponse.ok(data, 'Code category created');
+  }
+
+  @Post(':categoryCode/values')
+  @UseGuards(RBACGuard)
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Add a value to a category (SUPER_ADMIN only)' })
+  async createValue(
+    @Param('categoryCode') categoryCode: string,
+    @Body(new ZodValidationPipe(CreateCodeValueSchema)) dto: CreateCodeValueDto,
+  ): Promise<ApiResponse<CodeValueResponseDto>> {
+    const data = await this.service.createValue(categoryCode.toUpperCase(), dto);
+    return ApiResponse.ok(data, 'Code value created');
   }
 
   @Get(':categoryCode')
@@ -63,58 +91,28 @@ export class CodesController {
     return ApiResponse.ok(data, 'Code values fetched');
   }
 
-  // ── Admin write endpoints ─────────────────────────────────────────────────
-
-  @Post('categories')
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a new code category (admin only)' })
-  async createCategory(
-    @Body() dto: CreateCodeCategoryDto,
-  ): Promise<ApiResponse<CodeCategoryResponseDto>> {
-    const data = await this.service.createCategory(dto);
-    return ApiResponse.ok(data, 'Category created');
-  }
-
-  @Post(':categoryCode/values')
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Add a value to a category' })
-  async createValue(
-    @Param('categoryCode') categoryCode: string,
-    @Body() dto: CreateCodeValueDto,
-  ): Promise<ApiResponse<CodeValueResponseDto>> {
-    const data = await this.service.createValue(
-      categoryCode.toUpperCase(),
-      dto,
-    );
-    return ApiResponse.ok(data, 'Code value created');
-  }
-
   @Put('values/:id')
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Edit a non-system value' })
+  @UseGuards(RBACGuard)
+  @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'Edit a non-system value (SUPER_ADMIN only)' })
   async updateValue(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateCodeValueDto,
+    @Req() req: AuthenticatedRequest,
   ): Promise<ApiResponse<CodeValueResponseDto>> {
-    const data = await this.service.updateValue(Number(id), dto);
+    const data = await this.service.updateValue(id, dto, req.user.userId);
     return ApiResponse.ok(data, 'Code value updated');
   }
 
   @Delete('values/:id')
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Soft-delete a non-system value' })
-  async deleteValue(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
-    await this.service.deleteValue(
-      Number(id),
-      req.user.userId,
-    );
-    return ApiResponse.ok(null, 'Code value deleted');
+  @UseGuards(RBACGuard)
+  @Roles('SUPER_ADMIN')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Soft-delete a non-system value (SUPER_ADMIN only)' })
+  async deleteValue(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    await this.service.deleteValue(id, req.user.userId);
   }
 }

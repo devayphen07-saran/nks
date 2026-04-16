@@ -7,7 +7,3 @@ export * from './auth-response.dto';
 export * from './onboarding.dto';
 export * from './auth.dto';
 export * from './permissions.dto';
-export {
-  ProfileCompleteDto,
-  ProfileCompleteResponseDto,
-} from './onboarding.dto';

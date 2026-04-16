@@ -15,7 +15,6 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { StatusService } from './status.service';
 import { CreateStatusDto, UpdateStatusDto, GetAllStatusesQuerySchema, GetAllStatusesQueryDto } from './dto/status.dto';
 import type { StatusListResponse, StatusSingleResponse } from './dto/status.dto';
-import { StatusMapper } from './mapper/status.mapper';
 import { ApiResponse } from '../../common/utils/api-response';
 import { Public } from '../../common/decorators/public.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';

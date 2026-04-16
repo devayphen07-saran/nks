@@ -1,8 +1,12 @@
 import { useState } from "react";
 import { router } from "expo-router";
-import { passwordSchema, type PasswordFields } from "../schema/password";
+import { passwordSchema } from "../schema/password";
+import { profileComplete } from "@nks/api-manager";
+import { useRootDispatch } from "../../../store";
+import { ErrorHandler } from "../../../shared/errors";
 
 export function useSetPassword() {
+  const dispatch = useRootDispatch();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -11,27 +15,25 @@ export function useSetPassword() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleSubmit = async () => {
-    if (isLoading) return;
-
     const result = passwordSchema.safeParse({ password, confirm });
     if (!result.success) {
-      const firstError = result.error.issues[0];
-      setErrorMessage(firstError?.message ?? "Invalid password");
+      setErrorMessage(result.error.issues[0]?.message ?? "Invalid password");
       return;
     }
 
-    setErrorMessage(null);
     setIsLoading(true);
+    setErrorMessage(null);
 
-    try {
-      // Note: Password is set via PROFILE_COMPLETE endpoint (to be wired when available)
-      // For now, navigate to workspace — password will be collected in profile completion flow
-      router.replace("/(protected)/(workspace)");
-    } catch (error) {
-      setErrorMessage("Failed to set password. Please try again.");
-    } finally {
-      setIsLoading(false);
-    }
+    dispatch(profileComplete({ bodyParam: { password } }))
+      .unwrap()
+      .then(() => {
+        router.replace("/(protected)/(workspace)");
+      })
+      .catch((err) => {
+        const appError = ErrorHandler.handle(err, { action: "set_password" });
+        setErrorMessage(appError.getUserMessage());
+      })
+      .finally(() => setIsLoading(false));
   };
 
   const handleSkip = () => {
@@ -39,23 +41,16 @@ export function useSetPassword() {
   };
 
   return {
-    // password state
     password,
     setPassword,
     showPassword,
     setShowPassword,
-
-    // confirm state
     confirm,
     setConfirm,
     showConfirm,
     setShowConfirm,
-
-    // request state
     isLoading,
     errorMessage,
-
-    // actions
     handleSubmit,
     handleSkip,
   };

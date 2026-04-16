@@ -10,13 +10,13 @@ import {
   SEND_EMAIL_OTP,
   VERIFY_EMAIL_OTP,
   SYNC_TIME,
-  VERIFY_CLAIMS,
   GET_JWKS,
   GET_PERMISSIONS_SNAPSHOT,
   GET_PERMISSIONS_DELTA,
   GET_SESSIONS,
   DELETE_SESSION,
   DELETE_ALL_SESSIONS,
+  PROFILE_COMPLETE,
 } from "./api-data";
 import {
   LoginRequest,
@@ -59,9 +59,6 @@ export const syncTime = SYNC_TIME.generateAsyncThunk<{
   deviceTime: number;
 }>("auth/syncTime");
 
-export const verifyClaims = VERIFY_CLAIMS.generateAsyncThunk<{
-  token: string;
-}>("auth/verifyClaims");
 
 export const getJwks = GET_JWKS.generateAsyncThunk("auth/getJwks");
 
@@ -87,3 +84,10 @@ export const deleteSession = DELETE_SESSION.generateAsyncThunk<{
 export const deleteAllSessions = DELETE_ALL_SESSIONS.generateAsyncThunk(
   "auth/deleteAllSessions"
 );
+
+export const profileComplete = PROFILE_COMPLETE.generateAsyncThunk<{
+  name?: string;
+  email?: string;
+  password?: string;
+  phoneNumber?: string;
+}>("auth/profileComplete");

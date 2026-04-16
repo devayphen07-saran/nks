@@ -1,8 +1,9 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { passwordCreationSchema } from './password-validation.dto';
 
 export const SetPasswordSchema = z.object({
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: passwordCreationSchema,
 });
 
 export class SetPasswordDto extends createZodDto(SetPasswordSchema) {}

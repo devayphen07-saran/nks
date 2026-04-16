@@ -4,3 +4,6 @@ export { SanitizerValidator } from './sanitizer.validator';
 export { QueryValidator } from './query.validator';
 export { AuthorizationValidator } from './authorization.validator';
 export { DeviceValidator } from './device.validator';
+export { EmailValidator } from './email.validator';
+export { PhoneValidator } from './phone.validator';
+export { PasswordValidator } from './password.validator';

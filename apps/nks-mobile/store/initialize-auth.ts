@@ -1,6 +1,6 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import type { AuthResponse } from "@nks/api-manager";
-import { tokenManager, SESSION_STALE_MS } from "@nks/mobile-utils";
+import { tokenManager, SESSION_STALE_MS, migrateUserToSecureStore } from "@nks/mobile-utils";
 import { offlineSession } from "../lib/offline-session";
 import { getServerAdjustedNow } from "../lib/server-time";
 import { setCredentials, setUnauthenticated } from "./auth-slice";
@@ -10,6 +10,7 @@ import { sessionTokenReg } from "@nks/utils";
 import { validateAuthResponse } from "../lib/token-validators";
 import { sanitizeError } from "../lib/log-sanitizer";
 import { JWTManager } from "../lib/jwt-manager";
+import { initializeRateLimiters } from "../lib/rate-limiter";
 import { createLogger } from "../lib/logger";
 import type { AppDispatch } from "./index";
 
@@ -27,8 +28,14 @@ export const initializeAuth = createAsyncThunk<
   try {
     log.info("Starting session initialization...");
 
+    // One-time migration: move user PII from unencrypted AsyncStorage → SecureStore
+    await migrateUserToSecureStore();
+
     // Hydrate JWTManager (access + offline + refresh tokens) into memory
     await JWTManager.hydrate();
+
+    // Load persisted rate limiter state so lockouts survive app restarts
+    await initializeRateLimiters();
 
     const envelope = await tokenManager.loadSession<AuthResponse>();
 

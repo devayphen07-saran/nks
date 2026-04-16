@@ -3,8 +3,16 @@ import { FlatList } from "react-native";
 import styled from "styled-components/native";
 import { Column, Row, Typography, LucideIcon } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { MOCK_EXPENSES, CATEGORY_ICONS } from "./mock-data";
-import type { MockExpense } from "./mock-data";
+// TODO: Replace with Redux thunk dispatching to the transactions API
+interface MockExpense {
+  id: string;
+  description: string;
+  amount: number;
+  category: string;
+  date: string;
+}
+const MOCK_EXPENSES: MockExpense[] = [];
+const CATEGORY_ICONS: Record<string, string> = {};
 
 export function ExpenseScreen() {
   const { theme } = useMobileTheme();

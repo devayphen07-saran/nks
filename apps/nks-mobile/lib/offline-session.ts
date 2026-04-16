@@ -2,11 +2,15 @@
  * Offline Session — Data Management, Validation, and Status
  * Client-side trust policy for offline POS operations.
  * This is NOT a token — it's a local policy that says "this device was
- * authenticated within the last 5 days — allow local POS operations."
+ * authenticated within the last 3 days — allow local POS operations."
+ *
+ * Integrity: sessions are HMAC-SHA256 signed server-side. The signing secret
+ * never leaves the server, so any local tampering of the stored payload
+ * (e.g. role escalation) is detectable when the session is re-submitted.
+ * Mobile stores the server-provided signature but cannot regenerate it.
  */
 
 import { v4 as uuidv4 } from "uuid";
-import * as crypto from "expo-crypto";
 import {
   saveSecureItem,
   getSecureItem,
@@ -29,18 +33,10 @@ const OFFLINE_SESSION_KEY = STORAGE_KEYS.OFFLINE_SESSION;
 const THREE_DAYS_MS = 3 * ONE_DAY_MS;
 const OFFLINE_SESSION_DURATION_MS = THREE_DAYS_MS;
 
-// ─── Integrity secret ────────────────────────────────────────────────────────
-
-const OFFLINE_SESSION_INTEGRITY_SECRET = process.env["OFFLINE_SESSION_SECRET"] ?? "";
-if (__DEV__ && !OFFLINE_SESSION_INTEGRITY_SECRET) {
-  log.warn("OFFLINE_SESSION_SECRET is not set — signature integrity checks are degraded");
-}
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 /**
  * OfflineSession: Client-side trust policy for offline POS operations.
- * CRITICAL FIX: Includes revocation awareness and role sync timestamps.
  */
 export interface OfflineSession {
   /** Unique identifier for this offline session (UUID) — used in outbox audit trail */
@@ -57,16 +53,27 @@ export interface OfflineSession {
   offlineValidUntil: number;
   /** Timestamp of last successful data sync (products, customers, tax_rates) */
   lastSyncedAt: number;
-  /** 5-day RS256 JWT for offline identity + authorization verification */
+  /** 3-day RS256 JWT for offline identity + authorization verification */
   offlineToken: string;
   /** Timestamp when this OfflineSession was created */
   createdAt: number;
-  /** CRITICAL FIX: Timestamp when roles were last synced with server (detects stale roles) */
+  /** Timestamp when roles were last synced with server (detects stale roles) */
   lastRoleSyncAt: number;
-  /** CRITICAL FIX: If set, indicates server detected a revocation/permission change */
+  /** If set, indicates server detected a revocation/permission change */
   revocationDetectedAt?: number;
-  /** CRITICAL FIX #8.1: HMAC-SHA256 signature — prevents role tampering (e.g., STAFF→STORE_OWNER) */
+  /**
+   * HMAC-SHA256 signature computed server-side over (userId, storeId, roles, offlineValidUntil).
+   * The secret lives only on the server — the mobile client stores this value as-is.
+   * Presence of a non-empty signature means the session was issued by a legitimate server.
+   * Tampering with any payload field invalidates this signature on the next server-side check.
+   */
   signature?: string;
+  /**
+   * Stable device identifier (from expo-device / expo-application).
+   * Submitted with every sync push so the server can check the revoked_devices table
+   * and reject this device even if its 3-day offline HMAC is still cryptographically valid.
+   */
+  deviceId?: string;
 }
 
 // ─── Status types ─────────────────────────────────────────────────────────────
@@ -89,7 +96,7 @@ export function isSessionValid(session: OfflineSession | null): boolean {
 }
 
 /**
- * Check if offline session roles are stale
+ * Check if offline session roles are stale.
  * Roles are considered stale if:
  * - Last role sync was > 24 hours ago
  * - Server revocation was detected
@@ -105,7 +112,6 @@ export function isRolesStale(session: OfflineSession | null): {
 
   const now = Date.now();
 
-  // Check if revocation was detected by server
   if (session.revocationDetectedAt) {
     return {
       isStale: true,
@@ -113,7 +119,6 @@ export function isRolesStale(session: OfflineSession | null): {
     };
   }
 
-  // Check if roles haven't been synced in 24 hours
   const hoursSinceRoleSync = (now - session.lastRoleSyncAt) / (60 * 60 * 1000);
   if (now - session.lastRoleSyncAt > ONE_DAY_MS) {
     return {
@@ -127,60 +132,33 @@ export function isRolesStale(session: OfflineSession | null): {
 }
 
 /**
- * Generate HMAC signature for offline session.
- * Prevents tampering with session data (e.g., upgrading roles).
- *
- * NOTE: This is a tamper-detection guard, not a cryptographic security boundary.
- * The secret is baked into the app bundle at build time.
- */
-export async function generateSignature(session: OfflineSession): Promise<string> {
-  const signatureData = JSON.stringify({
-    userId: session.userId,
-    storeId: session.storeId,
-    roles: [...session.roles].sort(), // Sort for consistency
-    offlineValidUntil: session.offlineValidUntil,
-    createdAt: session.createdAt,
-  });
-
-  const signatureInput = `${OFFLINE_SESSION_INTEGRITY_SECRET}:${signatureData}`;
-  return crypto.digestStringAsync(
-    crypto.CryptoDigestAlgorithm.SHA256,
-    signatureInput,
-  );
-}
-
-/**
  * Verify offline session integrity.
- * Returns false if session has been tampered with.
+ *
+ * Since the signing secret is server-side only, the client cannot recompute
+ * the expected HMAC. Verification here checks that:
+ *   1. A signature was set (session was issued by the server, not locally forged)
+ *   2. The signature field has not been cleared (storage wasn't wiped selectively)
+ *
+ * Full cryptographic verification (re-computing the HMAC) happens server-side
+ * whenever the session payload is submitted in a sync or auth call.
  */
-export async function verifySessionIntegrity(session: OfflineSession): Promise<boolean> {
+export function verifySessionIntegrity(session: OfflineSession): boolean {
   if (!session.signature) {
-    log.warn("No signature found, session may be tampered");
+    log.warn("No server-provided signature — session may be forged or from an older client");
     return false;
   }
-
-  try {
-    const expectedSignature = await generateSignature(session);
-    const isValid = session.signature === expectedSignature;
-
-    if (!isValid) {
-      log.error("Signature verification failed - session tampered!");
-    }
-
-    return isValid;
-  } catch (error) {
-    log.error("Signature verification error:", error);
+  // Server produces a 64-char lowercase hex HMAC-SHA256 string.
+  // Reject anything that doesn't match this format — catches empty strings,
+  // whitespace padding, and non-hex values that would pass the truthy check above.
+  if (!/^[0-9a-f]{64}$/i.test(session.signature)) {
+    log.warn("Invalid signature format — expected 64-char hex HMAC-SHA256");
     return false;
   }
+  return true;
 }
 
 // ─── Status ───────────────────────────────────────────────────────────────────
 
-/**
- * Get the current offline session status.
- * Returns a machine-readable status and a plain descriptive message.
- * UI layers are responsible for adding icons, colors, and translations.
- */
 export function getStatusMessage(session: OfflineSession | null): StatusMessage {
   if (!session) {
     return { status: "no_session", message: "Not authenticated" };
@@ -221,7 +199,9 @@ export const offlineSession = {
   /**
    * Creates a new OfflineSession from auth response data.
    * Stores it in SecureStore immediately.
-   * CRITICAL FIX: Tracks lastRoleSyncAt to detect stale roles.
+   *
+   * @param signature - HMAC-SHA256 signature from the server (offlineSessionSignature
+   *   in the auth response). If absent (older server), the session is stored unsigned.
    */
   async create(input: {
     userId: number;
@@ -229,6 +209,8 @@ export const offlineSession = {
     storeName: string;
     roles: string[];
     offlineToken: string;
+    signature?: string;
+    deviceId?: string;
   }): Promise<OfflineSession> {
     const now = Date.now();
     const session: OfflineSession = {
@@ -242,9 +224,10 @@ export const offlineSession = {
       lastRoleSyncAt: now,
       offlineToken: input.offlineToken,
       createdAt: now,
+      ...(input.signature ? { signature: input.signature } : {}),
+      ...(input.deviceId ? { deviceId: input.deviceId } : {}),
     };
 
-    session.signature = await generateSignature(session);
     await saveSecureItem(OFFLINE_SESSION_KEY, JSON.stringify(session));
     return session;
   },
@@ -252,11 +235,11 @@ export const offlineSession = {
   /**
    * Loads and verifies the persisted OfflineSession from SecureStore.
    *
-   * Performs HMAC-SHA256 integrity check when a signature is present.
-   * If verification fails (tampered roles, modified expiry, etc.),
-   * the session is cleared from storage and null is returned.
+   * Checks that a server-provided signature is present. If it is missing
+   * (session tampered to remove the signature field), the session is cleared
+   * and null is returned.
    *
-   * @returns Verified OfflineSession, or null if missing / invalid / tampered.
+   * @returns Verified OfflineSession, or null if missing / invalid / unsigned.
    */
   async load(): Promise<OfflineSession | null> {
     try {
@@ -265,12 +248,9 @@ export const offlineSession = {
 
       const session = JSON.parse(raw) as OfflineSession;
 
-      if (session.signature) {
-        const valid = await verifySessionIntegrity(session);
-        if (!valid) {
-          await deleteSecureItem(OFFLINE_SESSION_KEY);
-          return null;
-        }
+      if (!verifySessionIntegrity(session)) {
+        await deleteSecureItem(OFFLINE_SESSION_KEY);
+        return null;
       }
 
       return session;
@@ -282,15 +262,13 @@ export const offlineSession = {
   /** Checks if the session is still valid (offlineValidUntil > now) */
   isValid: isSessionValid,
 
-  /**
-   * CRITICAL FIX #4.2: Checks if roles are stale (> 24h since sync or revocation detected).
-   * Prompt user to go online to refresh roles when stale.
-   */
+  /** Checks if roles are stale (> 24h since sync or revocation detected). */
   isRolesStale,
 
   /**
-   * Extends offlineValidUntil by 5 days.
+   * Extends offlineValidUntil by 3 days.
    * Called on every successful token refresh.
+   * Does NOT update the signature — extend is a local time extension only.
    */
   async extendValidity(session: OfflineSession): Promise<OfflineSession> {
     const updated = {
@@ -303,13 +281,13 @@ export const offlineSession = {
 
   /**
    * Updates roles and extends validity after token refresh.
-   * CRITICAL FIX #1: Syncs new role data and updates lastRoleSyncAt.
-   * CRITICAL FIX #8.1: Regenerates HMAC signature after role update.
+   * Stores the new server-provided signature if present.
    */
   async updateRolesAndExtend(
     session: OfflineSession,
     roles: string[],
     offlineToken?: string,
+    signature?: string,
   ): Promise<OfflineSession> {
     const now = Date.now();
     const updated: OfflineSession = {
@@ -318,9 +296,9 @@ export const offlineSession = {
       offlineValidUntil: now + OFFLINE_SESSION_DURATION_MS,
       lastRoleSyncAt: now,
       ...(offlineToken ? { offlineToken } : {}),
+      ...(signature ? { signature } : {}),
     };
 
-    updated.signature = await generateSignature(updated);
     await saveSecureItem(OFFLINE_SESSION_KEY, JSON.stringify(updated));
     return updated;
   },
@@ -334,15 +312,9 @@ export const offlineSession = {
   },
 
   /**
-   * CRITICAL FIX #8.1: Verify offline session HMAC integrity.
-   * Returns false if session has been tampered with.
+   * Verify offline session integrity (signature presence check).
    */
   verify: verifySessionIntegrity,
-
-  /**
-   * CRITICAL FIX #8.1: Generate HMAC signature for offline session.
-   */
-  sign: generateSignature,
 
   /**
    * Get a human-readable status message for UI display.

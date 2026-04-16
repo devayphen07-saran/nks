@@ -1,11 +1,14 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { RolesRepository } from './roles.repository';
-import { RoleEntityPermissionRepository } from './role-entity-permission.repository';
+import { RolesRepository } from './repositories/roles.repository';
+import { RoleEntityPermissionRepository } from './repositories/role-entity-permission.repository';
 import { RoleMapper } from './mapper/role.mapper';
 import { CreateRoleDto, UpdateRoleDto } from './dto';
 import type { EntityPermission } from './dto/role-response.dto';
 import { NotFoundException, ForbiddenException } from '../../common/exceptions';
 import { ErrorCode } from '../../common/constants/error-codes.constants';
+import { AuditService } from '../audit/audit.service';
+import { AuthUsersRepository } from '../auth/repositories/auth-users.repository';
+import { PermissionsChangelogRepository } from '../auth/repositories/permissions-changelog.repository';
 
 @Injectable()
 export class RolesService {
@@ -14,48 +17,12 @@ export class RolesService {
   constructor(
     private readonly rolesRepository: RolesRepository,
     private readonly roleEntityPermissionRepository: RoleEntityPermissionRepository,
+    private readonly auditService: AuditService,
+    private readonly authUsersRepository: AuthUsersRepository,
+    private readonly changelogRepository: PermissionsChangelogRepository,
   ) {}
 
   // ─── Roles ────────────────────────────────────────────────────────────────
-
-  /**
-   * List all roles with optional filtering and pagination.
-   */
-  async listRoles(
-    opts: { search?: string; page?: number; pageSize?: number } = {},
-  ) {
-    const { rows, total } = await this.rolesRepository.findAll(opts);
-    return {
-      rows: rows.map(RoleMapper.toResponseDto),
-      total,
-    };
-  }
-
-  /**
-   * Get a role by numeric ID.
-   */
-  async getRole(id: number) {
-    const role = await this.rolesRepository.findById(id);
-    if (!role)
-      throw new NotFoundException({
-        errorCode: ErrorCode.ROLE_NOT_FOUND,
-        message: 'Role not found',
-      });
-    return RoleMapper.toResponseDto(role);
-  }
-
-  /**
-   * Get a role by GUUID (public-safe identifier).
-   */
-  async getRoleByGuuid(guuid: string) {
-    const role = await this.rolesRepository.findByGuuid(guuid);
-    if (!role)
-      throw new NotFoundException({
-        errorCode: ErrorCode.ROLE_NOT_FOUND,
-        message: 'Role not found',
-      });
-    return RoleMapper.toResponseDto(role);
-  }
 
   /**
    * Get role details with all permissions (entity + route).
@@ -162,14 +129,17 @@ export class RolesService {
     this.logger.log(
       `Created role: ${dto.code} for store ${dto.storeId} by user ${userId}`,
     );
+    this.auditService
+      .logRoleCreated(userId, created.id, created.code, dto.storeId)
+      .catch(() => {});
     return RoleMapper.toResponseDto(created);
   }
 
   /**
    * Update role by GUUID with store ownership verification.
+   * Also applies entity permission changes atomically in the same call.
    */
   async updateRoleByGuuid(guuid: string, dto: UpdateRoleDto, userId: number) {
-    // Get raw entity for internal security checks requiring storeFk
     const role = await this.rolesRepository.findByGuuid(guuid);
     if (!role)
       throw new NotFoundException({
@@ -177,51 +147,51 @@ export class RolesService {
         message: 'Role not found',
       });
 
-    // Verify user owns the store
     if (role.storeFk) {
       const isOwner = await this.rolesRepository.isStoreOwner(
         userId,
         role.storeFk,
       );
-      if (!isOwner) {
+      if (!isOwner)
         throw new ForbiddenException({
           errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
           message: 'You do not have access to this role.',
         });
-      }
     }
 
-    return this.updateRole(role.id, dto, userId);
-  }
-
-  /**
-   * Update a role by ID.
-   */
-  async updateRole(id: number, dto: UpdateRoleDto, modifiedBy: number) {
-    const role = await this.rolesRepository.findById(id);
-    if (!role)
-      throw new NotFoundException({
-        errorCode: ErrorCode.ROLE_NOT_FOUND,
-        message: 'Role not found',
-      });
-    if (role.isSystem) {
+    if (role.isSystem)
       throw new ForbiddenException({
         errorCode: ErrorCode.ROLE_IS_SYSTEM,
         message: 'System roles cannot be modified',
       });
-    }
-    const updated = await this.rolesRepository.update(id, {
+
+    const updated = await this.rolesRepository.update(role.id, {
       roleName: dto.name,
       description: dto.description,
       sortOrder: dto.sortOrder,
-      modifiedBy,
+      modifiedBy: userId,
     });
     if (!updated)
       throw new NotFoundException({
         errorCode: ErrorCode.ROLE_NOT_FOUND,
         message: 'Role not found',
       });
-    this.logger.log(`Updated role ${id} by user ${modifiedBy}`);
+
+    if (dto.entityPermissions && Object.keys(dto.entityPermissions).length > 0)
+      await this.updateEntityPermissions(
+        role.id,
+        dto.entityPermissions,
+        userId,
+      );
+
+    this.logger.log(`Updated role ${role.id} by user ${userId}`);
+    this.auditService
+      .logRoleUpdated(userId, role.id, role.code, {
+        name: dto.name,
+        description: dto.description,
+        sortOrder: dto.sortOrder,
+      })
+      .catch(() => {});
     return RoleMapper.toResponseDto(updated);
   }
 
@@ -236,6 +206,7 @@ export class RolesService {
   async updateEntityPermissions(
     roleId: number,
     entityPermissions: Record<string, Partial<EntityPermission>>,
+    actorId?: number,
   ): Promise<void> {
     for (const [entityCode, perms] of Object.entries(entityPermissions)) {
       // Delete existing permission for this entity
@@ -244,16 +215,18 @@ export class RolesService {
         entityCode,
       );
 
+      const newPerms = {
+        canView: perms.canView ?? false,
+        canCreate: perms.canCreate ?? false,
+        canEdit: perms.canEdit ?? false,
+        canDelete: perms.canDelete ?? false,
+      };
+
       // Create new permission (repository returns null if entity type not found)
       const created = await this.roleEntityPermissionRepository.create(
         roleId,
         entityCode,
-        {
-          canView: perms.canView ?? false,
-          canCreate: perms.canCreate ?? false,
-          canEdit: perms.canEdit ?? false,
-          canDelete: perms.canDelete ?? false,
-        },
+        newPerms,
       );
 
       if (!created) {
@@ -262,28 +235,85 @@ export class RolesService {
           message: `Entity type '${entityCode}' not found`,
         });
       }
+
+      if (actorId) {
+        this.auditService
+          .logEntityPermissionChanged(actorId, roleId, entityCode, newPerms)
+          .catch(() => {});
+      }
+
+      // Fan-out: bump permissionsVersion + write changelog for every user who holds
+      // this role so their next /permissions-delta returns the precise diff.
+      // Fire-and-forget — changelog failure must never block the role update itself.
+      this.fanOutPermissionChange(
+        roleId,
+        entityCode,
+        'MODIFIED',
+        newPerms,
+      ).catch((err: unknown) => {
+        this.logger.error(
+          `Permission changelog fan-out failed for role=${roleId} entity=${entityCode}`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      });
     }
     this.logger.debug(`Updated entity permissions for role ${roleId}`);
   }
 
+  // ─── Private Helpers ──────────────────────────────────────────────────────
+
   /**
-   * Delete a role by ID.
+   * Increment permissionsVersion and write a changelog entry for every active
+   * user who holds `roleId`. Each user is processed independently — a failure
+   * for one user is logged and skipped rather than aborting the full fan-out.
+   *
+   * @param roleId     - Role whose entity permission just changed
+   * @param entityCode - Affected entity (e.g. 'PRODUCT')
+   * @param operation  - 'ADDED' | 'MODIFIED' | 'REMOVED'
+   * @param newPerms   - New permission flags (null for REMOVED)
    */
-  async deleteRole(id: number, deletedBy: number) {
-    const role = await this.rolesRepository.findById(id);
-    if (!role)
-      throw new NotFoundException({
-        errorCode: ErrorCode.ROLE_NOT_FOUND,
-        message: 'Role not found',
-      });
-    if (role.isSystem) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.ROLE_CANNOT_DELETE_SYSTEM,
-        message: 'System roles cannot be deleted',
-      });
-    }
-    await this.rolesRepository.softDelete(id, deletedBy);
-    this.logger.log(`Deleted role ${id} by user ${deletedBy}`);
+  private async fanOutPermissionChange(
+    roleId: number,
+    entityCode: string,
+    operation: 'ADDED' | 'MODIFIED' | 'REMOVED',
+    newPerms: Record<string, boolean> | null,
+  ): Promise<void> {
+    const userIds = await this.rolesRepository.findUsersByRoleId(roleId);
+    if (userIds.length === 0) return;
+
+    let successCount = 0;
+
+    await Promise.all(
+      userIds.map(async (userId) => {
+        try {
+          const newVersion =
+            await this.authUsersRepository.incrementPermissionsVersion(userId);
+          const match = /^v(\d+)$/.exec(newVersion);
+          const versionNumber = match ? parseInt(match[1], 10) : 0;
+
+          await this.changelogRepository.record([
+            {
+              userFk: userId,
+              versionNumber,
+              entityCode,
+              operation,
+              data: newPerms,
+            },
+          ]);
+
+          successCount++;
+        } catch (err) {
+          this.logger.error(
+            `fanOutPermissionChange: failed for user=${userId} role=${roleId} entity=${entityCode}`,
+            err instanceof Error ? err.stack : String(err),
+          );
+        }
+      }),
+    );
+
+    this.logger.log(
+      `fanOutPermissionChange: role=${roleId} entity=${entityCode} op=${operation} users=${successCount}/${userIds.length}`,
+    );
   }
 
   // ─── Authorization helpers ────────────────────────────────────────────────

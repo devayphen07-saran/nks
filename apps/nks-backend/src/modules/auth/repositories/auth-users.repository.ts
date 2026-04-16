@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { PG_UNIQUE_VIOLATION } from '../../../common/constants/pg-error-codes';
 import { eq, and, isNull, ne, sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
@@ -283,9 +284,11 @@ export class AuthUsersRepository {
    * Increment version string from format "vN" to "v(N+1)".
    * Extracts numeric part, increments, and reconstructs.
    */
-  private incrementVersion(currentVersion: string): string {
-    const versionNum = parseInt(currentVersion.substring(1), 10) || 1;
-    return `v${versionNum + 1}`;
+  private incrementVersion(currentVersion: string | null | undefined): string {
+    if (!currentVersion) return 'v1';
+    const match = /^v(\d+)$/.exec(currentVersion);
+    if (!match) return 'v1'; // reset on malformed value
+    return `v${parseInt(match[1], 10) + 1}`;
   }
 
   /**
@@ -351,8 +354,7 @@ export class AuthUsersRepository {
       return user ?? null;
     } catch (err) {
       // SECURITY: Handle unique constraint violation (email already exists)
-      // PostgreSQL error code 23505 = unique constraint violation
-      if ((err as { code?: string }).code === '23505') {
+      if ((err as { code?: string }).code === PG_UNIQUE_VIOLATION) {
         // Treat as null rather than throwing — lets caller decide action
         return null;
       }

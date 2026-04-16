@@ -9,6 +9,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ApiResponse } from '../../common/utils/api-response';
@@ -27,20 +28,13 @@ import type {
   StoreCategoriesListResponse,
   CurrenciesListResponse,
   VolumesListResponse,
-  PlanTypesListResponse,
-  TaxLineStatusesListResponse,
-  EntityTypesListResponse,
-  NotificationStatusesListResponse,
-  StaffInviteStatusesListResponse,
-  BillingFrequenciesListResponse,
-  TaxRegistrationTypesListResponse,
-  TaxFilingFrequenciesListResponse,
 } from './dto/lookups-response.dto';
 import type {
   CreateLookupValueDto,
   UpdateLookupValueDto,
   LookupTypesListResponse,
   LookupValuesListResponse,
+  LookupValueAdminResponse,
 } from './dto/admin-lookups.dto';
 
 @ApiTags('Lookups')
@@ -153,114 +147,6 @@ export class LookupsController {
     return ApiResponse.ok(data, 'Volumes retrieved successfully');
   }
 
-  // ── Public: NEW Dedicated Lookup Tables (Phase 1 Normalization) ──────────────
-
-  /**
-   * GET /lookups/plan-types
-   * Get all active plan types (STARTER, PROFESSIONAL, ENTERPRISE, PREMIUM, STANDARD, TRIAL)
-   */
-  @Get('plan-types')
-  @Public()
-  async getPlanTypes(): Promise<ApiResponse<PlanTypesListResponse>> {
-    const data = await this.lookupsService.getPlanTypes();
-    return ApiResponse.ok(data, 'Plan types retrieved successfully');
-  }
-
-  /**
-   * GET /lookups/tax-line-statuses
-   * Get all active tax line statuses (PENDING, APPROVED, REJECTED)
-   */
-  @Get('tax-line-statuses')
-  @Public()
-  async getTaxLineStatuses(): Promise<
-    ApiResponse<TaxLineStatusesListResponse>
-  > {
-    const data = await this.lookupsService.getTaxLineStatuses();
-    return ApiResponse.ok(data, 'Tax line statuses retrieved successfully');
-  }
-
-  /**
-   * GET /lookups/entity-types
-   * Get all active entity types for role permissions (INVOICE, PRODUCT, CUSTOMER, etc.)
-   */
-  @Get('entity-types')
-  @Public()
-  async getEntityTypes(): Promise<ApiResponse<EntityTypesListResponse>> {
-    const data = await this.lookupsService.getEntityTypes();
-    return ApiResponse.ok(data, 'Entity types retrieved successfully');
-  }
-
-  /**
-   * GET /lookups/notification-statuses
-   * Get all active notification statuses (PENDING, SENT, DELIVERED, READ, FAILED, EXPIRED)
-   */
-  @Get('notification-statuses')
-  @Public()
-  async getNotificationStatuses(): Promise<
-    ApiResponse<NotificationStatusesListResponse>
-  > {
-    const data = await this.lookupsService.getNotificationStatuses();
-    return ApiResponse.ok(data, 'Notification statuses retrieved successfully');
-  }
-
-  /**
-   * GET /lookups/staff-invite-statuses
-   * Get all active staff invite statuses (PENDING, ACCEPTED, REVOKED, EXPIRED)
-   */
-  @Get('staff-invite-statuses')
-  @Public()
-  async getStaffInviteStatuses(): Promise<
-    ApiResponse<StaffInviteStatusesListResponse>
-  > {
-    const data = await this.lookupsService.getStaffInviteStatuses();
-    return ApiResponse.ok(data, 'Staff invite statuses retrieved successfully');
-  }
-
-  /**
-   * GET /lookups/billing-frequencies
-   * Get all active billing frequencies (MONTHLY, QUARTERLY, SEMI_ANNUAL, ANNUAL, ONE_TIME)
-   */
-  @Get('billing-frequencies')
-  @Public()
-  async getBillingFrequencies(): Promise<
-    ApiResponse<BillingFrequenciesListResponse>
-  > {
-    const data = await this.lookupsService.getBillingFrequencies();
-    return ApiResponse.ok(data, 'Billing frequencies retrieved successfully');
-  }
-
-  /**
-   * GET /lookups/tax-registration-types
-   * Get all active tax registration types (REGULAR, COMPOSITION, EXEMPT, SEZ, SPECIAL)
-   */
-  @Get('tax-registration-types')
-  @Public()
-  async getTaxRegistrationTypes(): Promise<
-    ApiResponse<TaxRegistrationTypesListResponse>
-  > {
-    const data = await this.lookupsService.getTaxRegistrationTypes();
-    return ApiResponse.ok(
-      data,
-      'Tax registration types retrieved successfully',
-    );
-  }
-
-  /**
-   * GET /lookups/tax-filing-frequencies
-   * Get all active tax filing frequencies (MONTHLY, QUARTERLY, HALF_YEARLY, ANNUAL)
-   */
-  @Get('tax-filing-frequencies')
-  @Public()
-  async getTaxFilingFrequencies(): Promise<
-    ApiResponse<TaxFilingFrequenciesListResponse>
-  > {
-    const data = await this.lookupsService.getTaxFilingFrequencies();
-    return ApiResponse.ok(
-      data,
-      'Tax filing frequencies retrieved successfully',
-    );
-  }
-
   // ── Admin: Lookup Configuration ─────────────────────────────────────────────
 
   /**
@@ -306,7 +192,7 @@ export class LookupsController {
   async createLookupValue(
     @Param('code') code: string,
     @Body() dto: CreateLookupValueDto,
-  ): Promise<ApiResponse<LookupValuesListResponse>> {
+  ): Promise<ApiResponse<LookupValueAdminResponse>> {
     const data = await this.lookupsService.createLookupValue(code, dto);
     return ApiResponse.ok(data, 'Lookup value created successfully');
   }
@@ -322,10 +208,10 @@ export class LookupsController {
   @ApiOperation({ summary: 'Update a lookup value (SUPER_ADMIN)' })
   async updateLookupValue(
     @Param('code') code: string,
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateLookupValueDto,
-  ): Promise<ApiResponse<LookupValuesListResponse>> {
-    const data = await this.lookupsService.updateLookupValue(code, +id, dto);
+  ): Promise<ApiResponse<LookupValueAdminResponse>> {
+    const data = await this.lookupsService.updateLookupValue(code, id, dto);
     return ApiResponse.ok(data, 'Lookup value updated successfully');
   }
 
@@ -341,8 +227,8 @@ export class LookupsController {
   @ApiOperation({ summary: 'Delete a lookup value (SUPER_ADMIN)' })
   async deleteLookupValue(
     @Param('code') code: string,
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
   ): Promise<void> {
-    return this.lookupsService.deleteLookupValue(code, +id);
+    await this.lookupsService.deleteLookupValue(code, id);
   }
 }

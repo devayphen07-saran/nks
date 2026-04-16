@@ -1,10 +1,13 @@
 import { Redirect } from "expo-router";
+import { useSelector } from "react-redux";
 import { useAuth } from "../../../store";
+import { selectIsSuperAdmin } from "../../../store/auth-slice";
+import type { RootState } from "../../../store";
 
 export default function WorkspaceIndex() {
   const authState = useAuth();
   const roles = authState.authResponse?.access?.roles ?? [];
-  const isSuperAdmin = authState.authResponse?.access?.isSuperAdmin ?? false;
+  const isSuperAdmin = useSelector((state: RootState) => selectIsSuperAdmin(state));
 
   const hasPersonalAccess = roles.some((r: any) => r.roleCode === "CUSTOMER");
 

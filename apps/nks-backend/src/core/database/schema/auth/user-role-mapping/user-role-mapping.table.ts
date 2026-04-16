@@ -58,6 +58,11 @@ export const userRoleMapping = pgTable(
     assignedAt: timestamp('assigned_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
+
+    // Optional expiry for temporary role grants (e.g., trial MANAGER for 7 days).
+    // NULL means the assignment never expires.
+    // AuthGuard filters out rows where expires_at < NOW().
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
   },
   (table) => [
     // ── Uniqueness ─────────────────────────────────────────────────────────
@@ -88,6 +93,7 @@ export const userRoleMapping = pgTable(
     index('urm_role_idx').on(table.roleFk),
     index('urm_store_idx').on(table.storeFk),
     index('urm_user_store_idx').on(table.userFk, table.storeFk),
+    index('urm_expires_at_idx').on(table.expiresAt),
   ],
 );
 

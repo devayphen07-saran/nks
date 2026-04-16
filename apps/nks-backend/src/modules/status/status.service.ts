@@ -4,7 +4,7 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
-import { StatusRepository } from './status.repository';
+import { StatusRepository } from './repositories/status.repository';
 import { StatusMapper } from './mapper/status.mapper';
 import type {
   CreateStatusDto,

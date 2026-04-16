@@ -6,6 +6,7 @@ import {
   index,
   bigint,
   boolean,
+  uuid,
 } from 'drizzle-orm/pg-core';
 import { betterAuthEntity } from '../../base.entity';
 import { users } from '../../auth/users';
@@ -75,6 +76,11 @@ export const userSession = pgTable(
     // Role hash (SHA256) for detecting role changes between requests
     // If this differs from current role hash, roles have changed and session should be invalidated
     roleHash: varchar('role_hash', { length: 64 }),
+
+    // JWT ID — the jti claim from the RS256 access token issued for this session.
+    // Stored here so that on logout/revoke we can blocklist this specific JWT
+    // without decoding the token string at revocation time.
+    jti: uuid('jti'),
 
     // Refresh Token Rotation (security)
     // When null: refresh token is still valid

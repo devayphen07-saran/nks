@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   getSecureItem,
   saveSecureItem,
@@ -53,17 +52,17 @@ export const createAuthStorage = (
     setRefreshToken: (token: string) =>
       saveSecureItem(resolvedKeys.refreshToken, token),
     getUser: async <T = unknown>() => {
-      const stored = await AsyncStorage.getItem(resolvedKeys.user);
+      const stored = await getSecureItem(resolvedKeys.user);
       return safeParse<T>(stored);
     },
     setUser: async <T>(user: T) => {
-      await AsyncStorage.setItem(resolvedKeys.user, stringify(user));
+      await saveSecureItem(resolvedKeys.user, stringify(user));
     },
     clearAuthData: async () => {
       await Promise.all([
         deleteSecureItem(resolvedKeys.accessToken),
         deleteSecureItem(resolvedKeys.refreshToken),
-        AsyncStorage.removeItem(resolvedKeys.user),
+        deleteSecureItem(resolvedKeys.user),
       ]);
     },
   };

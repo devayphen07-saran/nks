@@ -1,8 +1,7 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { LocationService } from './location.service';
 import { ApiResponse } from '../../common/utils/api-response';
-import { AuthGuard } from '../../common/guards/auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import {
   StateListResponse,
@@ -14,7 +13,6 @@ import {
 
 @ApiTags('Location')
 @Controller('location')
-@UseGuards(AuthGuard)
 export class LocationController {
   constructor(private readonly locationService: LocationService) {}
 
@@ -47,19 +45,17 @@ export class LocationController {
   }
 
   /**
-   * GET /location/states/:stateId/districts
-   * Get all districts for a state
+   * GET /location/states/:code/districts
+   * Get all districts for a state by state code (e.g. 'KA', 'MH')
    * Public endpoint — no authentication required
    */
-  @Get('states/:stateId/districts')
+  @Get('states/:code/districts')
   @Public()
-  @ApiOperation({ summary: 'Get districts for a state' })
+  @ApiOperation({ summary: 'Get districts for a state by state code' })
   async getDistrictsByState(
-    @Param('stateId') stateId: string,
+    @Param('code') code: string,
   ): Promise<ApiResponse<DistrictListResponse>> {
-    const result = await this.locationService.getDistrictsByState(
-      Number(stateId),
-    );
+    const result = await this.locationService.getDistrictsByStateCode(code);
     return ApiResponse.ok(result, 'Districts retrieved successfully');
   }
 
@@ -72,11 +68,9 @@ export class LocationController {
   @Public()
   @ApiOperation({ summary: 'Get pincodes for a district' })
   async getPincodesByDistrict(
-    @Param('districtId') districtId: string,
+    @Param('districtId', ParseIntPipe) districtId: number,
   ): Promise<ApiResponse<PincodeListResponse>> {
-    const result = await this.locationService.getPincodesByDistrict(
-      Number(districtId),
-    );
+    const result = await this.locationService.getPincodesByDistrict(districtId);
     return ApiResponse.ok(result, 'Pincodes retrieved successfully');
   }
 

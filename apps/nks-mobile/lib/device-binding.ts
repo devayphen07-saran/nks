@@ -10,9 +10,15 @@ import * as crypto from "expo-crypto";
 import * as Device from "expo-device";
 import * as Application from "expo-application";
 
-const DEVICE_BINDING_SECRET = process.env["DEVICE_BINDING_SECRET"] ?? "";
-if (__DEV__ && !DEVICE_BINDING_SECRET) {
-  console.warn("[DeviceBinding] DEVICE_BINDING_SECRET is not set — HMAC tamper detection is disabled");
+const DEVICE_BINDING_SECRET = process.env["EXPO_PUBLIC_DEVICE_BINDING_SECRET"] ?? "";
+if (!DEVICE_BINDING_SECRET) {
+  if (__DEV__) {
+    console.warn("[DeviceBinding] DEVICE_BINDING_SECRET is not set — HMAC tamper detection is disabled");
+  } else {
+    // Hard fail in production — shipping without a binding secret means token
+    // binding provides no protection. Set DEVICE_BINDING_SECRET in your .env.
+    throw new Error("[DeviceBinding] DEVICE_BINDING_SECRET must be set in production builds");
+  }
 }
 
 export interface DeviceIdentity {

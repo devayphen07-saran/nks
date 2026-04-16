@@ -133,11 +133,8 @@ export const authSlice = createSlice({
       if (state.user && me) {
         state.user.user.name = (me.name as string) ?? state.user.user.name;
         state.user.user.email = (me.email as string) ?? state.user.user.email;
-        state.user.user.emailVerified = (me.emailVerified as boolean) ?? state.user.user.emailVerified;
         state.user.user.phoneNumber = (me.phoneNumber as string | null) ?? state.user.user.phoneNumber;
-        state.user.user.image = (me.image as string | null) ?? state.user.user.image;
         if (me.roles) state.user.access.roles = me.roles as typeof state.user.access.roles;
-        if (me.isSuperAdmin !== undefined) state.user.access.isSuperAdmin = me.isSuperAdmin as boolean;
         if (me.guuid) state.user.user.guuid = me.guuid as string;
       }
       state.status = "AUTHENTICATED";

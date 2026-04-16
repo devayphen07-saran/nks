@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { EntityStatusRepository } from './entity-status.repository';
+import { EntityStatusRepository } from './repositories/entity-status.repository';
 import { StatusService } from '../status/status.service';
 import type { AssignStatusDto, EntityStatusResponse } from './dto/entity-status.dto';
 import { toEntityStatusResponse } from './mapper/entity-status.mapper';

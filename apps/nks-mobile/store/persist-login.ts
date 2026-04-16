@@ -11,6 +11,7 @@ import {
   analyzeStorageUsage,
 } from "../lib/token-validators";
 import { sanitizeError } from "../lib/log-sanitizer";
+import { getStableDeviceId } from "../lib/device-binding";
 import { JWTManager } from "../lib/jwt-manager";
 import { createLogger } from "../lib/logger";
 import type { AppDispatch } from "./index";
@@ -104,12 +105,15 @@ export async function persistLogin(
           const activeStoreRole = roles.find((r) => r.storeId === activeStoreId);
           const storeName = activeStoreRole?.storeName ?? "Store";
           const roleCodes = roles.map((r) => r.roleCode);
+          const deviceId = await getStableDeviceId().catch(() => undefined);
           await offlineSession.create({
             userId: parseInt(authResponse.user.id, 10) || 0,
             storeId: activeStoreId,
             storeName,
             roles: roleCodes,
             offlineToken: authResponse.offlineToken ?? "",
+            signature: authResponse.offlineSessionSignature,
+            deviceId,
           });
           log.info("Offline session created");
         })().catch((err) => {

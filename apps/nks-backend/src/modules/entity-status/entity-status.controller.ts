@@ -35,24 +35,12 @@ export class EntityStatusController {
   async getEntityStatusesPublic(
     @Param('entityCode') entityCode: string,
   ): Promise<ApiResponse<EntityStatusListResponse>> {
-    const data = await this.entityStatusService.getStatusesForEntity(entityCode);
-    return ApiResponse.ok(data, `Statuses for '${entityCode}' retrieved successfully`);
-  }
-
-  /**
-   * GET /entity-status/:entityCode
-   * SUPER_ADMIN — get all statuses assigned to an entity.
-   */
-  @Get(':entityCode')
-  @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get all statuses for an entity (SUPER_ADMIN)' })
-  async getEntityStatuses(
-    @Param('entityCode') entityCode: string,
-  ): Promise<ApiResponse<EntityStatusListResponse>> {
-    const data = await this.entityStatusService.getStatusesForEntity(entityCode);
-    return ApiResponse.ok(data, `Statuses for '${entityCode}' retrieved successfully`);
+    const data =
+      await this.entityStatusService.getStatusesForEntity(entityCode);
+    return ApiResponse.ok(
+      data,
+      `Statuses for '${entityCode}' retrieved successfully`,
+    );
   }
 
   /**
@@ -63,7 +51,6 @@ export class EntityStatusController {
   @UseGuards(AuthGuard, RBACGuard)
   @Roles('SUPER_ADMIN')
   @ApiBearerAuth()
-  @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Assign a status to an entity (SUPER_ADMIN)' })
   async assignStatus(
     @Param('entityCode') entityCode: string,

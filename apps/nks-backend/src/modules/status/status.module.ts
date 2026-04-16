@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { StatusController } from './status.controller';
 import { StatusService } from './status.service';
-import { StatusRepository } from './status.repository';
+import { StatusRepository } from './repositories/status.repository';
 import { RolesModule } from '../roles/roles.module';
 
 @Module({

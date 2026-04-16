@@ -28,10 +28,7 @@ export interface AuthUserResponse {
   guuid: string;
   name: string | null;
   email: string | null;
-  emailVerified: boolean;
   phoneNumber: string | null;
-  phoneNumberVerified: boolean;
-  image: string | null;
 }
 
 export interface AuthSessionResponse {
@@ -82,7 +79,6 @@ export interface RouteEntry {
 }
 
 export interface AuthAccessResponse {
-  isSuperAdmin: boolean;
   activeStoreId: number | null;
   roles: UserRoleEntry[];
 }
@@ -106,15 +102,17 @@ export interface ApiMetadataResponse {
   timestamp: string;
 }
 
-export interface AuthResponse extends ApiMetadataResponse {
+export interface AuthResponse {
   user: AuthUserResponse;
   session: AuthSessionResponse;
   access: AuthAccessResponse;
   offlineToken?: string;
+  /** HMAC-SHA256 of the offline session payload, signed server-side. */
+  offlineSessionSignature?: string;
 }
 
-/** @deprecated Use AuthResponse directly — fields are now at top level */
-export type AuthData = Omit<AuthResponse, keyof ApiMetadataResponse>;
+/** Alias kept for backward compatibility with shared libs that imported AuthData. */
+export type AuthData = AuthResponse;
 
 // ─── Profile Completion (unified endpoint for all profile updates) ─────────────
 

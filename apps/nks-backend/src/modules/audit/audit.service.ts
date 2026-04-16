@@ -1,5 +1,8 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { AuditRepository } from './repositories/audit.repository';
+import { AuditMapper } from './mappers/audit.mapper';
+import type { AuditListQuery } from './dto/requests';
+import type { AuditLogResponseDto } from './dto/responses';
 
 export enum AuditEventType {
   LOGIN = 'LOGIN',
@@ -17,6 +20,11 @@ export enum AuditEventType {
   DEVICE_LOGOUT = 'DEVICE_LOGOUT',
   SESSION_TERMINATE = 'SESSION_TERMINATE',
   STORE_DATA_ACCESS = 'STORE_DATA_ACCESS',
+  // Role lifecycle
+  ROLE_CREATED = 'ROLE_CREATED',
+  ROLE_UPDATED = 'ROLE_UPDATED',
+  ROLE_ASSIGNED = 'ROLE_ASSIGNED',
+  ROLE_REVOKED = 'ROLE_REVOKED',
 }
 
 /** Database audit action type enum — must match auditActionTypeEnum in schema */
@@ -64,6 +72,10 @@ const AUDIT_EVENT_TYPE_MAPPING: Record<AuditEventType, DatabaseAuditActionType> 
     [AuditEventType.DEVICE_LOGOUT]: 'LOGOUT',
     [AuditEventType.SESSION_TERMINATE]: 'LOGOUT',
     [AuditEventType.STORE_DATA_ACCESS]: 'UPDATE',
+    [AuditEventType.ROLE_CREATED]: 'CREATE',
+    [AuditEventType.ROLE_UPDATED]: 'UPDATE',
+    [AuditEventType.ROLE_ASSIGNED]: 'ROLE_ASSIGNED',
+    [AuditEventType.ROLE_REVOKED]: 'ROLE_REVOKED',
   };
 
 /** Convert AuditEventType to database enum value with strict validation */
@@ -307,12 +319,80 @@ export class AuditService {
   }
 
   /**
-   * Get audit logs for a user
+   * Log role creation.
    */
-  async getUserAuditLogs(
-    userId: number,
-    limit: number = 100,
-  ): Promise<Awaited<ReturnType<typeof this.auditRepository.findByUserId>>> {
-    return this.auditRepository.findByUserId(userId, limit);
+  async logRoleCreated(
+    actorId: number,
+    roleId: number,
+    roleCode: string,
+    storeId: number,
+  ): Promise<void> {
+    await this.log({
+      eventType: AuditEventType.ROLE_CREATED,
+      userId: actorId,
+      description: `Role '${roleCode}' created for store ${storeId}`,
+      metadata: { roleId, roleCode, storeId },
+      severity: 'info',
+      resourceType: 'role',
+      resourceId: roleId,
+    });
+  }
+
+  /**
+   * Log role update (name / description / sortOrder changes).
+   */
+  async logRoleUpdated(
+    actorId: number,
+    roleId: number,
+    roleCode: string,
+    changes: Record<string, unknown>,
+  ): Promise<void> {
+    await this.log({
+      eventType: AuditEventType.ROLE_UPDATED,
+      userId: actorId,
+      description: `Role '${roleCode}' updated`,
+      metadata: { roleId, roleCode, changes },
+      severity: 'info',
+      resourceType: 'role',
+      resourceId: roleId,
+    });
+  }
+
+  /**
+   * Log entity-permission change on a role.
+   * Called once per entity code that was updated.
+   */
+  async logEntityPermissionChanged(
+    actorId: number,
+    roleId: number,
+    entityCode: string,
+    newPerms: Record<string, boolean>,
+  ): Promise<void> {
+    await this.log({
+      eventType: AuditEventType.PERMISSION_GRANT,
+      userId: actorId,
+      description: `Permissions for '${entityCode}' updated on role ${roleId}`,
+      metadata: { roleId, entityCode, newPerms },
+      severity: 'warning',
+      resourceType: 'role_permission',
+      resourceId: roleId,
+    });
+  }
+
+  /**
+   * Get audit logs with filtering and pagination.
+   */
+  async getLogs(query: AuditListQuery): Promise<{ logs: AuditLogResponseDto[]; total: number }> {
+    const { rows, total } = await this.auditRepository.findAll(query);
+    return { logs: AuditMapper.toResponseDtoList(rows), total };
+  }
+
+  /**
+   * Get a single audit log by ID.
+   */
+  async getById(id: number): Promise<AuditLogResponseDto> {
+    const row = await this.auditRepository.findById(id);
+    if (!row) throw new NotFoundException(`Audit log ${id} not found`);
+    return AuditMapper.toResponseDto(row);
   }
 }

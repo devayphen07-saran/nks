@@ -64,117 +64,117 @@ export const GET_LOOKUP_TYPES: APIData = new APIData(
 );
 
 export const GET_LOOKUP_VALUES: APIData = new APIData(
-  "lookups/admin/code",
+  "lookups/admin/:code",
   APIMethod.GET,
 );
 
 export const CREATE_LOOKUP_VALUE: APIData = new APIData(
-  "lookups/admin/code",
+  "lookups/admin/:code",
   APIMethod.POST,
 );
 
 export const UPDATE_LOOKUP_VALUE: APIData = new APIData(
-  "lookups/admin/code/id",
+  "lookups/admin/:code/:id",
   APIMethod.PUT,
 );
 
 export const DELETE_LOOKUP_VALUE: APIData = new APIData(
-  "lookups/admin/code/id",
+  "lookups/admin/:code/:id",
   APIMethod.DELETE,
 );
 
 // ─── Store Categories ──────────────────────────────────────────────────────
 
 export const GET_STORE_CATEGORIES_ADMIN: APIData = new APIData(
-  "lookups/store-categories",
+  "lookups/admin/store-categories",
   APIMethod.GET,
 );
 
 export const CREATE_STORE_CATEGORY: APIData = new APIData(
-  "lookups/store-categories",
+  "lookups/admin/store-categories",
   APIMethod.POST,
 );
 
 export const UPDATE_STORE_CATEGORY: APIData = new APIData(
-  "lookups/store-categories/id",
+  "lookups/admin/store-categories/:id",
   APIMethod.PUT,
 );
 
 export const DELETE_STORE_CATEGORY: APIData = new APIData(
-  "lookups/store-categories/id",
+  "lookups/admin/store-categories/:id",
   APIMethod.DELETE,
 );
 
 // ─── Store Legal Types ─────────────────────────────────────────────────────
 
 export const GET_STORE_LEGAL_TYPES_ADMIN: APIData = new APIData(
-  "lookups/store-legal-types",
+  "lookups/admin/store-legal-types",
   APIMethod.GET,
 );
 
 export const CREATE_STORE_LEGAL_TYPE: APIData = new APIData(
-  "lookups/store-legal-types",
+  "lookups/admin/store-legal-types",
   APIMethod.POST,
 );
 
 export const UPDATE_STORE_LEGAL_TYPE: APIData = new APIData(
-  "lookups/store-legal-types/id",
+  "lookups/admin/store-legal-types/:id",
   APIMethod.PUT,
 );
 
 export const DELETE_STORE_LEGAL_TYPE: APIData = new APIData(
-  "lookups/store-legal-types/id",
+  "lookups/admin/store-legal-types/:id",
   APIMethod.DELETE,
 );
 
 // ─── Salutations ───────────────────────────────────────────────────────────
 
 export const CREATE_SALUTATION: APIData = new APIData(
-  "lookups/salutations",
+  "lookups/admin/salutations",
   APIMethod.POST,
 );
 
 export const UPDATE_SALUTATION: APIData = new APIData(
-  "lookups/salutations/id",
+  "lookups/admin/salutations/:id",
   APIMethod.PUT,
 );
 
 export const DELETE_SALUTATION: APIData = new APIData(
-  "lookups/salutations/id",
+  "lookups/admin/salutations/:id",
   APIMethod.DELETE,
 );
 
 // ─── Countries ─────────────────────────────────────────────────────────────
 
 export const CREATE_COUNTRY: APIData = new APIData(
-  "lookups/countries",
+  "lookups/admin/countries",
   APIMethod.POST,
 );
 
 export const UPDATE_COUNTRY: APIData = new APIData(
-  "lookups/countries/id",
+  "lookups/admin/countries/:id",
   APIMethod.PUT,
 );
 
 export const DELETE_COUNTRY: APIData = new APIData(
-  "lookups/countries/id",
+  "lookups/admin/countries/:id",
   APIMethod.DELETE,
 );
 
 // ─── Designations ──────────────────────────────────────────────────────────
 
 export const CREATE_DESIGNATION: APIData = new APIData(
-  "lookups/designations",
+  "lookups/admin/designations",
   APIMethod.POST,
 );
 
 export const UPDATE_DESIGNATION: APIData = new APIData(
-  "lookups/designations/id",
+  "lookups/admin/designations/:id",
   APIMethod.PUT,
 );
 
 export const DELETE_DESIGNATION: APIData = new APIData(
-  "lookups/designations/id",
+  "lookups/admin/designations/:id",
   APIMethod.DELETE,
 );
 

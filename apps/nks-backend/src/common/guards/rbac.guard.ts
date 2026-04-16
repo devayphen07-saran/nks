@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { RoleEntityPermissionRepository } from '../../modules/roles/role-entity-permission.repository';
+import { RoleEntityPermissionRepository } from '../../modules/roles/repositories/role-entity-permission.repository';
 import { ErrorCode } from '../constants/error-codes.constants';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import {
@@ -60,8 +60,15 @@ export class RBACGuard implements CanActivate {
     );
 
     if (requiredRoles?.length) {
-      const userRoleCodes = roles.map((r: { roleCode: string }) => r.roleCode);
-      const hasRole = requiredRoles.some((r) => userRoleCodes.includes(r));
+      // Prevent privilege escalation: a user with STORE_OWNER in store A must not
+      // satisfy a @Roles check while their activeStoreId points to store B.
+      // A role with storeId=null is store-agnostic and always matches.
+      const activeStoreId = user.activeStoreId;
+      const hasRole = requiredRoles.some((required) =>
+        roles.some(
+          (r) => r.roleCode === required && (r.storeId === null || r.storeId === activeStoreId),
+        ),
+      );
       if (!hasRole) {
         throw new ForbiddenException({
           errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
@@ -87,6 +94,18 @@ export class RBACGuard implements CanActivate {
         throw new ForbiddenException({
           errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
           message: 'No active store selected',
+        });
+      }
+
+      // Verify the user actually holds a role in activeStoreId — guards against
+      // a session where activeStoreId was set to a store the user no longer belongs to
+      const hasRoleInStore = roles.some(
+        (r: { roleCode: string; storeId: number | null }) => r.storeId === storeId,
+      );
+      if (!hasRoleInStore) {
+        throw new ForbiddenException({
+          errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+          message: 'No active role in the selected store',
         });
       }
 

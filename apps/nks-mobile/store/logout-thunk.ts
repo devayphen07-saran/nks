@@ -6,15 +6,15 @@ import { tokenMutex } from "../lib/token-mutex";
 import { offlineSession } from "../lib/offline-session";
 import { sanitizeError } from "../lib/log-sanitizer";
 import { JWTManager } from "../lib/jwt-manager";
-import { resetRateLimiters } from "../lib/rate-limiter";
+import { clearRateLimiters } from "../lib/rate-limiter";
 import { resetRefreshState } from "../lib/jwt-refresh";
 import { resetInterceptorState } from "../lib/axios-interceptors";
 import { resetSyncState } from "../lib/sync-engine";
+import { resetServerTime } from "../lib/server-time";
 import { DeviceManager } from "../lib/device-manager";
 import { createLogger } from "../lib/logger";
 import { clearAllTables } from "../lib/local-db";
 import { deleteDbKey } from "../lib/db-key";
-import { IS_SHARED_DEVICE } from "../lib/device-config";
 import type { AppDispatch } from "./index";
 
 const log = createLogger("Logout");
@@ -47,17 +47,17 @@ export const logoutThunk = createAsyncThunk<
       // Clear all synced data from local database
       await clearAllTables();
 
-      // For shared devices, also delete the encryption key so next user cannot access cached data
-      if (IS_SHARED_DEVICE) {
-        try {
-          await deleteDbKey();
-        } catch (err) {
-          log.error("Failed to delete DB key on shared device:", err);
-        }
+      // Always delete the DB encryption key so the next session (same or different user)
+      // cannot access any residual schema or cached data from this session.
+      try {
+        await deleteDbKey();
+      } catch (err) {
+        log.error("Failed to delete DB key on logout:", err);
       }
 
-      // Reset OTP rate limiters so a fresh login session starts clean
-      resetRateLimiters();
+      // Clear OTP rate limiters (removes persisted state from AsyncStorage)
+      await clearRateLimiters();
+      resetServerTime();
       dispatch(logoutAction());
       log.info("Session and offline data cleared successfully");
     } catch (error) {

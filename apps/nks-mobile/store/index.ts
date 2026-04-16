@@ -28,9 +28,16 @@ export const useAuth = () => useRootSelector((state: RootState) => state.auth);
 export const useAuthUser = () =>
   useRootSelector((state: RootState) => state.auth.authResponse?.user);
 
+// Concurrency guard — prevents double-logout if notifyExpired() fires multiple
+// times in quick succession (e.g. two simultaneous 401 responses).
+let _logoutInProgress = false;
+
 // HIGH FIX #2: Make logout atomic — clear storage BEFORE updating Redux state
 // Prevents race condition where Redux is cleared but SecureStore still has old token
 tokenManager.onExpired(async () => {
+  if (_logoutInProgress) return;
+  _logoutInProgress = true;
+
   try {
     // Clear SecureStore synchronously to token manager perspective
     // Actual async I/O happens but we await it here
@@ -38,6 +45,8 @@ tokenManager.onExpired(async () => {
   } catch (error) {
     log.error("Failed to clear session on expiry:", error);
     // Continue anyway — dispatch logout to clear Redux state
+  } finally {
+    _logoutInProgress = false;
   }
 
   // Only dispatch after storage is definitely cleared

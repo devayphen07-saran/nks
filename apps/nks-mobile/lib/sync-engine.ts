@@ -18,6 +18,7 @@
 
 import { API } from '@nks/api-manager';
 import type { AxiosError } from 'axios';
+import type { SQLiteBindValue } from 'expo-sqlite';
 import {
   getCursor,
   saveCursor,
@@ -27,9 +28,22 @@ import {
   initializeDatabase,
   getDatabase,
 } from './local-db';
+import { offlineSession } from './offline-session';
 import { createLogger } from './logger';
+import * as ExpoCrypto from 'expo-crypto';
 
 const log = createLogger('SyncEngine');
+
+/**
+ * Coerce an unknown value from a server JSON payload to a type
+ * that expo-sqlite can bind as a query parameter.
+ * Objects, arrays, and undefined all become null.
+ */
+function toBindValue(v: unknown): SQLiteBindValue {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+  return null;
+}
 
 // Sync state tracking
 let _syncing = false;
@@ -62,6 +76,24 @@ interface PushOperation {
   table: string;
   op: string;
   opData: Record<string, unknown>;
+  signature?: string;
+}
+
+/**
+ * Compute a keyed SHA-256 hash over the canonical operation fields.
+ * Mirrors the server-side verification in SyncService.verifyOperationSignature().
+ *
+ * Format: SHA256(signingKey + ":" + op + ":" + table + ":" + JSON.stringify(opData))
+ */
+async function signOperation(
+  op: string,
+  table: string,
+  opData: Record<string, unknown>,
+  signingKey: string,
+): Promise<string> {
+  const canonical = `${op}:${table}:${JSON.stringify(opData)}`;
+  const input = `${signingKey}:${canonical}`;
+  return ExpoCrypto.digestStringAsync(ExpoCrypto.CryptoDigestAlgorithm.SHA256, input);
 }
 
 /**
@@ -85,11 +117,8 @@ export async function runSync(storeGuuid: string): Promise<void> {
 
   try {
     const startTime = Date.now();
-    const timeout = setTimeout(() => {
-      throw new Error('Sync timeout');
-    }, SYNC_TIMEOUT_MS);
 
-    try {
+    const syncWork = async () => {
       // Ensure database is initialized
       await initializeDatabase();
 
@@ -103,9 +132,13 @@ export async function runSync(storeGuuid: string): Promise<void> {
 
       _lastSyncedAt = Date.now();
       log.info(`Sync complete in ${Date.now() - startTime}ms`);
-    } finally {
-      clearTimeout(timeout);
-    }
+    };
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Sync timeout')), SYNC_TIMEOUT_MS),
+    );
+
+    await Promise.race([syncWork(), timeoutPromise]);
   } catch (err) {
     log.error('Sync failed:', err);
     throw err;
@@ -198,19 +231,19 @@ async function pullChanges(storeGuuid: string): Promise<void> {
             `,
             [
               change.id,
-              data.guuid,
-              data.parentRouteFk ?? null,
-              data.routeName,
-              data.routePath,
-              data.fullPath,
-              data.description ?? null,
-              data.iconName ?? null,
-              data.routeType,
-              data.routeScope,
+              toBindValue(data.guuid),
+              toBindValue(data.parentRouteFk),
+              toBindValue(data.routeName),
+              toBindValue(data.routePath),
+              toBindValue(data.fullPath),
+              toBindValue(data.description),
+              toBindValue(data.iconName),
+              toBindValue(data.routeType),
+              toBindValue(data.routeScope),
               data.isPublic ? 1 : 0,
               data.isActive ? 1 : 0,
-              data.createdAt,
-              data.updatedAt,
+              toBindValue(data.createdAt),
+              toBindValue(data.updatedAt),
               null, // deletedAt = null for upsert
             ],
           );
@@ -245,6 +278,9 @@ async function pullChanges(storeGuuid: string): Promise<void> {
 async function pushMutations(): Promise<void> {
   log.info('PUSH: Starting mutation push...');
 
+  // Load once per push cycle — avoids repeated SecureStore reads per batch
+  const session = await offlineSession.load();
+
   while (true) {
     const batch = await getMutationQueueBatch(PUSH_BATCH_SIZE);
 
@@ -255,19 +291,50 @@ async function pushMutations(): Promise<void> {
 
     log.debug(`PUSH: Sending batch of ${batch.length} mutations`);
 
-    // Convert queue format to sync.push format
-    const operations: PushOperation[] = batch.map((item) => ({
-      id: String(item.id),
-      clientId: `${item.id}-${Date.now()}`,
-      table: item.entity,
-      op: item.operation,
-      opData: item.payload,
-    }));
+    // Convert queue format to sync.push format, signing each operation
+    // if we have a session signature available.
+    const operations: PushOperation[] = await Promise.all(
+      batch.map(async (item) => {
+        const op: PushOperation = {
+          id: String(item.id),
+          clientId: `${item.id}-${Date.now()}`,
+          table: item.entity,
+          op: item.operation,
+          opData: item.payload,
+        };
+        if (session?.signature) {
+          op.signature = await signOperation(
+            item.operation,
+            item.entity,
+            item.payload,
+            session.signature,
+          );
+        }
+        return op;
+      }),
+    );
+
+    // Include offline session context so the server can re-validate the HMAC
+    // signature and detect any on-device tampering of userId/storeId/roles.
+    const body: Record<string, unknown> = { operations };
+    if (session?.signature) {
+      body.offlineSession = {
+        userId: session.userId,
+        storeId: session.storeId,
+        roles: session.roles,
+        offlineValidUntil: session.offlineValidUntil,
+        signature: session.signature,
+        ...(session.deviceId ? { deviceId: session.deviceId } : {}),
+        // Include the RS256 offline JWT so the server can verify its signature
+        // and cross-validate claims against the HMAC payload (write-guard).
+        ...(session.offlineToken ? { offlineToken: session.offlineToken } : {}),
+      };
+    }
 
     try {
       const res = await API.post<{ processed: number }>(
         '/sync/push',
-        { operations },
+        body,
         { timeout: 20_000 },
       );
 

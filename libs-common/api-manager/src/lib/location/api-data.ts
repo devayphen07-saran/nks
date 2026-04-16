@@ -11,7 +11,7 @@ export const GET_STATES: APIData = new APIData(
 // ─── Districts ─────────────────────────────────────────────────────────────
 
 export const GET_DISTRICTS_BY_STATE: APIData = new APIData(
-  "location/states/:stateId/districts",
+  "location/states/:code/districts",
   APIMethod.GET,
   { public: true },
 );

@@ -11,9 +11,10 @@ export class TokenMutex {
   private clearPromise: Promise<any> | null = null;
 
   /**
-   * Executes a refresh operation with mutual exclusion
-   * If a refresh is already in progress, waits for it to complete
-   * If a clear is in progress, aborts refresh
+   * Executes a refresh operation with mutual exclusion.
+   * If a refresh is already in progress, waits for it to complete and returns undefined
+   * (caller should read the current in-memory token — the in-flight refresh already updated it).
+   * If a clear is in progress, throws immediately.
    */
   async withRefreshLock<T>(fn: () => Promise<T>): Promise<T | undefined> {
     // Abort if clear is in progress
@@ -21,52 +22,40 @@ export class TokenMutex {
       throw new Error("Token clear in progress, cannot refresh");
     }
 
-    // Wait if refresh already in progress
+    // If a refresh is already running, wait for it then signal the caller to
+    // re-read the token rather than issuing a second refresh.
     if (this.isRefreshing && this.refreshPromise) {
-      await this.refreshPromise;
+      // Swallow the error — the original caller handles it; waiters just retry.
+      await this.refreshPromise.catch(() => {});
       return undefined;
     }
 
     this.isRefreshing = true;
-    this.refreshPromise = fn()
-      .then((result) => {
-        this.isRefreshing = false;
-        this.refreshPromise = null;
-        return result;
-      })
-      .catch((error) => {
-        this.isRefreshing = false;
-        this.refreshPromise = null;
-        throw error;
-      });
+    this.refreshPromise = fn().finally(() => {
+      this.isRefreshing = false;
+      this.refreshPromise = null;
+    });
 
     return this.refreshPromise;
   }
 
   /**
-   * Executes a clear operation with mutual exclusion
-   * Waits for any in-flight refresh to complete before clearing
+   * Executes a clear operation with mutual exclusion.
+   * Waits for any in-flight refresh to complete before clearing.
    */
   async withClearLock<T>(fn: () => Promise<T>): Promise<T> {
-    // Abort if refresh in progress
-    if (this.isRefreshing) {
-      // Wait for refresh to finish, then clear
-      await this.refreshPromise;
+    // Wait for any in-flight refresh — swallow its error so logout is never
+    // blocked by a failed refresh attempt.
+    if (this.isRefreshing && this.refreshPromise) {
+      await this.refreshPromise.catch(() => {});
     }
 
     // Now perform clear with exclusive access
     this.isClearing = true;
-    this.clearPromise = fn()
-      .then((result) => {
-        this.isClearing = false;
-        this.clearPromise = null;
-        return result;
-      })
-      .catch((error) => {
-        this.isClearing = false;
-        this.clearPromise = null;
-        throw error;
-      });
+    this.clearPromise = fn().finally(() => {
+      this.isClearing = false;
+      this.clearPromise = null;
+    });
 
     return this.clearPromise;
   }

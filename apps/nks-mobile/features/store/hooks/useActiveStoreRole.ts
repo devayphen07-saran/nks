@@ -1,14 +1,15 @@
 import { useSelector } from 'react-redux';
 import type { RootState } from '../../../store';
+import { selectIsSuperAdmin } from '../../../store/auth-slice';
 import { ROLE_MENU_MAP, type MenuItem, type RoleCode } from '../constants/drawer-menu-config';
 
 export function useActiveStoreRole() {
   const authState = useSelector((state: RootState) => state.auth);
   const access = authState.authResponse?.access;
+  const isSuperAdmin = useSelector(selectIsSuperAdmin);
 
   const activeStoreId = access?.activeStoreId;
   const roles = access?.roles ?? [];
-  const isSuperAdmin = access?.isSuperAdmin ?? false;
 
   // Find the primary role for the active store
   const activeStoreRole = roles.find(

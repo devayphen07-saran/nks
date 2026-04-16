@@ -47,3 +47,7 @@ export * from './sync';
 export * from './user-preferences';
 export * from './system-config';
 export * from './files';
+export * from './rate-limit-entries';
+export * from './jti-blocklist';
+export * from './permissions-changelog';
+export * from './revoked-devices';

@@ -11,8 +11,8 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { OtpService } from '../services/otp.service';
-import { OtpAuthOrchestrator } from '../services/otp-auth-orchestrator.service';
+import { OtpService } from '../services/otp/otp.service';
+import { OtpAuthOrchestrator } from '../services/orchestrators/otp-auth-orchestrator.service';
 import { AuthControllerHelpers } from '../../../common/utils/auth-helpers';
 import { SendOtpDto, VerifyOtpDto, ResendOtpDto } from '../dto/otp.dto';
 import { SendEmailOtpDto, VerifyEmailOtpDto } from '../dto/email-verify.dto';

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
 import { RouteMapper } from './mapper/route.mapper';
 import { RolesService } from '../roles/roles.service';
 import { RoutesRepository } from './repositories/routes.repository';
@@ -76,7 +76,9 @@ export class RoutesService {
 
     // No roles and not owner → no access
     if (roleIds.length === 0) {
-      return { routes: [] };
+      throw new ForbiddenException(
+        'You do not have access to this store or it does not exist.',
+      );
     }
 
     // For custom roles, get routes based on role_route_mapping

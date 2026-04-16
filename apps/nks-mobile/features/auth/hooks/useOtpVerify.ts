@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { router, useLocalSearchParams } from "expo-router";
+import { router } from "expo-router";
 import { otpSchema } from "../schema/otp";
 import { verifyOtp, otpResend } from "@nks/api-manager";
 import { useRootDispatch } from "../../../store";
@@ -10,13 +10,11 @@ import { OTP_LENGTH, OTP_RESEND_COOLDOWN_SECONDS } from "@nks/utils";
 import { ROUTES } from "../../../lib/routes";
 import { JWTManager } from "../../../lib/jwt-manager";
 import { registerProactiveRefresh } from "../../../lib/jwt-refresh";
+import { getPendingOtpSession, clearPendingOtpSession } from "../lib/otp-session";
 
 export function useOtpVerify() {
   const dispatch = useRootDispatch();
-  const { phone: rawPhone, reqId: initialReqId } = useLocalSearchParams<{
-    phone: string;
-    reqId: string;
-  }>();
+  const { phone: rawPhone, reqId: initialReqId } = getPendingOtpSession();
 
   // Clean up phone: remove duplicate +, ensure single prefix
   const phone = rawPhone ? rawPhone.replace(/^\++/, "+") : "";
@@ -53,14 +51,17 @@ export function useOtpVerify() {
 
   useEffect(() => {
     startCountdown();
-    return clearTimer;
+    return () => {
+      clearTimer();
+      clearPendingOtpSession();
+    };
   }, [startCountdown, clearTimer]);
 
   const handleVerify = useCallback(
     (otpValue: string) => {
       if (isVerifying) return;
 
-      // ✅ CRITICAL FIX #5: Rate limit OTP verification attempts
+      // Rate limit OTP verification attempts (persisted across app restarts)
       const rateLimitCheck = OTP_RATE_LIMITS.verify.check();
       if (!rateLimitCheck.allowed) {
         setErrorMessage(
@@ -69,6 +70,7 @@ export function useOtpVerify() {
         setDigits(Array(OTP_LENGTH).fill(""));
         return;
       }
+      OTP_RATE_LIMITS.verify.recordAttempt();
 
       const currentReqId = reqIdRef.current;
       if (!currentReqId) {
@@ -99,6 +101,7 @@ export function useOtpVerify() {
           if (authResponse?.session?.sessionToken) {
             // Reset rate limiter on successful verification
             OTP_RATE_LIMITS.verify.reset();
+            clearPendingOtpSession();
             await persistLogin(authResponse, dispatch);
 
             // Cache NKS RS256 JWKS for offline JWT verification (non-critical)
@@ -158,7 +161,7 @@ export function useOtpVerify() {
   const handleResend = useCallback(() => {
     if (isResending || countdown > 0) return;
 
-    // ✅ CRITICAL FIX #5: Rate limit OTP resend attempts
+    // Rate limit OTP resend attempts (persisted across app restarts)
     const rateLimitCheck = OTP_RATE_LIMITS.resend.check();
     if (!rateLimitCheck.allowed) {
       setErrorMessage(
@@ -166,6 +169,7 @@ export function useOtpVerify() {
       );
       return;
     }
+    OTP_RATE_LIMITS.resend.recordAttempt();
 
     setIsResending(true);
     resetOtp();

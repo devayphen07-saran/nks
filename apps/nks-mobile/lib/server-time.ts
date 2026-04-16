@@ -27,6 +27,16 @@ export async function initServerTime(): Promise<void> {
   return initializeFromStorage();
 }
 
+/**
+ * Reset all server time state. Call on logout so the next user session
+ * starts with a clean clock offset rather than inheriting a stale one.
+ */
+export function resetServerTime(): void {
+  cachedOffsetSeconds = null;
+  lastSyncTimeSeconds = null;
+  isInitialized = false;
+}
+
 async function initializeFromStorage(): Promise<void> {
   if (isInitialized) return;
 

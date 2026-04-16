@@ -23,9 +23,9 @@ export const REFRESH_TOKEN: APIData = new APIData(
 // 4. Logout (invalidate session)
 export const SIGN_OUT: APIData = new APIData("auth/logout", APIMethod.POST);
 
-// 5. Get JWKS public key set
+// 5. Get JWKS public key set (mobile endpoint)
 export const GET_JWKS: APIData = new APIData(
-  "auth/.well-known/jwks.json",
+  "auth/mobile-jwks",
   APIMethod.GET,
   { public: true }
 );
@@ -37,13 +37,7 @@ export const SYNC_TIME: APIData = new APIData(
   { public: true }
 );
 
-// 7. Verify JWT token claims
-export const VERIFY_CLAIMS: APIData = new APIData(
-  "auth/token/verify",
-  APIMethod.POST
-);
-
-// 8. Get current authenticated user (validates session, returns user + roles)
+// 7. Get current authenticated user (validates session, returns user + roles)
 export const GET_ME: APIData = new APIData("auth/me", APIMethod.GET);
 
 // ─── OTP Endpoints ────────────────────────────────────────────────────────
@@ -110,3 +104,8 @@ export const DELETE_ALL_SESSIONS: APIData = new APIData(
   APIMethod.DELETE
 );
 
+// 18. Complete user profile (name / email+password / phone) during onboarding
+export const PROFILE_COMPLETE: APIData = new APIData(
+  "auth/profile-complete",
+  APIMethod.POST
+);

@@ -1,10 +1,7 @@
-import type { StatusListResponse, StatusSingleResponse, StatusResponse } from '../dto/status.dto';
+import type { StatusResponse } from '../dto/status.dto';
 import type { Status } from '../../../core/database/schema/entity-system/status/status.table';
 
 export class StatusMapper {
-  /**
-   * Transform database Status entity to StatusResponse DTO
-   */
   static toResponse(row: Status): StatusResponse {
     return {
       guuid: row.guuid,
@@ -21,13 +18,5 @@ export class StatusMapper {
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt?.toISOString() ?? null,
     };
-  }
-
-  static toListResponse<T>(items: T[]): StatusListResponse {
-    return items as StatusListResponse;
-  }
-
-  static toSingleResponse<T>(item: T): StatusSingleResponse {
-    return item as StatusSingleResponse;
   }
 }

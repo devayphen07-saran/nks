@@ -6,8 +6,9 @@ import {
   Body,
   Req,
   Res,
-  Query,
   Param,
+  Query,
+  ParseIntPipe,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -16,43 +17,52 @@ import {
 } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../../../common/guards/auth.guard';
 import type { Request, Response } from 'express';
-import { AuthService } from '../services/auth.service';
+import { AuthService } from '../services/session/auth.service';
+import { PasswordAuthService } from '../services/flows/password-auth.service';
+import { TokenLifecycleService } from '../services/token/token-lifecycle.service';
+import { OnboardingService } from '../services/flows/onboarding.service';
+import { PermissionsService, type PermissionsSnapshot } from '../services/permissions/permissions.service';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthControllerHelpers } from '../../../common/utils/auth-helpers';
+import { extractCookieValue } from '../../../common/utils/cookie.utils';
 import {
   LoginDto,
   RegisterDto,
   RefreshTokenDto,
   AuthResponseEnvelope,
   MeResponseDto,
-  SyncTimeDto,
 } from '../dto';
-import {
-  PermissionsSnapshotDto,
-  PermissionsDeltaDto,
-  SessionListDto,
-  GetPermissionsDeltaQuerySchema,
-  GetPermissionsDeltaQueryDto,
-} from '../dto/permissions.dto';
+import { OnboardingCompleteDto, OnboardingCompleteResponseDto } from '../dto/onboarding.dto';
+import { SessionListDto } from '../dto/permissions.dto';
 import { ApiResponse } from '../../../common/utils/api-response';
-import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe';
 import { AuthGuard } from '../../../common/guards/auth.guard';
+import { RateLimitingGuard } from '../../../common/guards/rate-limiting.guard';
 import { Public } from '../../../common/decorators/public.decorator';
+import { CurrentUser } from '../../../common/decorators/current-user.decorator';
+import { RateLimit } from '../../../common/decorators/rate-limit.decorator';
 import { JWTConfigService } from '../../../config/jwt.config';
-import type { VerifyClaimsResponse } from '../services/auth.service';
+import type { SessionUser } from '../interfaces/session-user.interface';
 
 @ApiTags('Auth')
 @Controller('auth')
+@UseGuards(AuthGuard)
+@ApiBearerAuth()
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
   constructor(
     private readonly authService: AuthService,
+    private readonly passwordAuthService: PasswordAuthService,
+    private readonly tokenLifecycleService: TokenLifecycleService,
     private readonly jwtConfigService: JWTConfigService,
+    private readonly onboardingService: OnboardingService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(RateLimitingGuard)
+  @RateLimit(10)
   @ApiOperation({ summary: 'Login with email + password' })
   async login(
     @Body() dto: LoginDto,
@@ -60,7 +70,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<ApiResponse<AuthResponseEnvelope>> {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
-    const result = await this.authService.login(dto, deviceInfo);
+    const result = await this.passwordAuthService.login(dto, deviceInfo);
     AuthControllerHelpers.applySessionCookie(res, result);
     return ApiResponse.ok(result, 'Login successful');
   }
@@ -76,13 +86,15 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<ApiResponse<AuthResponseEnvelope>> {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
-    const result = await this.authService.register(dto, deviceInfo);
+    const result = await this.passwordAuthService.register(dto, deviceInfo);
     AuthControllerHelpers.applySessionCookie(res, result);
     return ApiResponse.ok(result, 'Registration successful');
   }
 
   @Post('refresh-token')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(RateLimitingGuard)
+  @RateLimit(30)
   @ApiOperation({
     summary: 'Refresh access token using refresh token',
     description:
@@ -113,14 +125,11 @@ export class AuthController {
       );
     }
 
-    // X-Device-ID header — sent by mobile clients, absent for web
     const deviceId =
       (req.headers as Record<string, string | undefined>)['x-device-id'] ??
       null;
 
-    // refreshAccessToken() handles structured token decode, session lookup,
-    // reuse detection, rotation, and new token issuance atomically.
-    const result = await this.authService.refreshAccessToken(
+    const result = await this.tokenLifecycleService.refreshAccessToken(
       providedRefreshToken,
       deviceId,
     );
@@ -131,8 +140,6 @@ export class AuthController {
 
   @Get('me')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get current authenticated user',
     description:
@@ -160,14 +167,11 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<ApiResponse<null>> {
-    // No AuthGuard — works even when the session has already expired.
-    // Read token from cookie directly; delete it from DB (best-effort).
     const token = this.parseSessionCookie(req);
     if (token) {
       try {
         await this.authService.logout(token);
       } catch (err) {
-        // Log the error but don't block logout - best-effort session cleanup
         this.logger.warn(
           `Failed to revoke session during logout: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -182,33 +186,13 @@ export class AuthController {
     return ApiResponse.ok(null, 'Logged out');
   }
 
-  @Get('.well-known/jwks.json')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Get JWKS public key set',
-    description:
-      'Returns the public key in JWKS format for JWT verification. Includes active key + fallback keys from past 7 days for graceful key rotation. Used by mobile clients for offline JWT verification. Cache max 1 hour for fast emergency rotation propagation.',
-  })
-  getJWKS(@Res({ passthrough: true }) res: Response): Record<string, unknown> {
-    const jwks = this.jwtConfigService.getPublicKeyAsJWKS();
-    // 1-hour cache (3600s) for fast emergency key rotation propagation
-    // Mobile clients will refetch within 1h, catching emergency rotations
-    res.set('Cache-Control', 'public, max-age=3600');
-    res.set('Content-Type', 'application/jwk-set+json');
-    return jwks;
-  }
-
-  /**
-   * RS256 JWKS endpoint for mobile offline JWT verification.
-   * Separate from Better Auth's EdDSA JWKS at /.well-known/jwks.json.
-   * Mobile fetches this because access + offline tokens are signed RS256.
-   */
   @Get('mobile-jwks')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get RS256 JWKS for mobile offline verification',
     description:
-      'Returns the RS256 public key in JWKS format for verifying access and offline JWTs on device. Separate from Better Auth EdDSA JWKS.',
+      'Returns the RS256 public key in JWKS format for verifying access and offline JWTs on device.',
   })
   getMobileJwks(@Res({ passthrough: true }) res: Response): Record<string, unknown> {
     const publicKeyJwk = this.jwtConfigService.getPublicKeyAsJwk();
@@ -221,103 +205,14 @@ export class AuthController {
           kid: this.jwtConfigService.getCurrentKid(),
           use: 'sig',
           alg: 'RS256',
+          pem: this.jwtConfigService.getPublicKeyPem(),
         },
       ],
     };
   }
 
-  @Post('sync-time')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Sync device time with server',
-    description:
-      'Mobile clients call this to calculate device time offset. Returns server time so client can calculate: offset = serverTime - deviceTime',
-  })
-  async syncTime(
-    @Body() dto: SyncTimeDto,
-  ): Promise<
-    ApiResponse<{ serverTime: number; offset: number; deviceTime: number }>
-  > {
-    const serverTime = Math.floor(Date.now() / 1000);
-    const offset = serverTime - dto.deviceTime;
-    return ApiResponse.ok(
-      { serverTime, offset, deviceTime: dto.deviceTime },
-      'Time synchronized',
-    );
-  }
-
-  @Post('token/verify')
-  @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({
-    summary: 'Verify JWT token claims',
-    description:
-      'Verify JWT token claims and check if roles have changed. Used by mobile during offline sync to detect role changes and get updated permissions. Token is read from Authorization: Bearer <token> header only (never in request body).',
-  })
-  async verifyToken(
-    @Req() req: AuthenticatedRequest,
-  ): Promise<ApiResponse<VerifyClaimsResponse>> {
-    // AuthGuard has already verified the token and populated req.user
-    // Extract the raw token from Authorization header if needed for additional checks
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.replace('Bearer ', '');
-    const result = await this.authService.verifyClaims(token);
-    return ApiResponse.ok(result, 'Token verified');
-  }
-
-  @Get('permissions-snapshot')
-  @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({
-    summary: 'Get full permissions snapshot',
-    description:
-      'Returns complete permissions snapshot for offline-first mobile apps. Includes all entity permissions across all user stores.',
-  })
-  async getPermissionsSnapshot(
-    @Req() req: AuthenticatedRequest,
-  ): Promise<ApiResponse<PermissionsSnapshotDto>> {
-    const snapshot = await this.authService.getPermissionsSnapshot(
-      req.user.userId,
-    );
-    const version = await this.authService.getPermissionsVersion(
-      req.user.userId,
-    );
-    return ApiResponse.ok(
-      { version, snapshot } as PermissionsSnapshotDto,
-      'Permissions snapshot retrieved',
-    );
-  }
-
-  @Get('permissions-delta')
-  @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({
-    summary: 'Get permissions delta since version',
-    description:
-      'Returns only added/removed/modified permissions since specified version. Optimized for mobile delta sync to reduce bandwidth.',
-  })
-  async getPermissionsDelta(
-    @Query(new ZodValidationPipe(GetPermissionsDeltaQuerySchema))
-    query: GetPermissionsDeltaQueryDto,
-    @Req() req: AuthenticatedRequest,
-  ): Promise<ApiResponse<PermissionsDeltaDto>> {
-    const delta = await this.authService.calculatePermissionsDelta(
-      req.user.userId,
-      query.sinceVersion,
-    );
-    return ApiResponse.ok(
-      delta as PermissionsDeltaDto,
-      'Permissions delta calculated',
-    );
-  }
-
   @Get('sessions')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
   @ApiOperation({
     summary: 'List user device sessions',
     description:
@@ -339,25 +234,20 @@ export class AuthController {
   }
 
   @Delete('sessions/:sessionId')
-  @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
+  @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Terminate a specific session',
     description: 'Remotely logout from a specific device/session',
   })
   async terminateSession(
-    @Param('sessionId') sessionId: string,
+    @Param('sessionId', ParseIntPipe) sessionId: number,
     @Req() req: AuthenticatedRequest,
-  ): Promise<ApiResponse<null>> {
+  ): Promise<void> {
     await this.authService.terminateSession(req.user.userId, sessionId);
-    return ApiResponse.ok(null, 'Session terminated');
   }
 
   @Delete('sessions')
-  @HttpCode(HttpStatus.OK)
-  @UseGuards(AuthGuard)
-  @ApiBearerAuth()
+  @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Terminate all sessions',
     description:
@@ -365,23 +255,19 @@ export class AuthController {
   })
   async terminateAllSessions(
     @Req() req: AuthenticatedRequest,
-  ): Promise<ApiResponse<null>> {
+  ): Promise<void> {
     await this.authService.terminateAllSessions(req.user.userId);
-    return ApiResponse.ok(null, 'All sessions terminated');
   }
 
   /**
    * GET /auth/session-status
-   * Mobile reconnection check — returns whether session is active or revoked.
-   * Called as the first step when a mobile device comes back online.
-   *
-   * No AuthGuard — if the session was revoked/expired, the guard would reject
-   * with 401 before the revocation status could be returned. Instead, we
-   * manually extract the session token and check the DB directly.
-   *
-   * Reference: MOBILE_OFFLINE_FLOW.md Section 15, Step 1
+   * Mobile reconnection check — no AuthGuard so revoked/expired sessions
+   * still get a useful response rather than a 401.
    */
   @Get('session-status')
+  @Public()
+  @UseGuards(RateLimitingGuard)
+  @RateLimit(5)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Check session revocation status',
@@ -391,7 +277,6 @@ export class AuthController {
   async getSessionStatus(
     @Req() req: Request,
   ): Promise<ApiResponse<{ active: boolean; revoked: boolean; wipe: boolean }>> {
-    // Extract token from Bearer header or httpOnly cookie (same as logout)
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith('Bearer ')
       ? authHeader.slice(7)
@@ -408,15 +293,70 @@ export class AuthController {
     return ApiResponse.ok(result, result.active ? 'Session active' : 'Session revoked');
   }
 
-  // ─── Private Helpers ───────────────────────────────────────────────────────
+  @Post('profile-complete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Complete user profile (name / email+password / phone)',
+    description: 'Called during onboarding to set name and add credentials.',
+  })
+  async profileComplete(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: OnboardingCompleteDto,
+  ): Promise<ApiResponse<OnboardingCompleteResponseDto>> {
+    const result = await this.onboardingService.completeOnboarding(Number(req.user.id), dto);
+    return ApiResponse.ok(result, result.message);
+  }
+
+  @Get('permissions-snapshot')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get full permissions snapshot',
+    description:
+      'Returns all entity permissions for the authenticated user across all their stores. Used by mobile for offline caching and by frontend for permission-aware UI rendering.',
+  })
+  async getPermissionsSnapshot(
+    @CurrentUser() user: SessionUser,
+  ): Promise<ApiResponse<PermissionsSnapshot>> {
+    const snapshot = await this.permissionsService.buildPermissionsSnapshot(user.userId);
+    return ApiResponse.ok(snapshot, 'Permissions snapshot retrieved');
+  }
+
+  @Get('permissions-delta')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get permissions delta since version',
+    description:
+      'Returns only permissions that changed since the provided version string. Used by mobile for efficient incremental sync after reconnection.',
+  })
+  async getPermissionsDelta(
+    @CurrentUser() user: SessionUser,
+    @Query('version') sinceVersion: string,
+  ): Promise<ApiResponse<{ version: string; added: PermissionsSnapshot; removed: PermissionsSnapshot; modified: PermissionsSnapshot }>> {
+    const delta = await this.permissionsService.calculateDelta(user.userId, sinceVersion ?? '');
+    return ApiResponse.ok(delta, 'Permissions delta retrieved');
+  }
 
   /**
-   * Parse httpOnly session cookie from request
-   * Used for logout and refresh token endpoints
+   * POST /auth/sync-time
+   * Mobile calls this at login and after token refresh to calculate device clock offset.
+   * Returns offset = serverTime - deviceTime (seconds). Positive means device is behind.
    */
+  @Post('sync-time')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Sync device clock with server time',
+    description: 'Returns the offset between server and device time in seconds. Used by mobile for clock drift detection before offline operations.',
+  })
+  getSyncTime(@Body() body: { deviceTime?: number }): ApiResponse<{ serverTime: number; offset: number }> {
+    const serverTime = Math.floor(Date.now() / 1000);
+    const offset = body.deviceTime != null ? serverTime - body.deviceTime : 0;
+    return ApiResponse.ok({ serverTime, offset }, 'Server time');
+  }
+
+  // ─── Private Helpers ───────────────────────────────────────────────────────
+
   private parseSessionCookie(req: Request): string | undefined {
-    const cookieHeader = req.headers.cookie || '';
-    const match = cookieHeader.match(/nks_session=([^;]+)/);
-    return match?.[1]?.trim();
+    return extractCookieValue(req.headers.cookie ?? '', 'nks_session');
   }
 }

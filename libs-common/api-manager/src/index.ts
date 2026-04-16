@@ -6,3 +6,4 @@ export * from './lib/roles';
 export * from './lib/location';
 export * from './lib/lookups';
 export * from './lib/users';
+export * from './lib/stores';
