@@ -15,7 +15,6 @@
 
 import { API, type AuthResponse } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
-import { offlineSession } from "./offline-session";
 import { sanitizeError } from "../utils/log-sanitizer";
 import { createLogger } from "../utils/logger";
 import { refreshTokenAttempt } from "./refresh-token-attempt";
@@ -176,19 +175,6 @@ export function setupAxiosInterceptors(
                   sanitizeError(syncErr),
                 );
               }
-            }
-
-            // Extend offline session validity
-            try {
-              const session = await offlineSession.load();
-              if (session) {
-                await offlineSession.extendValidity(session);
-              }
-            } catch (offlineErr) {
-                log.debug(
-                "[Interceptor] Offline session extension failed:",
-                sanitizeError(offlineErr),
-              );
             }
 
             // Replay all queued requests with the new token

@@ -60,7 +60,9 @@ export const selectIsSuperAdmin = (state: { auth: AuthState }): boolean => {
   const jwtToken = state.auth.authResponse?.session?.jwtToken;
   if (!jwtToken) return false;
   try {
-    const payload = JSON.parse(atob(jwtToken.split('.')[1])) as { roles?: string[] };
+    // JWT uses URL-safe Base64 (- → +, _ → /) — atob() needs standard Base64
+    const raw = jwtToken.split('.')[1];
+    const payload = JSON.parse(atob(raw.replace(/-/g, '+').replace(/_/g, '/'))) as { roles?: string[] };
     return payload.roles?.includes('SUPER_ADMIN') ?? false;
   } catch {
     return false;

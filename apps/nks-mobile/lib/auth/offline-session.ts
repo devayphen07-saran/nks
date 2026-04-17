@@ -235,11 +235,11 @@ export const offlineSession = {
   /**
    * Loads and verifies the persisted OfflineSession from SecureStore.
    *
-   * Checks that a server-provided signature is present. If it is missing
-   * (session tampered to remove the signature field), the session is cleared
-   * and null is returned.
+   * Returns null if the session is missing, unsigned (integrity check fails),
+   * or expired (offlineValidUntil has passed). Expired sessions are cleared
+   * from storage so future calls don't re-parse them.
    *
-   * @returns Verified OfflineSession, or null if missing / invalid / unsigned.
+   * @returns Valid OfflineSession, or null if missing / invalid / unsigned / expired.
    */
   async load(): Promise<OfflineSession | null> {
     try {
@@ -249,6 +249,11 @@ export const offlineSession = {
       const session = JSON.parse(raw) as OfflineSession;
 
       if (!verifySessionIntegrity(session)) {
+        await deleteSecureItem(OFFLINE_SESSION_KEY);
+        return null;
+      }
+
+      if (!isSessionValid(session)) {
         await deleteSecureItem(OFFLINE_SESSION_KEY);
         return null;
       }
