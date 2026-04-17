@@ -170,6 +170,13 @@ export class TokenLifecycleService {
     });
 
     // Step 7: Atomically update new session + revoke old refresh token
+    // Re-validate activeStoreFk — user's role in that store may have been revoked since last login
+    const validatedActiveStoreFk =
+      session.activeStoreFk !== null &&
+      userRoles.some((r) => r.storeId === session.activeStoreFk)
+        ? session.activeStoreFk
+        : null;
+
     await this.db.transaction(async (_tx) => {
       await this.sessionsRepository.update(newSession.id, {
         roleHash: currentRoleHash,
@@ -177,7 +184,7 @@ export class TokenLifecycleService {
         deviceName: session.deviceName,
         deviceType: session.deviceType,
         appVersion: session.appVersion,
-        activeStoreFk: session.activeStoreFk,
+        activeStoreFk: validatedActiveStoreFk,
         refreshTokenHash: newRefreshTokenHash,
         refreshTokenExpiresAt: newRefreshTokenExpiresAt,
         accessTokenExpiresAt,
@@ -210,7 +217,7 @@ export class TokenLifecycleService {
             id: r.storeId as number,
             name: r.storeName as string,
           })),
-        activeStoreId: userRoles.find((r) => r.storeId)?.storeId || null,
+        activeStoreId: userRoles.find((r) => r.isPrimary && r.storeId)?.storeId ?? null,
       },
       OFFLINE_JWT_EXPIRATION,
     );

@@ -120,7 +120,7 @@ export class AuthGuard implements CanActivate {
       this.db
         .select()
         .from(schema.users)
-        .where(eq(schema.users.id, dbSession.userId))
+        .where(and(eq(schema.users.id, dbSession.userId), isNull(schema.users.deletedAt)))
         .limit(1),
       this.db
         .select({
