@@ -60,7 +60,6 @@ export type TokenPair = {
 export class AuthMapper {
   static toAuthResponseEnvelope(
     authResult: AuthResult,
-    permissionContext: PermissionContext,
     tokenPair?: TokenPair,
     defaultStore?: { guuid: string } | null,
     sessionId?: string, // Business logic: must be generated in service
@@ -92,8 +91,6 @@ export class AuthMapper {
         ? refreshExpiresAt.toISOString()
         : String(refreshExpiresAt ?? '');
 
-    const { roles } = permissionContext;
-
     return {
       user: this.toPublicUserDto(user),
       session: {
@@ -104,17 +101,6 @@ export class AuthMapper {
         refreshExpiresAt: refreshExpiresAtStr,
         defaultStore: defaultStore ?? null,
         ...(jwtToken ? { jwtToken } : {}),
-      },
-      access: {
-        activeStoreId: permissionContext.activeStoreId ?? null,
-        roles: roles.map((r) => ({
-          roleCode: r.roleCode,
-          storeId: r.storeId ?? null,
-          storeName: r.storeName ?? null,
-          isPrimary: r.isPrimary,
-          assignedAt: r.assignedAt,
-          expiresAt: r.expiresAt ?? null,
-        })),
       },
       ...(offlineToken ? { offlineToken } : {}),
       ...(offlineSessionSignature ? { offlineSessionSignature } : {}),

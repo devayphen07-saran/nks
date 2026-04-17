@@ -113,9 +113,12 @@ export class CsrfMiddleware implements NestMiddleware {
 
   /**
    * Check if route is exempt from CSRF validation.
-   * Uses exact match against the explicit allowlist — no prefix matching.
+   * Strips the global API prefix (e.g. /api/v1) before matching so that
+   * exempt routes can be listed without the prefix regardless of how main.ts
+   * registers the global prefix.
    */
   private isExemptRoute(path: string): boolean {
-    return this.CSRF_EXEMPT_ROUTES.includes(path);
+    const normalized = path.replace(/^\/api\/v\d+/, '');
+    return this.CSRF_EXEMPT_ROUTES.includes(normalized);
   }
 }

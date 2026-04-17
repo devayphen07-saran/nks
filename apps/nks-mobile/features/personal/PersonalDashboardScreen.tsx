@@ -15,7 +15,7 @@ import {
   IconButton,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useAuth } from "../../store";
+import { useAuthState } from "../../store";
 import {
   HeaderControls,
   SearchRow,
@@ -36,7 +36,7 @@ const MOCK_EXPENSES: MockExpense[] = [];
 
 export function PersonalDashboardScreen() {
   const { theme } = useMobileTheme();
-  const user = useAuth().authResponse?.user;
+  const user = useAuthState().authResponse?.user;
   const navigation = useNavigation();
 
   const [searchQuery, setSearchQuery] = useState("");

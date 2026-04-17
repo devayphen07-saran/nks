@@ -70,7 +70,7 @@ export function UserProfileScreen() {
           icon: "Settings",
           title: "App Settings",
           subtitle: "Theme, Language and Notifications",
-          onPress: () => router.push("settings"),
+          onPress: () => router.push("/(protected)/(store)/settings"),
         },
       ],
     },

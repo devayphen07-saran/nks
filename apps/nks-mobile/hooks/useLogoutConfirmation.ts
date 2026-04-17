@@ -1,6 +1,9 @@
 import { useCallback } from "react";
 import { Alert } from "react-native";
 import { useLogout } from "./useLogout";
+import { createLogger } from '../lib/utils/logger';
+
+const log = createLogger("LogoutConfirmation");
 
 export function useLogoutConfirmation() {
   const { logout } = useLogout();
@@ -17,7 +20,7 @@ export function useLogoutConfirmation() {
             style: "destructive",
             onPress: () => {
               logout(onLoggedOut).catch((error) => {
-                console.error("[Logout] Failed:", error);
+                log.error("Failed:", error);
                 Alert.alert("Error", "Failed to log out. Please try again.");
               });
             },

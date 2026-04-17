@@ -4,7 +4,7 @@ import { phoneSchema } from "../schema/phone";
 import { sendOtp } from "@nks/api-manager";
 import { useRootDispatch } from "../../../store";
 import { ErrorHandler } from "../../../shared/errors";
-import { OTP_RATE_LIMITS } from "../../../lib/rate-limiter";
+import { OTP_RATE_LIMITS } from '../../../lib/utils/rate-limiter';
 import {
   formatPhoneWithCountryCode,
   sanitizePhoneInput,
@@ -34,12 +34,15 @@ export function usePhoneAuth() {
     if (!canSubmit || submittingRef.current) return;
 
     // Rate limit OTP send attempts (persisted across app restarts)
-    const rateLimitCheck = OTP_RATE_LIMITS.send.check();
-    if (!rateLimitCheck.allowed) {
-      setErrorMessage(rateLimitCheck.message || "Please wait before requesting another OTP.");
-      return;
+    // Skip in dev so repeated test runs are not blocked
+    if (!__DEV__) {
+      const rateLimitCheck = OTP_RATE_LIMITS.send.check();
+      if (!rateLimitCheck.allowed) {
+        setErrorMessage(rateLimitCheck.message || "Please wait before requesting another OTP.");
+        return;
+      }
+      OTP_RATE_LIMITS.send.recordAttempt();
     }
-    OTP_RATE_LIMITS.send.recordAttempt();
 
     // Validate phone format
     const validationResult = phoneSchema.safeParse({ phone: phone.trim() });

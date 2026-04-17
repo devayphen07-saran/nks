@@ -19,7 +19,7 @@ import {
   Column,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useRootDispatch, useAuth } from "../../store";
+import { useRootDispatch, useAuthState } from "../../store";
 import { getMyStores } from "@nks/api-manager";
 import {
   HeaderControls,
@@ -43,7 +43,7 @@ interface Store {
 export function StoreListScreen() {
   const { theme } = useMobileTheme();
   const dispatch = useRootDispatch();
-  const authState = useAuth();
+  const authState = useAuthState();
   const user = authState.authResponse?.user;
   const navigation = useNavigation();
 
@@ -90,11 +90,11 @@ export function StoreListScreen() {
   );
 
   const handleSelectStore = useCallback(async (store: Store) => {
-    router.replace("/(protected)/(workspace)/(app)/(store)/store");
+    router.replace("/(protected)/(store)/store");
   }, []);
 
   const handleCreateStore = useCallback(() => {
-    router.push("/(protected)/(workspace)/(app)/(store)/setup");
+    router.push("/(protected)/(store)/setup");
   }, []);
 
   const renderItem: ListRenderItem<Store> = useCallback(

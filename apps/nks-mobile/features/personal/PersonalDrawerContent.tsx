@@ -35,12 +35,12 @@ export function PersonalDrawerContent(props: DrawerContentComponentProps) {
       items: [
         {
           label: "Dashboard",
-          route: "/(protected)/(workspace)/(app)/(personal)/dashboard",
+          route: "/(protected)/(personal)/dashboard",
           iconName: "LayoutDashboard",
         },
         {
           label: "Expenses",
-          route: "/(protected)/(workspace)/(app)/(personal)/dashboard", // Placeholder for expenses
+          route: "/(protected)/(personal)/dashboard", // Placeholder for expenses
           iconName: "Wallet",
         },
       ],
@@ -50,7 +50,7 @@ export function PersonalDrawerContent(props: DrawerContentComponentProps) {
       items: [
         {
           label: "Switch to Store",
-          route: "/(protected)/(workspace)/(app)/(store)/list",
+          route: "/(protected)/(store)/list",
           iconName: "Store",
         },
       ],

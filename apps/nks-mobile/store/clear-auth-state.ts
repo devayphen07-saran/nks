@@ -1,6 +1,6 @@
 import { tokenManager } from "@nks/mobile-utils";
-import { offlineSession } from "../lib/offline-session";
-import { JWTManager } from "../lib/jwt-manager";
+import { offlineSession } from '../lib/auth/offline-session';
+import { JWTManager } from '../lib/auth/jwt-manager';
 import type { AppDispatch } from "./index";
 
 /**

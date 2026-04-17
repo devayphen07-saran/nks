@@ -134,7 +134,7 @@ export const authSlice = createSlice({
         state.user.user.name = (me.name as string) ?? state.user.user.name;
         state.user.user.email = (me.email as string) ?? state.user.user.email;
         state.user.user.phoneNumber = (me.phoneNumber as string | null) ?? state.user.user.phoneNumber;
-        if (me.roles) state.user.access.roles = me.roles as typeof state.user.access.roles;
+        // roles are no longer in AuthResponse.access — fetched separately via store API
         if (me.guuid) state.user.user.guuid = me.guuid as string;
       }
       state.status = "AUTHENTICATED";

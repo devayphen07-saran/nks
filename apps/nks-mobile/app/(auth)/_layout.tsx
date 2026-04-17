@@ -1,12 +1,12 @@
 import { Redirect, Stack } from "expo-router";
-import { useAuthGuard } from "../../lib/auth-provider";
+import { useAuthContext } from '../../lib/auth/auth-provider';
 
 export default function AuthLayout() {
-  const { isLoggedIn, isLoading } = useAuthGuard();
+  const { isLoggedIn, isLoading } = useAuthContext();
 
   // If the user is already authenticated, kick them out of the auth stack.
   if (!isLoading && isLoggedIn) {
-    return <Redirect href="/(protected)/(workspace)" />;
+    return <Redirect href="/(protected)" />;
   }
 
   return (

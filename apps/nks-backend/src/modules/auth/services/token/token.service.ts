@@ -157,6 +157,8 @@ export class TokenService {
       cachedPermissions ??
       (await this.permissionsService.getUserPermissions(user.id));
 
+    const primaryStoreId = permissions.roles.find((r) => r.isPrimary && r.storeId)?.storeId ?? null;
+
     const offlineToken = this.jwtConfigService.signOfflineToken(
       {
         sub: user.guuid ?? '',
@@ -168,14 +170,14 @@ export class TokenService {
             id: r.storeId as number,
             name: r.storeName as string,
           })),
-        activeStoreId: permissions.activeStoreId ?? null,
+        activeStoreId: primaryStoreId,
       },
       OFFLINE_JWT_EXPIRATION,
     );
 
     const offlineSessionSignature = this.signOfflineSessionPayload({
       userId: user.id,
-      storeId: permissions.activeStoreId ?? null,
+      storeId: primaryStoreId,
       roles: permissions.roles.map((r) => r.roleCode),
       offlineValidUntil:
         Date.now() + OFFLINE_JWT_TTL_DAYS * 24 * 60 * 60 * 1000,
@@ -193,7 +195,6 @@ export class TokenService {
         token,
         session: { token, expiresAt, sessionId },
       },
-      permissions,
       tokenPair,
       primaryStore ? { guuid: primaryStore.guuid } : null,
       sessionId,

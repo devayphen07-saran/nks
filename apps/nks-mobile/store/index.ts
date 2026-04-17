@@ -5,7 +5,7 @@ import { tokenManager } from "@nks/mobile-utils";
 import { authReducer } from "./auth-slice";
 import { setUnauthenticated } from "./auth-slice";
 import { refreshSession } from "./refresh-session";
-import { createLogger } from "../lib/logger";
+import { createLogger } from '../lib/utils/logger';
 
 const log = createLogger("Auth");
 
@@ -24,7 +24,7 @@ export const useRootDispatch = () => useDispatch<AppDispatch>();
 
 const useRootSelector = useSelector.withTypes<RootState>();
 
-export const useAuth = () => useRootSelector((state: RootState) => state.auth);
+export const useAuthState = () => useRootSelector((state: RootState) => state.auth);
 export const useAuthUser = () =>
   useRootSelector((state: RootState) => state.auth.authResponse?.user);
 

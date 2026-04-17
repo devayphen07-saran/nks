@@ -10,8 +10,8 @@ export const AuditListQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => (v === 'true' ? true : v === 'false' ? false : undefined)),
-  fromDate: z.coerce.date().optional(),
-  toDate: z.coerce.date().optional(),
+  fromDate: z.string().optional().transform((v) => (v ? new Date(v) : undefined)),
+  toDate: z.string().optional().transform((v) => (v ? new Date(v) : undefined)),
   limit: z.coerce.number().int().min(1).max(500).default(50),
   offset: z.coerce.number().int().nonnegative().default(0),
 });

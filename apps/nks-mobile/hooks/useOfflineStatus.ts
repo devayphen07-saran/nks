@@ -14,7 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as Network from "expo-network";
-import { JWTManager, type OfflineStatus, type OfflineMode } from "../lib/jwt-manager";
+import { JWTManager, type OfflineStatus, type OfflineMode } from '../lib/auth/jwt-manager';
 
 const POLL_INTERVAL_MS = 60_000; // 1 minute
 

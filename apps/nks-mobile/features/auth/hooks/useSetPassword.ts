@@ -27,7 +27,7 @@ export function useSetPassword() {
     dispatch(profileComplete({ bodyParam: { password } }))
       .unwrap()
       .then(() => {
-        router.replace("/(protected)/(workspace)");
+        router.replace("/(protected)");
       })
       .catch((err) => {
         const appError = ErrorHandler.handle(err, { action: "set_password" });
@@ -37,7 +37,7 @@ export function useSetPassword() {
   };
 
   const handleSkip = () => {
-    router.replace("/(protected)/(workspace)");
+    router.replace("/(protected)");
   };
 
   return {

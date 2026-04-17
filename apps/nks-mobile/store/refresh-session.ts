@@ -3,10 +3,10 @@ import type { AuthResponse } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
 import { setCredentials, logout as logoutAction } from "./auth-slice";
 import { clearAuthState } from "./clear-auth-state";
-import { tokenMutex } from "../lib/token-mutex";
-import { refreshTokenAttempt } from "../lib/refresh-token-attempt";
-import { sanitizeError } from "../lib/log-sanitizer";
-import { createLogger } from "../lib/logger";
+import { tokenMutex } from '../lib/auth/token-mutex';
+import { refreshTokenAttempt } from '../lib/auth/refresh-token-attempt';
+import { sanitizeError } from '../lib/utils/log-sanitizer';
+import { createLogger } from '../lib/utils/logger';
 import type { AppDispatch } from "./index";
 
 const log = createLogger("RefreshSession");

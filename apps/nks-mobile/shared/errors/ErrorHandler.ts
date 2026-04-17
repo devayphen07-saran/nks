@@ -82,6 +82,30 @@ export class ErrorHandler {
       return this.handleStandardError(error, context);
     }
 
+    // undefined/null — comes from rejectWithValue(err.response?.data) when
+    // there is no response (network unreachable, CORS, timeout before response)
+    if (error === undefined || error === null) {
+      return new AppError(
+        ErrorCode.NETWORK_ERROR,
+        'Network error. Please check your connection.',
+        undefined,
+        context,
+      );
+    }
+
+    // Plain backend API response object — comes from rejectWithValue(err.response?.data)
+    // Shape: { success: false, code: string, message: string, statusCode?: number }
+    if (typeof error === 'object' && 'code' in error) {
+      const apiErr = error as { code?: string; message?: string; statusCode?: number };
+      const mapped = mapBackendCode(apiErr.code);
+      return new AppError(
+        mapped ?? ErrorCode.UNKNOWN_ERROR,
+        apiErr.message || 'An unexpected error occurred',
+        apiErr.statusCode,
+        context,
+      );
+    }
+
     // Unknown error type
     return new AppError(
       ErrorCode.UNKNOWN_ERROR,

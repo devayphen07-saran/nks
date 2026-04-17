@@ -1,19 +1,17 @@
 import type { AuthResponse } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
 import { sessionTokenReg } from "@nks/utils";
-import { offlineSession } from "../lib/offline-session";
-import { syncServerTime } from "../lib/server-time";
+import { syncServerTime } from '../lib/utils/server-time';
 import { setCredentials, logout } from "./auth-slice";
 import { clearAuthState } from "./clear-auth-state";
 import {
   validateAuthResponse,
   validateRefreshTokenFormat,
   analyzeStorageUsage,
-} from "../lib/token-validators";
-import { sanitizeError } from "../lib/log-sanitizer";
-import { getStableDeviceId } from "../lib/device-binding";
-import { JWTManager } from "../lib/jwt-manager";
-import { createLogger } from "../lib/logger";
+} from '../lib/auth/token-validators';
+import { sanitizeError } from '../lib/utils/log-sanitizer';
+import { JWTManager } from '../lib/auth/jwt-manager';
+import { createLogger } from '../lib/utils/logger';
 import type { AppDispatch } from "./index";
 
 const log = createLogger("Auth");
@@ -38,14 +36,12 @@ export async function persistLogin(
     // Validate full auth response structure
     const validation = validateAuthResponse(authResponse);
     if (!validation.isValid) {
-      throw new Error(
-        `Invalid auth response: ${validation.errors.join(", ")}`
-      );
+      throw new Error(`Invalid auth response: ${validation.errors.join(", ")}`);
     }
 
     // Validate refresh token format (Issue 9.2)
     const refreshTokenCheck = validateRefreshTokenFormat(
-      authResponse.session?.refreshToken
+      authResponse.session?.refreshToken,
     );
     if (!refreshTokenCheck.isValid) {
       throw new Error(`Refresh token invalid: ${refreshTokenCheck.error}`);
@@ -53,7 +49,9 @@ export async function persistLogin(
 
     // Analyze storage usage (Issue 1.1)
     const storageAnalysis = analyzeStorageUsage(authResponse);
-    log.info(`Session valid. Size: ${storageAnalysis.sizeBytes}b (${storageAnalysis.usagePercent}%)`);
+    log.info(
+      `Session valid. Size: ${storageAnalysis.sizeBytes}b (${storageAnalysis.usagePercent}%)`,
+    );
     if (storageAnalysis.message) {
       log.warn(storageAnalysis.message);
     }
@@ -69,7 +67,9 @@ export async function persistLogin(
     // ════════════════════════════════════════════════════════════════════════════
     const sessionToken = authResponse.session.sessionToken;
     if (!sessionTokenReg.test(sessionToken)) {
-      throw new Error(`Session token format invalid: length ${sessionToken.length}`);
+      throw new Error(
+        `Session token format invalid: length ${sessionToken.length}`,
+      );
     }
     tokenManager.set(sessionToken);
     log.info("In-memory token set");
@@ -78,50 +78,35 @@ export async function persistLogin(
     // NON-CRITICAL: Sync server time + create offline session in parallel
     // Neither blocks login — failures are logged and swallowed.
     // ════════════════════════════════════════════════════════════════════════════
-    const activeStoreId = authResponse.access?.activeStoreId;
-
     // Persist dual tokens (accessToken, offlineToken, refreshToken) into JWTManager
     const jwtPersistPromise = (async () => {
       const accessToken = authResponse.session?.jwtToken;
       const offlineToken = authResponse.offlineToken;
       const refreshToken = authResponse.session?.refreshToken;
       if (accessToken && offlineToken && refreshToken) {
-        await JWTManager.persistTokens({ accessToken, offlineToken, refreshToken });
+        await JWTManager.persistTokens({
+          accessToken,
+          offlineToken,
+          refreshToken,
+        });
         log.info("JWTManager tokens persisted");
       }
     })().catch((err) => {
       log.warn("JWTManager persist failed (non-critical):", sanitizeError(err));
     });
 
-    const syncPromise = syncServerTime().then(() => {
-      log.info("Server time synced");
-    }).catch((err) => {
-      log.warn("Server time sync failed (non-critical):", sanitizeError(err));
-    });
+    const syncPromise = syncServerTime()
+      .then(() => {
+        log.info("Server time synced");
+      })
+      .catch((err) => {
+        log.warn("Server time sync failed (non-critical):", sanitizeError(err));
+      });
 
-    const offlinePromise = activeStoreId
-      ? (async () => {
-          const roles = authResponse.access?.roles ?? [];
-          const activeStoreRole = roles.find((r) => r.storeId === activeStoreId);
-          const storeName = activeStoreRole?.storeName ?? "Store";
-          const roleCodes = roles.map((r) => r.roleCode);
-          const deviceId = await getStableDeviceId().catch(() => undefined);
-          await offlineSession.create({
-            userId: parseInt(authResponse.user.id, 10) || 0,
-            storeId: activeStoreId,
-            storeName,
-            roles: roleCodes,
-            offlineToken: authResponse.offlineToken ?? "",
-            signature: authResponse.offlineSessionSignature,
-            deviceId,
-          });
-          log.info("Offline session created");
-        })().catch((err) => {
-          log.warn("Offline session failed (non-critical):", sanitizeError(err));
-        })
-      : Promise.resolve();
+    // Offline session is created after store API responds (store selection flow),
+    // not at login — store API provides accurate per-store roles + numeric storeId.
 
-    await Promise.allSettled([jwtPersistPromise, syncPromise, offlinePromise]);
+    await Promise.allSettled([jwtPersistPromise, syncPromise]);
 
     // ════════════════════════════════════════════════════════════════════════════
     // STATE: Update Redux store
@@ -132,13 +117,16 @@ export async function persistLogin(
     // ════════════════════════════════════════════════════════════════════════════
     // CLEANUP: On any failure, clear all auth state
     // ════════════════════════════════════════════════════════════════════════════
-    log.error("Persistence failed, clearing all auth state:", sanitizeError(error));
+    log.error(
+      "Persistence failed, clearing all auth state:",
+      sanitizeError(error),
+    );
     await clearAuthState(dispatch, logout);
 
     // Provide clear error to user
     const message = error instanceof Error ? error.message : "Unknown error";
     throw new Error(
-      `Failed to save session: ${message}. Please try logging in again.`
+      `Failed to save session: ${message}. Please try logging in again.`,
     );
   }
 }

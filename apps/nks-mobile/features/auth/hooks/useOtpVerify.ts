@@ -5,11 +5,11 @@ import { verifyOtp, otpResend } from "@nks/api-manager";
 import { useRootDispatch } from "../../../store";
 import { persistLogin } from "../../../store/persist-login";
 import { ErrorHandler } from "../../../shared/errors";
-import { OTP_RATE_LIMITS } from "../../../lib/rate-limiter";
+import { OTP_RATE_LIMITS } from '../../../lib/utils/rate-limiter';
 import { OTP_LENGTH, OTP_RESEND_COOLDOWN_SECONDS } from "@nks/utils";
-import { ROUTES } from "../../../lib/routes";
-import { JWTManager } from "../../../lib/jwt-manager";
-import { registerProactiveRefresh } from "../../../lib/jwt-refresh";
+import { ROUTES } from '../../../lib/navigation/routes';
+import { JWTManager } from '../../../lib/auth/jwt-manager';
+import { registerProactiveRefresh } from '../../../lib/auth/jwt-refresh';
 import { getPendingOtpSession, clearPendingOtpSession } from "../lib/otp-session";
 
 export function useOtpVerify() {
@@ -62,15 +62,18 @@ export function useOtpVerify() {
       if (isVerifying) return;
 
       // Rate limit OTP verification attempts (persisted across app restarts)
-      const rateLimitCheck = OTP_RATE_LIMITS.verify.check();
-      if (!rateLimitCheck.allowed) {
-        setErrorMessage(
-          rateLimitCheck.message || "Too many attempts. Please wait.",
-        );
-        setDigits(Array(OTP_LENGTH).fill(""));
-        return;
+      // Skip in dev so repeated test runs are not blocked
+      if (!__DEV__) {
+        const rateLimitCheck = OTP_RATE_LIMITS.verify.check();
+        if (!rateLimitCheck.allowed) {
+          setErrorMessage(
+            rateLimitCheck.message || "Too many attempts. Please wait.",
+          );
+          setDigits(Array(OTP_LENGTH).fill(""));
+          return;
+        }
+        OTP_RATE_LIMITS.verify.recordAttempt();
       }
-      OTP_RATE_LIMITS.verify.recordAttempt();
 
       const currentReqId = reqIdRef.current;
       if (!currentReqId) {
@@ -162,14 +165,17 @@ export function useOtpVerify() {
     if (isResending || countdown > 0) return;
 
     // Rate limit OTP resend attempts (persisted across app restarts)
-    const rateLimitCheck = OTP_RATE_LIMITS.resend.check();
-    if (!rateLimitCheck.allowed) {
-      setErrorMessage(
-        rateLimitCheck.message || "Please wait before requesting another OTP.",
-      );
-      return;
+    // Skip in dev so repeated test runs are not blocked
+    if (!__DEV__) {
+      const rateLimitCheck = OTP_RATE_LIMITS.resend.check();
+      if (!rateLimitCheck.allowed) {
+        setErrorMessage(
+          rateLimitCheck.message || "Please wait before requesting another OTP.",
+        );
+        return;
+      }
+      OTP_RATE_LIMITS.resend.recordAttempt();
     }
-    OTP_RATE_LIMITS.resend.recordAttempt();
 
     setIsResending(true);
     resetOtp();

@@ -117,7 +117,9 @@ export class AuthController {
     }>
   > {
     const cookieToken = this.parseSessionCookie(req);
-    const providedRefreshToken = cookieToken ?? dto.refreshToken;
+    // Prefer body token (mobile sends refresh token in body).
+    // Fall back to cookie only for web clients that don't send a body.
+    const providedRefreshToken = dto.refreshToken ?? cookieToken;
 
     if (!providedRefreshToken) {
       throw new UnauthorizedException(

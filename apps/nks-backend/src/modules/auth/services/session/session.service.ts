@@ -11,7 +11,7 @@ import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { SessionsRepository } from '../../repositories/sessions.repository';
 import { SessionMapper } from '../../mappers/session.mapper';
-import { SessionValidator } from '../validators/session.validator';
+import { SessionValidator } from '../../../../common/validators/session.validator';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { PermissionsService } from '../permissions/permissions.service';
 import { JWTConfigService } from '../../../../config/jwt.config';
@@ -247,7 +247,7 @@ export class SessionService {
   async setActiveStore(sessionId: number, storeId: number): Promise<void> {
     const session = await this.sessionsRepository.findById(sessionId);
     if (!session) {
-      throw new BadRequestException('Session not found');
+      throw new NotFoundException('Session not found');
     }
 
     await this.sessionsRepository.setActiveStore(sessionId, storeId);

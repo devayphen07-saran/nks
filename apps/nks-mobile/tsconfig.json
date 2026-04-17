@@ -4,32 +4,76 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "@/features/*": ["./features/*"],
-      "@nks/local-db": ["../../libs-mobile/local-db/src"],
-      "@nks/local-db/*": ["../../libs-mobile/local-db/src/*"],
-      "@nks/mobile-theme": ["../../libs-mobile/mobile-theme/src"],
-      "@nks/mobile-theme/*": ["../../libs-mobile/mobile-theme/src/*"],
-      "@nks/mobile-ui-components": ["../../libs-mobile/mobile-ui-components/src"],
-      "@nks/mobile-ui-components/*": ["../../libs-mobile/mobile-ui-components/src/*"],
-      "@nks/mobile-utils": ["../../libs-mobile/mobile-utils/src"],
-      "@nks/mobile-utils/*": ["../../libs-mobile/mobile-utils/src/*"],
-      "@nks/mobile-i18n": ["../../libs-mobile/mobile-i18n/src"],
-      "@nks/mobile-i18n/*": ["../../libs-mobile/mobile-i18n/src/*"],
-      "@nks/common-i18n": ["../../libs-common/i18n/src"],
-      "@nks/common-i18n/*": ["../../libs-common/i18n/src/*"],
-      "@nks/shared-types": ["../../libs-common/shared-types/src"],
-      "@nks/shared-types/*": ["../../libs-common/shared-types/src/*"],
-      "@nks/api-manager": ["../../libs-common/api-manager/src"],
-      "@nks/api-manager/*": ["../../libs-common/api-manager/src/*"],
-      "@nks/state-manager": ["../../libs-common/state-manager/src"],
-      "@nks/state-manager/*": ["../../libs-common/state-manager/src/*"],
-      "@nks/utils": ["../../libs-common/utils/src"],
-      "@nks/utils/*": ["../../libs-common/utils/src/*"]
+      "@/features/*": [
+        "./features/*"
+      ],
+      "@nks/local-db": [
+        "../../libs-mobile/local-db/src"
+      ],
+      "@nks/local-db/*": [
+        "../../libs-mobile/local-db/src/*"
+      ],
+      "@nks/mobile-theme": [
+        "../../libs-mobile/mobile-theme/src"
+      ],
+      "@nks/mobile-theme/*": [
+        "../../libs-mobile/mobile-theme/src/*"
+      ],
+      "@nks/mobile-ui-components": [
+        "../../libs-mobile/mobile-ui-components/src"
+      ],
+      "@nks/mobile-ui-components/*": [
+        "../../libs-mobile/mobile-ui-components/src/*"
+      ],
+      "@nks/mobile-utils": [
+        "../../libs-mobile/mobile-utils/src"
+      ],
+      "@nks/mobile-utils/*": [
+        "../../libs-mobile/mobile-utils/src/*"
+      ],
+      "@nks/mobile-i18n": [
+        "../../libs-mobile/mobile-i18n/src"
+      ],
+      "@nks/mobile-i18n/*": [
+        "../../libs-mobile/mobile-i18n/src/*"
+      ],
+      "@nks/common-i18n": [
+        "../../libs-common/i18n/src"
+      ],
+      "@nks/common-i18n/*": [
+        "../../libs-common/i18n/src/*"
+      ],
+      "@nks/shared-types": [
+        "../../libs-common/shared-types/src"
+      ],
+      "@nks/shared-types/*": [
+        "../../libs-common/shared-types/src/*"
+      ],
+      "@nks/api-manager": [
+        "../../libs-common/api-manager/src"
+      ],
+      "@nks/api-manager/*": [
+        "../../libs-common/api-manager/src/*"
+      ],
+      "@nks/state-manager": [
+        "../../libs-common/state-manager/src"
+      ],
+      "@nks/state-manager/*": [
+        "../../libs-common/state-manager/src/*"
+      ],
+      "@nks/utils": [
+        "../../libs-common/utils/src"
+      ],
+      "@nks/utils/*": [
+        "../../libs-common/utils/src/*"
+      ]
     }
   },
   "include": [
     "**/*.ts",
     "**/*.tsx",
-    "../../libs-mobile/mobile-theme/src/types/styled.d.ts"
+    "../../libs-mobile/mobile-theme/src/types/styled.d.ts",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
   ]
 }

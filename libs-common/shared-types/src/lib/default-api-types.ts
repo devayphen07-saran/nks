@@ -1,8 +1,8 @@
-export interface APIState {
+export interface APIState<T = unknown, E = unknown> {
   isLoading: boolean;
   hasError: boolean;
-  response: any;
-  errors: any;
+  response: T | undefined;
+  errors: E | undefined;
 }
 
 export const defaultAPIState: APIState = {
@@ -12,25 +12,10 @@ export const defaultAPIState: APIState = {
   errors: undefined,
 };
 
-export const defaultAPIStateList: APIState = {
+export const defaultAPIStateList: APIState<unknown[]> = {
   ...defaultAPIState,
   response: [],
 };
-
-export interface PaginationMeta {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-}
-
-export interface ApiResponse<T> {
-  status: "success" | "error" | "warning";
-  statusCode: number;
-  message: string;
-  data: T;
-  meta?: PaginationMeta;
-}
 
 export interface UserProfile {
   id: number;

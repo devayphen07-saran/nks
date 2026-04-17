@@ -8,12 +8,12 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { MobileThemeProvider } from "@nks/mobile-theme";
 import { I18nProvider, i18nInstance } from "@nks/mobile-i18n";
 import { store } from "../store";
-import { AuthProvider } from "../lib/auth-provider";
+import { AuthProvider } from '../lib/auth/auth-provider';
 import { LoadingFallback } from "../components/feedback/LoadingFallback";
 import { OfflineStatusBanner } from "../components/feedback/OfflineStatusBanner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { initializePinning } from "../lib/ssl-pinning";
-import { initServerTime } from "../lib/server-time";
+import { initializePinning } from '../lib/device/ssl-pinning';
+import { initServerTime } from '../lib/utils/server-time';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 // Pre-load clock offset from SecureStore so token expiry checks are accurate from startup

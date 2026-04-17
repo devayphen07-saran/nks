@@ -79,6 +79,7 @@ export interface RouteEntry {
 }
 
 export interface AuthAccessResponse {
+  isSuperAdmin: boolean;
   activeStoreId: number | null;
   roles: UserRoleEntry[];
 }

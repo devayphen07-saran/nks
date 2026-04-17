@@ -42,28 +42,11 @@ const AuthSessionSchema = z.object({
   jwtToken: z.string().optional(),
 });
 
-// ─── Access Response Schema ───────────────────────────────────────────────
-
-const AuthAccessSchema = z.object({
-  activeStoreId: z.number().nullable(),
-  roles: z.array(
-    z.object({
-      roleCode: z.string(),
-      storeId: z.number().nullable(),
-      storeName: z.string().nullable(),
-      isPrimary: z.boolean(),
-      assignedAt: z.string(),
-      expiresAt: z.string().nullable(),
-    }),
-  ),
-});
-
 // ─── Auth Data Schema (unified response) ──────────────────────────────────
 
 const AuthDataSchema = z.object({
   user: AuthMinimalUserSchema,
   session: AuthSessionSchema,
-  access: AuthAccessSchema,
   offlineToken: z.string().optional(),
   offlineSessionSignature: z.string().optional(),
 });
@@ -84,7 +67,6 @@ export class RefreshTokenResponseDto extends createZodDto(AuthSessionSchema) {}
 export interface AuthResponseEnvelope {
   user: z.infer<typeof AuthMinimalUserSchema>;
   session: z.infer<typeof AuthSessionSchema>;
-  access: z.infer<typeof AuthAccessSchema>;
   offlineToken?: string;
   /** HMAC-SHA256 of the offline session payload, signed server-side.
    *  Mobile stores this and checks its presence on load; the signing secret

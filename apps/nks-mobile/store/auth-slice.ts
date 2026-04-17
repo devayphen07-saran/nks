@@ -1,6 +1,5 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { AuthResponse } from "@nks/api-manager";
-import { initializeAuth } from "./initialize-auth";
 export interface AuthState {
   isInitializing: boolean;
   isAuthenticated: boolean;
@@ -35,14 +34,14 @@ const authSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      .addCase(initializeAuth.pending, (state) => {
+      .addCase("auth/bootstrap/pending", (state) => {
         state.isInitializing = true;
       })
-      .addCase(initializeAuth.fulfilled, () => {
+      .addCase("auth/bootstrap/fulfilled", () => {
         // isInitializing is set to false by setCredentials or setUnauthenticated
         // dispatched inside the thunk
       })
-      .addCase(initializeAuth.rejected, (state) => {
+      .addCase("auth/bootstrap/rejected", (state) => {
         state.isInitializing = false;
         state.isAuthenticated = false;
         state.authResponse = null;
@@ -55,10 +54,16 @@ export const authReducer = authSlice.reducer;
 
 /**
  * Derived selector — true when the authenticated user has the SUPER_ADMIN role.
- * Computed from roles rather than stored as redundant state.
+ * Decoded from the jwtToken claims (roles are embedded at login time).
  */
-export const selectIsSuperAdmin = (state: { auth: AuthState }): boolean =>
-  state.auth.authResponse?.access?.roles?.some(
-    (r) => r.roleCode === "SUPER_ADMIN",
-  ) ?? false;
+export const selectIsSuperAdmin = (state: { auth: AuthState }): boolean => {
+  const jwtToken = state.auth.authResponse?.session?.jwtToken;
+  if (!jwtToken) return false;
+  try {
+    const payload = JSON.parse(atob(jwtToken.split('.')[1])) as { roles?: string[] };
+    return payload.roles?.includes('SUPER_ADMIN') ?? false;
+  } catch {
+    return false;
+  }
+};
 

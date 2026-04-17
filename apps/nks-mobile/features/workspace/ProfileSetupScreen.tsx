@@ -59,7 +59,7 @@ export function ProfileSetupScreen() {
         {
           text: "OK",
           onPress: () =>
-            router.replace("/(protected)/(workspace)/(app)/(account-type)"),
+            router.replace("/(protected)/(onboarding)/account-type"),
         },
       ]);
     } catch (err) {

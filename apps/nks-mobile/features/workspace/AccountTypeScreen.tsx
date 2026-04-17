@@ -21,13 +21,13 @@ export function AccountTypeScreen() {
   }, [confirmLogout]);
 
   const handleStore = useCallback(() => {
-    router.push("/(protected)/(workspace)/(app)/(store)/list");
+    router.push("/(protected)/(store)/list");
   }, []);
 
   const handlePersonal = useCallback(() => {
     // TODO: Dispatch setupPersonal API call
     console.log("Setting up personal account...");
-    router.push("/(protected)/(workspace)/(app)/(personal)/dashboard");
+    router.push("/(protected)/(personal)/(tabs)/dashboard");
   }, []);
 
   return (
@@ -101,7 +101,7 @@ export function AccountTypeScreen() {
             <InviteLinkCard
               onPress={() =>
                 router.push(
-                  "/(protected)/(workspace)/(app)/(onboarding)/accept-invite",
+                  "/(protected)/(onboarding)/accept-invite",
                 )
               }
             >

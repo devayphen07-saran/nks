@@ -1,17 +1,19 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import type { AuthResponse } from "@nks/api-manager";
 import { tokenManager, SESSION_STALE_MS, migrateUserToSecureStore } from "@nks/mobile-utils";
-import { offlineSession } from "../lib/offline-session";
-import { getServerAdjustedNow } from "../lib/server-time";
+import { offlineSession } from '../lib/auth/offline-session';
+import { getServerAdjustedNow } from '../lib/utils/server-time';
 import { setCredentials, setUnauthenticated } from "./auth-slice";
 import { refreshSession } from "./refresh-session";
 import { clearAuthState } from "./clear-auth-state";
 import { sessionTokenReg } from "@nks/utils";
-import { validateAuthResponse } from "../lib/token-validators";
-import { sanitizeError } from "../lib/log-sanitizer";
-import { JWTManager } from "../lib/jwt-manager";
-import { initializeRateLimiters } from "../lib/rate-limiter";
-import { createLogger } from "../lib/logger";
+import { validateAuthResponse } from '../lib/auth/token-validators';
+import { sanitizeError } from '../lib/utils/log-sanitizer';
+import { JWTManager } from '../lib/auth/jwt-manager';
+import { initializeRateLimiters } from '../lib/utils/rate-limiter';
+import { initializeDatabase } from '../lib/database/connection';
+import { initializeSyncEngine } from '../lib/sync/sync-engine';
+import { createLogger } from '../lib/utils/logger';
 import type { AppDispatch } from "./index";
 
 const log = createLogger("Auth:init");
@@ -27,6 +29,13 @@ export const initializeAuth = createAsyncThunk<
 >("auth/bootstrap", async (_, { dispatch }) => {
   try {
     log.info("Starting session initialization...");
+
+    // Initialize local SQLite database (idempotent — safe to call every startup)
+    await initializeDatabase();
+
+    // Restore persisted lastSyncedAt and reset any 'in_progress' mutations
+    // left over from a previous session that crashed mid-push.
+    await initializeSyncEngine();
 
     // One-time migration: move user PII from unencrypted AsyncStorage → SecureStore
     await migrateUserToSecureStore();

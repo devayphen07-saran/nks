@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { AuditController } from './audit.controller';
 import { AuditService } from './audit.service';
 import { AuditRepository } from './repositories/audit.repository';
+import { RolesModule } from '../roles/roles.module';
 
 /**
  * Audit Module
@@ -15,6 +16,7 @@ import { AuditRepository } from './repositories/audit.repository';
  */
 @Global()
 @Module({
+  imports: [RolesModule],
   controllers: [AuditController],
   providers: [AuditService, AuditRepository],
   exports: [AuditService, AuditRepository],

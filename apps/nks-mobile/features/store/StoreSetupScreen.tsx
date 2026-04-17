@@ -69,7 +69,7 @@ export function StoreSetupScreen() {
       // TODO: Dispatch store/register API call (apiPost or thunk action)
       console.log("Registering store with values:", values);
       setLoading(false);
-      router.push("/(protected)/(workspace)/(app)/(store)/list");
+      router.push("/(protected)/(store)/list");
     } catch (err: any) {
       setError(err.message || "An unexpected error occurred");
       setLoading(false);

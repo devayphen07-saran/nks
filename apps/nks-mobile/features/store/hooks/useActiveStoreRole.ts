@@ -1,26 +1,21 @@
 import { useSelector } from 'react-redux';
 import type { RootState } from '../../../store';
 import { selectIsSuperAdmin } from '../../../store/auth-slice';
-import { ROLE_MENU_MAP, type MenuItem, type RoleCode } from '../constants/drawer-menu-config';
+import { type MenuItem, type RoleCode } from '../constants/drawer-menu-config';
 
+/**
+ * Provides the active store context for drawer/menu rendering.
+ * activeStoreId comes from storeSlice (set after store API call).
+ * activeRole/menuItems will be populated once the store roles state is implemented.
+ */
 export function useActiveStoreRole() {
-  const authState = useSelector((state: RootState) => state.auth);
-  const access = authState.authResponse?.access;
+  const activeStoreId = useSelector((state: RootState) => state.store.selectedStoreId);
   const isSuperAdmin = useSelector(selectIsSuperAdmin);
 
-  const activeStoreId = access?.activeStoreId;
-  const roles = access?.roles ?? [];
-
-  // Find the primary role for the active store
-  const activeStoreRole = roles.find(
-    (role) => role.storeId === activeStoreId && role.isPrimary
-  );
-
-  const activeRole = activeStoreRole?.roleCode as RoleCode | undefined;
-  const activeStoreName = activeStoreRole?.storeName;
-  const menuItems: MenuItem[] = activeRole
-    ? ROLE_MENU_MAP[activeRole] ?? []
-    : [];
+  // Role and menu data will come from the store API response state (to be implemented).
+  const activeRole: RoleCode | undefined = undefined;
+  const activeStoreName: string | undefined = undefined;
+  const menuItems: MenuItem[] = [];
 
   return {
     activeStoreId,
@@ -28,6 +23,6 @@ export function useActiveStoreRole() {
     activeRole,
     menuItems,
     isSuperAdmin,
-    isOwner: activeRole === 'STORE_OWNER',
+    isOwner: false,
   };
 }

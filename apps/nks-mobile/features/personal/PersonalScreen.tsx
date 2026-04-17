@@ -10,7 +10,7 @@ import {
   MetricCard
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useAuth } from "../../store";
+import { useAuthState } from "../../store";
 import { useLogout } from "../../hooks/useLogout";
 import { WelcomeBanner, ExpenseRow } from "./components";
 import type { ExpenseItem } from "./components/ExpenseRow";
@@ -20,7 +20,7 @@ const RECENT_EXPENSE_ITEMS: ExpenseItem[] = [];
 
 export function PersonalScreen() {
   const { theme } = useMobileTheme();
-  const user = useAuth().authResponse?.user;
+  const user = useAuthState().authResponse?.user;
   const { logout } = useLogout();
 
   const recentExpenses = RECENT_EXPENSE_ITEMS;

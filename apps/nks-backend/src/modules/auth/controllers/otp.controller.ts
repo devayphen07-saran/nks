@@ -22,6 +22,8 @@ import {
 } from '../dto/otp-response.dto';
 import { ApiResponse } from '../../../common/utils/api-response';
 import { AuthGuard } from '../../../common/guards/auth.guard';
+import { RateLimitingGuard } from '../../../common/guards/rate-limiting.guard';
+import { RateLimit } from '../../../common/decorators/rate-limit.decorator';
 import type { AuthResponseEnvelope } from '../dto';
 
 @ApiTags('Auth')
@@ -36,6 +38,8 @@ export class OtpController {
 
   @Post('send')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(RateLimitingGuard)
+  @RateLimit(3)
   @ApiOperation({ summary: 'Send OTP via MSG91' })
   async sendOtp(
     @Body() dto: SendOtpDto,
@@ -46,6 +50,8 @@ export class OtpController {
 
   @Post('verify')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(RateLimitingGuard)
+  @RateLimit(5)
   @ApiOperation({ summary: 'Verify OTP and login' })
   async verifyOtp(
     @Body() dto: VerifyOtpDto,
@@ -75,6 +81,8 @@ export class OtpController {
 
   @Post('resend')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(RateLimitingGuard)
+  @RateLimit(3)
   @ApiOperation({ summary: 'Resend OTP using original request ID' })
   async resendOtp(
     @Body() dto: ResendOtpDto,

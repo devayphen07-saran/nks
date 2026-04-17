@@ -33,7 +33,7 @@ export function AcceptInviteScreen() {
       // TODO: Dispatch acceptInvite API call
       console.log("Accepting invite with token:", token);
       setIsLoading(false);
-      router.replace("/(protected)/(workspace)/(app)/(store)/list");
+      router.replace("/(protected)/(store)/list");
     } catch (err) {
       setError("An error occurred. Please try again.");
       setIsLoading(false);

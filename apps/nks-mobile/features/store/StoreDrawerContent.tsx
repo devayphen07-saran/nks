@@ -10,7 +10,7 @@ import {
   Column,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
-import { useAuth } from "../../store";
+import { useAuthState } from "../../store";
 import { useLogout } from "../../hooks/useLogout";
 import { useActiveStoreRole } from "./hooks/useActiveStoreRole";
 import type { DrawerContentComponentProps } from "@react-navigation/drawer";
@@ -23,7 +23,7 @@ export function StoreDrawerContent({ navigation }: StoreDrawerContentProps) {
   const { theme } = useMobileTheme();
   const [activeRoute, setActiveRoute] = useState("store");
 
-  const authState = useAuth();
+  const authState = useAuthState();
   const user = authState.authResponse?.user;
   const { activeStoreName, activeRole, menuItems } = useActiveStoreRole();
   const { logout } = useLogout();
@@ -50,12 +50,12 @@ export function StoreDrawerContent({ navigation }: StoreDrawerContentProps) {
 
   const handleSwitchToPersonal = useCallback(() => {
     navigation.closeDrawer();
-    router.replace("/(protected)/(workspace)/(app)/(personal)/dashboard");
+    router.replace("/(protected)/(personal)/(tabs)/dashboard");
   }, [navigation, router]);
 
   const handleSwitchStores = useCallback(() => {
     navigation.closeDrawer();
-    router.replace("/(protected)/(workspace)/(app)/(store)/list");
+    router.replace("/(protected)/(store)/list");
   }, [navigation, router]);
 
   const handleLogout = useCallback(() => {
