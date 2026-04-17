@@ -41,21 +41,7 @@ export class PermissionsService {
   async getUserPermissions(
     userId: number,
   ): Promise<PermissionContext & { permissionCodes: string[] }> {
-    type RoleRow = Awaited<
-      ReturnType<typeof this.rolesRepository.findUserRolesWithCompany>
-    >[number];
-
-    let userRoles: RoleRow[] = [];
-    try {
-      userRoles = await this.rolesRepository.findUserRolesWithCompany(userId);
-    } catch (error) {
-      this.logger.error(
-        `getUserPermissions: findUserRolesWithCompany failed for user ${userId}, falling back`,
-        error instanceof Error ? error.stack : String(error),
-      );
-      const basicRoles = await this.rolesRepository.findUserRoles(userId);
-      userRoles = basicRoles.map((role) => ({ ...role, storeName: null }));
-    }
+    const userRoles = await this.rolesRepository.findUserRoles(userId);
 
     const roleCodes = userRoles.map((r) => r.roleCode);
     const activeStoreId =

@@ -45,42 +45,13 @@ export class RolesRepository {
   // ─── Auth Context Reads (consumed by AuthService / RBACGuard) ─────────────
 
   /**
-   * Get all active roles for a user from user_role_mapping.
-   *
-   * user_role_mapping is the single source of truth for all roles:
-   * - Platform-level roles (SUPER_ADMIN, USER) have storeFk = NULL
-   * - Store-scoped roles (STORE_OWNER, STAFF, custom roles) have storeFk = storeId
-   */
-  async findUserRoles(userId: number): Promise<UserRoleRow[]> {
-    return this.db
-      .select({
-        roleId: userRoleMapping.roleFk,
-        roleCode: schema.roles.code,
-        isSystem: schema.roles.isSystem,
-        storeFk: userRoleMapping.storeFk,
-        isPrimary: userRoleMapping.isPrimary,
-      })
-      .from(userRoleMapping)
-      .innerJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
-      .where(
-        and(
-          eq(userRoleMapping.userFk, userId),
-          eq(userRoleMapping.isActive, true),
-          isNull(userRoleMapping.deletedAt),
-        ),
-      );
-  }
-
-  /**
    * Get all active roles for a user with store name included.
    *
    * user_role_mapping is the single source of truth for all roles:
-   * - Platform-level roles (SUPER_ADMIN, USER) have storeFk = NULL (storeName = null in result)
-   * - Store-scoped roles have storeFk = storeId (storeName populated from store table)
+   * - Platform-level roles (SUPER_ADMIN, USER) have storeFk = NULL (storeName = null)
+   * - Store-scoped roles (STORE_OWNER, STAFF, custom roles) have storeFk = storeId
    */
-  async findUserRolesWithCompany(
-    userId: number,
-  ): Promise<UserRoleWithStoreRow[]> {
+  async findUserRoles(userId: number): Promise<UserRoleWithStoreRow[]> {
     return this.db
       .select({
         roleId: userRoleMapping.roleFk,

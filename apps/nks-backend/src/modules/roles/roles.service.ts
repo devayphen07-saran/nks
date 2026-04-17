@@ -8,7 +8,7 @@ import { RoleEntityPermissionRepository } from './repositories/role-entity-permi
 import { PermissionChecker } from '../../common/utils/permission-checker';
 import type { CreateRoleDto, UpdateRoleDto } from './dto';
 import type { RoleResponseDto, RoleDetailResponse } from './dto/role-response.dto';
-import type { UserRoleRow } from './dto/role-response.dto';
+import type { UserRoleRow, UserRoleWithStoreRow } from './dto/role-response.dto';
 
 @Injectable()
 export class RolesService {
@@ -111,7 +111,7 @@ export class RolesService {
 
   // ─── Role queries (delegated to repository) ────────────────────────────────
 
-  async findUserRoles(userId: number): Promise<UserRoleRow[]> {
+  async findUserRoles(userId: number): Promise<UserRoleWithStoreRow[]> {
     return this.rolesRepository.findUserRoles(userId);
   }
 

@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { signOfflineSession } from '../../../../common/utils/offline-session-hmac';
 import { JWTConfigService, JWTPayload } from '../../../../config/jwt.config';
 import { RefreshTokenService } from '../session/refresh-token.service';
 import { SessionsRepository } from '../../repositories/sessions.repository';
@@ -157,7 +158,8 @@ export class TokenService {
       cachedPermissions ??
       (await this.permissionsService.getUserPermissions(user.id));
 
-    const primaryStoreId = permissions.roles.find((r) => r.isPrimary && r.storeId)?.storeId ?? null;
+    const primaryStoreId =
+      permissions.roles.find((r) => r.isPrimary && r.storeId)?.storeId ?? null;
 
     const offlineToken = this.jwtConfigService.signOfflineToken(
       {
@@ -175,13 +177,19 @@ export class TokenService {
       OFFLINE_JWT_EXPIRATION,
     );
 
-    const offlineSessionSignature = this.signOfflineSessionPayload({
-      userId: user.id,
-      storeId: primaryStoreId,
-      roles: permissions.roles.map((r) => r.roleCode),
-      offlineValidUntil:
-        Date.now() + OFFLINE_JWT_TTL_DAYS * 24 * 60 * 60 * 1000,
-    });
+    const offlineSessionSecret = this.configService.getOrThrow<string>(
+      'OFFLINE_SESSION_HMAC_SECRET',
+    );
+    const offlineSessionSignature = signOfflineSession(
+      {
+        userId: user.id,
+        storeId: primaryStoreId,
+        roles: permissions.roles.map((r) => r.roleCode),
+        offlineValidUntil:
+          Date.now() + OFFLINE_JWT_TTL_DAYS * 24 * 60 * 60 * 1000,
+      },
+      offlineSessionSecret,
+    );
 
     return AuthMapper.toAuthResponseEnvelope(
       {
@@ -205,23 +213,4 @@ export class TokenService {
     );
   }
 
-  // ─── Private Helpers ───────────────────────────────────────────────────────
-
-  private signOfflineSessionPayload(payload: {
-    userId: number;
-    storeId: number | null;
-    roles: string[];
-    offlineValidUntil: number;
-  }): string | undefined {
-    const secret = this.configService.getOrThrow<string>(
-      'OFFLINE_SESSION_HMAC_SECRET',
-    );
-    const data = JSON.stringify({
-      userId: payload.userId,
-      storeId: payload.storeId,
-      roles: [...payload.roles].sort(),
-      offlineValidUntil: payload.offlineValidUntil,
-    });
-    return crypto.createHmac('sha256', secret).update(data).digest('hex');
-  }
 }

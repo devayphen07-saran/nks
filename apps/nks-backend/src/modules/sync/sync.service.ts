@@ -1,6 +1,7 @@
 import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
+import { verifyOfflineSession } from '../../common/utils/offline-session-hmac';
 import { SyncRepository } from './repositories/sync.repository';
 import { SyncDataMapper } from './mappers/sync-data.mapper';
 import { SyncDataValidator } from './validators/sync-data.validator';
@@ -223,21 +224,18 @@ export class SyncService {
     }
 
     const secret = this.configService.getOrThrow<string>('OFFLINE_SESSION_HMAC_SECRET');
-    const data = JSON.stringify({
-      userId: session.userId,
-      storeId: session.storeId,
-      roles: [...session.roles].sort(),
-      offlineValidUntil: session.offlineValidUntil,
-    });
-    const expected = crypto.createHmac('sha256', secret).update(data).digest('hex');
+    const isValid = verifyOfflineSession(
+      {
+        userId: session.userId,
+        storeId: session.storeId,
+        roles: session.roles,
+        offlineValidUntil: session.offlineValidUntil,
+      },
+      secret,
+      session.signature,
+    );
 
-    const sigBuffer = Buffer.from(session.signature, 'hex');
-    const expectedBuffer = Buffer.from(expected, 'hex');
-
-    if (
-      sigBuffer.length !== expectedBuffer.length ||
-      !crypto.timingSafeEqual(sigBuffer, expectedBuffer)
-    ) {
+    if (!isValid) {
       throw new ForbiddenException('Offline session signature invalid');
     }
 
