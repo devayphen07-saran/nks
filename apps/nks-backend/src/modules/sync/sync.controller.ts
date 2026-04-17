@@ -62,7 +62,7 @@ export class SyncController {
    * in a transaction with field-level conflict resolution.
    */
   @Post('push')
-  @UseGuards(AuthGuard, RBACGuard)
+  @UseGuards(RBACGuard)
   @Roles('CASHIER', 'MANAGER', 'STORE_OWNER')
   @ApiOperation({
     summary: 'Push offline mutations from mobile',

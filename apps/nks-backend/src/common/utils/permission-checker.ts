@@ -77,12 +77,17 @@ export class PermissionChecker {
   /**
    * Asserts that the user holds any role in the given storeId.
    * Used to prevent sessions where activeStoreId no longer matches a real membership.
+   *
+   * A role with storeId=null is store-agnostic (platform-level) and always satisfies
+   * the check — consistent with hasRequiredRoles() behaviour.
    */
   static assertHasRoleInStore(
     userRoles: Array<{ roleCode: string; storeId: number | null }>,
     storeId: number,
   ): void {
-    const hasRole = userRoles.some((r) => r.storeId === storeId);
+    const hasRole = userRoles.some(
+      (r) => r.storeId === null || r.storeId === storeId,
+    );
     if (!hasRole) {
       throw new ForbiddenException({
         errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,

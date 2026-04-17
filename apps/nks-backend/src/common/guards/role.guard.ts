@@ -2,10 +2,10 @@ import {
   Injectable,
   CanActivate,
   ExecutionContext,
-  ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../decorators/roles.decorator';
+import { PermissionChecker } from '../utils/permission-checker';
 import type { AuthenticatedRequest } from './auth.guard';
 
 /**
@@ -13,6 +13,9 @@ import type { AuthenticatedRequest } from './auth.guard';
  *
  * Use when you need only @Roles() enforcement without the full
  * entity-permission resolution that RBACGuard performs.
+ *
+ * Roles are scoped to user.activeStoreId — a STORE_OWNER in store A cannot
+ * satisfy a @Roles check while their session points to store B.
  *
  * Usage:
  *   @UseGuards(AuthGuard, RoleGuard)
@@ -36,14 +39,11 @@ export class RoleGuard implements CanActivate {
 
     if (user?.isSuperAdmin) return true;
 
-    const userRoleCodes = (user?.roles ?? []).map((r) => r.roleCode);
-    const hasRole = requiredRoles.some((r) => userRoleCodes.includes(r));
-
-    if (!hasRole) {
-      throw new ForbiddenException(
-        `Required role(s): ${requiredRoles.join(', ')}`,
-      );
-    }
+    PermissionChecker.assertHasRequiredRoles(
+      user?.roles ?? [],
+      requiredRoles,
+      user?.activeStoreId,
+    );
 
     return true;
   }
