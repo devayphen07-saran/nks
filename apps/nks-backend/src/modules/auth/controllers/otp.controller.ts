@@ -23,6 +23,7 @@ import {
 import { ApiResponse } from '../../../common/utils/api-response';
 import { AuthGuard } from '../../../common/guards/auth.guard';
 import { RateLimitingGuard } from '../../../common/guards/rate-limiting.guard';
+import { Public } from '../../../common/decorators/public.decorator';
 import { RateLimit } from '../../../common/decorators/rate-limit.decorator';
 import type { AuthResponseEnvelope } from '../dto';
 
@@ -37,6 +38,7 @@ export class OtpController {
   ) {}
 
   @Post('send')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @UseGuards(RateLimitingGuard)
   @RateLimit(3)
@@ -49,6 +51,7 @@ export class OtpController {
   }
 
   @Post('verify')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @UseGuards(RateLimitingGuard)
   @RateLimit(5)
@@ -80,6 +83,7 @@ export class OtpController {
   }
 
   @Post('resend')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @UseGuards(RateLimitingGuard)
   @RateLimit(3)

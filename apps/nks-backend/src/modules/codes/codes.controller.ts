@@ -13,7 +13,7 @@ import {
   UseGuards,
   ParseIntPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { CodesService } from './codes.service';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -35,13 +35,11 @@ import { CodeCategoryResponseDto, CodeValueResponseDto } from './dto/codes-respo
 
 @ApiTags('Codes')
 @Controller('codes')
-@UseGuards(AuthGuard)
-@ApiBearerAuth()
 export class CodesController {
   constructor(private readonly service: CodesService) {}
 
   @Get('categories')
-  @UseGuards(RBACGuard)
+  @UseGuards(AuthGuard, RBACGuard)
   @Roles('SUPER_ADMIN')
   @ApiOperation({ summary: 'List all code categories (SUPER_ADMIN only)' })
   async getCategories(): Promise<ApiResponse<CodeCategoryResponseDto[]>> {
@@ -50,7 +48,7 @@ export class CodesController {
   }
 
   @Post('categories')
-  @UseGuards(RBACGuard)
+  @UseGuards(AuthGuard, RBACGuard)
   @Roles('SUPER_ADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new code category (SUPER_ADMIN only)' })
@@ -62,7 +60,7 @@ export class CodesController {
   }
 
   @Post(':categoryCode/values')
-  @UseGuards(RBACGuard)
+  @UseGuards(AuthGuard, RBACGuard)
   @Roles('SUPER_ADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Add a value to a category (SUPER_ADMIN only)' })
@@ -92,7 +90,7 @@ export class CodesController {
   }
 
   @Put('values/:id')
-  @UseGuards(RBACGuard)
+  @UseGuards(AuthGuard, RBACGuard)
   @Roles('SUPER_ADMIN')
   @ApiOperation({ summary: 'Edit a non-system value (SUPER_ADMIN only)' })
   async updateValue(
@@ -105,7 +103,7 @@ export class CodesController {
   }
 
   @Delete('values/:id')
-  @UseGuards(RBACGuard)
+  @UseGuards(AuthGuard, RBACGuard)
   @Roles('SUPER_ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Soft-delete a non-system value (SUPER_ADMIN only)' })

@@ -60,6 +60,7 @@ export class AuthController {
   ) {}
 
   @Post('login')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @UseGuards(RateLimitingGuard)
   @RateLimit(10)
@@ -76,6 +77,7 @@ export class AuthController {
   }
 
   @Post('register')
+  @Public()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Register new user. First user auto-assigned SUPER_ADMIN.',
@@ -92,6 +94,7 @@ export class AuthController {
   }
 
   @Post('refresh-token')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @UseGuards(RateLimitingGuard)
   @RateLimit(30)
