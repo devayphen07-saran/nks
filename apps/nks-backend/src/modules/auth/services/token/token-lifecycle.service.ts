@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { eq } from 'drizzle-orm';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import * as schema from '../../../../core/database/schema';
 import { JWTConfigService } from '../../../../config/jwt.config';
@@ -169,7 +170,9 @@ export class TokenLifecycleService {
       aud: JWT_AUDIENCE,
     });
 
-    // Step 7: Atomically update new session + revoke old refresh token
+    // Step 7: Atomically update new session + revoke old refresh token.
+    // Uses tx directly (not via repository) so both writes share the same
+    // DB connection and are committed or rolled back together.
     // Re-validate activeStoreFk — user's role in that store may have been revoked since last login
     const validatedActiveStoreFk =
       session.activeStoreFk !== null &&
@@ -177,22 +180,26 @@ export class TokenLifecycleService {
         ? session.activeStoreFk
         : null;
 
-    await this.db.transaction(async (_tx) => {
-      await this.sessionsRepository.update(newSession.id, {
-        roleHash: currentRoleHash,
-        deviceId: session.deviceId,
-        deviceName: session.deviceName,
-        deviceType: session.deviceType,
-        appVersion: session.appVersion,
-        activeStoreFk: validatedActiveStoreFk,
-        refreshTokenHash: newRefreshTokenHash,
-        refreshTokenExpiresAt: newRefreshTokenExpiresAt,
-        accessTokenExpiresAt,
-      });
-      await this.sessionsRepository.update(session.id, {
-        refreshTokenRevokedAt: new Date(),
-        revokedReason: 'ROTATION',
-      });
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(schema.userSession)
+        .set({
+          roleHash: currentRoleHash,
+          deviceId: session.deviceId,
+          deviceName: session.deviceName,
+          deviceType: session.deviceType,
+          appVersion: session.appVersion,
+          activeStoreFk: validatedActiveStoreFk,
+          refreshTokenHash: newRefreshTokenHash,
+          refreshTokenExpiresAt: newRefreshTokenExpiresAt,
+          accessTokenExpiresAt,
+        })
+        .where(eq(schema.userSession.id, newSession.id));
+
+      await tx
+        .update(schema.userSession)
+        .set({ refreshTokenRevokedAt: new Date(), revokedReason: 'ROTATION' })
+        .where(eq(schema.userSession.id, session.id));
     });
 
     // Step 8: Fetch default store

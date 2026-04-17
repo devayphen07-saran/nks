@@ -265,20 +265,23 @@ export class SessionsRepository {
 
   /**
    * Revoke all sessions for a user with a reason (theft detection response).
-   * Sets revokedReason before deletion for audit trail.
+   * Both the revocation mark and the deletion are wrapped in a single transaction
+   * so a crash between the two cannot leave sessions alive post-theft-detection.
    */
   async revokeAndDeleteAllForUser(
     userId: number,
     revokedReason: string,
   ): Promise<void> {
-    await this.db
-      .update(schema.userSession)
-      .set({ refreshTokenRevokedAt: new Date(), revokedReason })
-      .where(eq(schema.userSession.userId, userId));
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(schema.userSession)
+        .set({ refreshTokenRevokedAt: new Date(), revokedReason })
+        .where(eq(schema.userSession.userId, userId));
 
-    await this.db
-      .delete(schema.userSession)
-      .where(eq(schema.userSession.userId, userId));
+      await tx
+        .delete(schema.userSession)
+        .where(eq(schema.userSession.userId, userId));
+    });
   }
 
   /**
