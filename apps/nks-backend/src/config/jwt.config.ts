@@ -526,7 +526,11 @@ export class JWTConfigService {
 
   decodeToken(token: string): JWTPayload {
     try {
-      return jwt.decode(token) as JWTPayload;
+      const decoded = jwt.decode(token);
+      if (!decoded || typeof decoded === 'string') {
+        throw new Error('JWT decode returned null or raw string');
+      }
+      return decoded as JWTPayload;
     } catch (error) {
       this.logger.error('Failed to decode JWT', error);
       throw error;
