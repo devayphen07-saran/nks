@@ -3,6 +3,7 @@ import * as jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { z } from 'zod';
 import { RSAKeyManager } from '../core/crypto/rsa-keys';
 
 export interface JWTPayload {
@@ -33,11 +34,76 @@ export interface OfflineJWTPayload {
   kid?: string;
 }
 
-// Track fallback keys for graceful key rotation (7-day grace period)
+// ─── Zod schemas — validate jwt.verify() output before casting ───────────────
+
+const JWTPayloadSchema = z.object({
+  sub: z.string(),
+  sid: z.string(),
+  jti: z.string(),
+  email: z.string().optional(),
+  roles: z.array(z.string()),
+  iat: z.number(),
+  exp: z.number(),
+  iss: z.string(),
+  aud: z.string(),
+  kid: z.string().optional(),
+});
+
+const OfflineJWTPayloadSchema = z.object({
+  sub: z.string(),
+  jti: z.string(),
+  email: z.string().optional(),
+  roles: z.array(z.string()),
+  stores: z.array(z.object({ id: z.number(), name: z.string() })),
+  activeStoreId: z.number().nullable(),
+  iat: z.number(),
+  exp: z.number(),
+  iss: z.string(),
+  aud: z.string(),
+  kid: z.string().optional(),
+});
+
+/**
+ * Strict JWK (JSON Web Key) interface — only the fields defined by RFC 7517/7518 for RSA keys.
+ * Replaces `Record<string, any>` to prevent arbitrary properties from passing through unnoticed.
+ */
+export interface JWK {
+  kty: string; // Key type — always "RSA" for RS256
+  n: string; // RSA modulus (base64url)
+  e: string; // RSA exponent (base64url)
+  kid?: string; // Key ID
+  use?: string; // Key use — "sig" for signing
+  alg?: string; // Algorithm — "RS256"
+  iat?: number; // Issued-at (custom extension for JWKS rotation)
+}
+
+export interface JWKSet {
+  keys: JWK[];
+}
+
+/** Validate that an exported JsonWebKey has all required RSA fields and narrow to JWK. */
+function toJWK(raw: crypto.JsonWebKey): JWK {
+  const kty = typeof raw.kty === 'string' ? raw.kty : undefined;
+  const n = typeof raw.n === 'string' ? raw.n : undefined;
+  const e = typeof raw.e === 'string' ? raw.e : undefined;
+  if (!kty || !n || !e) {
+    throw new Error('Exported JWK is missing required RSA fields (kty, n, e)');
+  }
+  return {
+    kty,
+    n,
+    e,
+    kid: typeof raw.kid === 'string' ? raw.kid : undefined,
+    use: typeof raw.use === 'string' ? raw.use : undefined,
+    alg: typeof raw.alg === 'string' ? raw.alg : undefined,
+  };
+}
+
+// Track fallback keys for graceful key rotation (30-day grace period)
 interface FallbackKey {
   kid: string;
   publicKeyPem: string;
-  jwk: Record<string, any>;
+  jwk: JWK;
   rotatedAt: Date;
   expiresAt: Date;
 }
@@ -72,7 +138,9 @@ export class JWTConfigService {
 
       // Load persisted fallback keys (survives restarts)
       this.fallbackKeys = this.loadFallbackKeysFromDisk();
-      this.logger.debug(`✅ Loaded ${this.fallbackKeys.length} fallback key(s) from disk`);
+      this.logger.debug(
+        `✅ Loaded ${this.fallbackKeys.length} fallback key(s) from disk`,
+      );
     } catch (error) {
       this.logger.error('Failed to load RSA keys', error);
       throw error;
@@ -87,7 +155,7 @@ export class JWTConfigService {
       const parsed: Array<{
         kid: string;
         publicKeyPem: string;
-        jwk: Record<string, any>;
+        jwk: JWK;
         rotatedAt: string;
         expiresAt: string;
       }> = JSON.parse(raw);
@@ -100,7 +168,9 @@ export class JWTConfigService {
         }))
         .filter((k) => k.expiresAt > now);
     } catch {
-      this.logger.warn('Could not read fallback keys from disk — starting fresh');
+      this.logger.warn(
+        'Could not read fallback keys from disk — starting fresh',
+      );
       return [];
     }
   }
@@ -109,7 +179,8 @@ export class JWTConfigService {
   private saveFallbackKeysToDisk(): void {
     try {
       const dir = path.dirname(JWTConfigService.FALLBACK_KEYS_PATH);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      if (!fs.existsSync(dir))
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       fs.writeFileSync(
         JWTConfigService.FALLBACK_KEYS_PATH,
         JSON.stringify(this.fallbackKeys, null, 2),
@@ -227,11 +298,12 @@ export class JWTConfigService {
    */
   verifyToken(token: string): JWTPayload {
     try {
-      return jwt.verify(token, this.publicKey, {
+      const raw = jwt.verify(token, this.publicKey, {
         algorithms: ['RS256'],
         issuer: 'nks-auth',
         audience: 'nks-app',
-      }) as JWTPayload;
+      });
+      return JWTPayloadSchema.parse(raw);
     } catch (primaryError) {
       // Decode without verification to read the kid claim
       const decoded = jwt.decode(token, { complete: true });
@@ -241,13 +313,17 @@ export class JWTConfigService {
         const fallback = this.getFallbackKey(kid);
         if (fallback) {
           try {
-            return jwt.verify(token, fallback.publicKeyPem, {
+            const raw = jwt.verify(token, fallback.publicKeyPem, {
               algorithms: ['RS256'],
               issuer: 'nks-auth',
               audience: 'nks-app',
-            }) as JWTPayload;
+            });
+            return JWTPayloadSchema.parse(raw);
           } catch (fallbackError) {
-            this.logger.warn(`JWT verification failed with fallback key (kid=${kid})`, fallbackError);
+            this.logger.warn(
+              `JWT verification failed with fallback key (kid=${kid})`,
+              fallbackError,
+            );
           }
         }
       }
@@ -268,9 +344,9 @@ export class JWTConfigService {
   }
 
   /** Export the RSA public key in JWK format (for /nks-jwks endpoint) */
-  getPublicKeyAsJwk(): Record<string, any> {
+  getPublicKeyAsJwk(): JWK {
     const key = crypto.createPublicKey({ key: this.publicKey, format: 'pem' });
-    return key.export({ format: 'jwk' }) as Record<string, any>;
+    return toJWK(key.export({ format: 'jwk' }));
   }
 
   /**
@@ -285,7 +361,7 @@ export class JWTConfigService {
    * 3. Cache: 1 hour (max-age=3600) for fast emergency rotation propagation
    * 4. If key is compromised: Generate new key, add to JWKS, remove old after 30 days
    */
-  getPublicKeyAsJWKS(): Record<string, any> {
+  getPublicKeyAsJWKS(): JWKSet {
     // Clean up expired fallback keys
     this.cleanupExpiredFallbackKeys();
 
@@ -294,13 +370,13 @@ export class JWTConfigService {
       format: 'pem',
     });
 
-    const jwk = key.export({ format: 'jwk' }) as Record<string, any>;
+    const activeJwk = toJWK(key.export({ format: 'jwk' }));
     const now = Math.floor(Date.now() / 1000);
 
     // Build keys array: active key first, then valid fallback keys
-    const keysArray: Record<string, any>[] = [
+    const keysArray: JWK[] = [
       {
-        ...jwk,
+        ...activeJwk,
         kid: this.currentKeyId,
         use: 'sig',
         alg: 'RS256',
@@ -332,7 +408,7 @@ export class JWTConfigService {
       format: 'pem',
     });
 
-    const jwk = key.export({ format: 'jwk' });
+    const jwk = toJWK(key.export({ format: 'jwk' }));
     const now = new Date();
     const expiresAt = new Date(
       now.getTime() + this.FALLBACK_KEY_DURATION_DAYS * 24 * 60 * 60 * 1000,
@@ -413,11 +489,12 @@ export class JWTConfigService {
    */
   verifyOfflineToken(token: string): OfflineJWTPayload {
     try {
-      return jwt.verify(token, this.publicKey, {
+      const raw = jwt.verify(token, this.publicKey, {
         algorithms: ['RS256'],
         issuer: 'nks-auth',
         audience: 'nks-app',
-      }) as OfflineJWTPayload;
+      });
+      return OfflineJWTPayloadSchema.parse(raw);
     } catch (primaryError) {
       // Attempt verification with a fallback key if kid differs from current
       const decoded = jwt.decode(token, { complete: true });
@@ -427,11 +504,12 @@ export class JWTConfigService {
         const fallback = this.getFallbackKey(kid);
         if (fallback) {
           try {
-            return jwt.verify(token, fallback.publicKeyPem, {
+            const raw = jwt.verify(token, fallback.publicKeyPem, {
               algorithms: ['RS256'],
               issuer: 'nks-auth',
               audience: 'nks-app',
-            }) as OfflineJWTPayload;
+            });
+            return OfflineJWTPayloadSchema.parse(raw);
           } catch (fallbackError) {
             this.logger.warn(
               `Offline JWT verification failed with fallback key (kid=${kid})`,

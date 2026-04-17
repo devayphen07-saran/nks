@@ -5,7 +5,7 @@ export const SyncOperationSchema = z.object({
   id: z.string().min(1),
   clientId: z.string().min(1),
   table: z.string().min(1),
-  op: z.enum(['PUT', 'PATCH', 'DELETE']),
+  op: z.enum(['create', 'update', 'delete']),
   opData: z.record(z.string(), z.unknown()),
   // SHA-256(sessionSignature + ":" + op + ":" + table + ":" + JSON.stringify(opData))
   // computed on-device to detect payload tampering during offline queue storage.

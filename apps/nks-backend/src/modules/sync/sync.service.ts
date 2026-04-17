@@ -6,11 +6,33 @@ import { SyncDataMapper } from './mappers/sync-data.mapper';
 import { SyncDataValidator } from './validators/sync-data.validator';
 import { RevokedDevicesRepository } from '../auth/repositories/revoked-devices.repository';
 import { JWTConfigService } from '../../config/jwt.config';
+import { SyncHandlerFactory } from './handlers/sync-handler.factory';
 import type { SyncOperation, ChangesResponse, OfflineSessionContext } from './dto';
 
 export type { ChangesResponse };
 
-const DEFAULT_SYNC_LIMIT = 500;
+const DEFAULT_SYNC_LIMIT = 200;
+
+/** Keys whose values must never appear in logs — tokens, credentials, PII. */
+const SENSITIVE_KEYS = new Set([
+  'password', 'token', 'secret', 'key', 'apiKey', 'accessToken',
+  'refreshToken', 'sessionToken', 'otp', 'pin', 'cvv', 'cardNumber',
+]);
+
+/**
+ * Returns a copy of opData with values of known sensitive keys replaced by '[REDACTED]'.
+ * Use this whenever opData needs to appear in a log message.
+ */
+function sanitizeOpData(data: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(data)) {
+    result[k] = SENSITIVE_KEYS.has(k.toLowerCase()) ? '[REDACTED]' : v;
+  }
+  return result;
+}
+
+/** Tables supported for pull sync. Mobile sends a subset via the `tables` query param. */
+const SUPPORTED_TABLES = new Set(['state', 'district', 'routes']);
 
 @Injectable()
 export class SyncService {
@@ -21,76 +43,96 @@ export class SyncService {
     private readonly configService: ConfigService,
     private readonly revokedDevicesRepository: RevokedDevicesRepository,
     private readonly jwtConfigService: JWTConfigService,
+    private readonly syncHandlerFactory: SyncHandlerFactory,
   ) {}
 
   /**
    * Process a batch of sync push operations from the mobile offline sync queue.
    *
-   * Each operation is wrapped in a transaction with its idempotency
-   * log entry so a crash between the mutation and the log write
-   * never causes re-processing on retry.
+   * All valid operations are executed inside a SINGLE database transaction —
+   * the batch is all-or-nothing at the DB level. Validation failures (bad op,
+   * signature mismatch) are counted as `rejected` and excluded from the transaction
+   * before it opens, so they never affect the rollback decision.
+   *
+   * Each mutation is paired with an idempotency log write inside the same
+   * transaction so a crash between the two is never possible.
    */
   async processPushBatch(
     operations: SyncOperation[],
     userId: number,
     activeStoreId: number | null,
     offlineSession?: OfflineSessionContext,
-  ): Promise<{ processed: number }> {
+  ): Promise<{ processed: number; rejected: number; status: 'ok' | 'partial' }> {
     if (offlineSession) {
       await this.validateOfflineSessionSignature(offlineSession);
     }
 
-    // Derive the per-session signing key used by the mobile to sign each operation.
-    // Mobile computes: SHA256(sessionSignature + ":" + canonicalPayload)
-    // We re-derive the session signature here so we can verify each mutation.
     const signingKey = offlineSession?.signature ?? null;
-    let processed = 0;
+
+    // ── Phase 1: validate every op BEFORE opening a transaction ─────────────
+    // Rejected ops never touch the DB; valid ops are queued for the batch.
+    let rejected = 0;
+    const validOps: SyncOperation[] = [];
 
     for (const op of operations) {
       if (!SyncDataValidator.isValidOp(op.op)) {
-        this.logger.warn(`Unknown op "${op.op}" for ${op.id} — skipped`);
+        this.logger.warn(`Unknown op "${op.op}" for ${op.id} — rejected`);
+        rejected++;
         continue;
       }
 
       if (signingKey) {
         if (!this.verifyOperationSignature(op, signingKey)) {
-          this.logger.warn(`Operation ${op.id} rejected — signature mismatch`);
+          this.logger.warn(
+            `Operation ${op.id} rejected — signature mismatch`,
+            { table: op.table, op: op.op, data: sanitizeOpData(op.opData) },
+          );
+          rejected++;
           continue;
         }
       }
 
-      const idempotencyKey = `${op.clientId}-${op.id}`;
-      let wasProcessed = false;
-
-      await this.syncRepository.withTransaction(async (tx) => {
-        const alreadySeen = await this.syncRepository.isAlreadyProcessed(idempotencyKey, tx);
-
-        if (alreadySeen) {
-          this.logger.log(`Duplicate skipped: ${idempotencyKey}`);
-          return;
-        }
-
-        await this.processOperation(op, userId, activeStoreId, tx);
-        await this.syncRepository.logIdempotencyKey(idempotencyKey, tx);
-        wasProcessed = true;
-      });
-
-      if (wasProcessed) processed++;
+      validOps.push(op);
     }
 
-    return { processed };
+    // ── Phase 2: apply all valid ops in one atomic transaction ───────────────
+    let processed = 0;
+
+    if (validOps.length > 0) {
+      await this.syncRepository.withTransaction(async (tx) => {
+        for (const op of validOps) {
+          const idempotencyKey = `${op.clientId}-${op.id}`;
+          const alreadySeen = await this.syncRepository.isAlreadyProcessed(idempotencyKey, tx);
+
+          if (alreadySeen) {
+            this.logger.log(`Duplicate skipped: ${idempotencyKey}`);
+            continue;
+          }
+
+          await this.processOperation(op, userId, activeStoreId, tx);
+          await this.syncRepository.logIdempotencyKey(idempotencyKey, tx);
+          processed++;
+        }
+      });
+    }
+
+    const status = rejected > 0 ? 'partial' : 'ok';
+    return { processed, rejected, status };
   }
 
   /**
    * Fetch changes since a given cursor for pull-based sync.
    *
-   * Validates user membership in the store, then fetches route changes
-   * since the cursor timestamp. Returns nextCursor and hasMore flag.
+   * Validates store membership, then fetches all requested tables since cursorMs.
+   * Each table is fetched independently so mobile can advance per-table cursors.
+   * nextCursor = max updatedAt across all returned rows.
    */
   async getChanges(
     userId: number,
     cursorMs: number,
     storeGuuid: string,
+    tablesCsv: string,
+    limit: number = DEFAULT_SYNC_LIMIT,
   ): Promise<ChangesResponse> {
     const storeId = await this.syncRepository.verifyStoreMembership(userId, storeGuuid);
 
@@ -100,18 +142,40 @@ export class SyncService {
       );
     }
 
-    const limit = DEFAULT_SYNC_LIMIT;
-    const routeRows = await this.syncRepository.getRouteChanges(cursorMs, limit);
+    const requestedTables = tablesCsv
+      .split(',')
+      .map((t) => t.trim())
+      .filter((t) => SUPPORTED_TABLES.has(t));
 
-    const hasMore = routeRows.length > limit;
-    const rows = hasMore ? routeRows.slice(0, limit) : routeRows;
+    const allChanges: import('./dto/responses').SyncChange[] = [];
 
-    const changes = rows.map(SyncDataMapper.routeRowToChange);
-    const nextCursor = rows.length > 0 ? rows[rows.length - 1].updatedAt.getTime() : cursorMs;
+    for (const table of requestedTables) {
+      if (table === 'state') {
+        const rows = await this.syncRepository.getStateChanges(cursorMs, limit);
+        const slice = rows.length > limit ? rows.slice(0, limit) : rows;
+        allChanges.push(...slice.map(SyncDataMapper.stateRowToChange));
+      } else if (table === 'district') {
+        const rows = await this.syncRepository.getDistrictChanges(cursorMs, limit);
+        const slice = rows.length > limit ? rows.slice(0, limit) : rows;
+        allChanges.push(...slice.map(SyncDataMapper.districtRowToChange));
+      } else if (table === 'routes') {
+        const rows = await this.syncRepository.getRouteChanges(cursorMs, limit);
+        const slice = rows.length > limit ? rows.slice(0, limit) : rows;
+        allChanges.push(...slice.map(SyncDataMapper.routeRowToChange));
+      }
+    }
 
-    this.logger.debug(`Changes: ${changes.length} row(s), hasMore=${hasMore}, nextCursor=${nextCursor}`);
+    const hasMore = allChanges.length >= limit;
+    const nextCursor =
+      allChanges.length > 0
+        ? Math.max(...allChanges.map((c) => c.updatedAt))
+        : cursorMs;
 
-    return { nextCursor, hasMore, changes };
+    this.logger.debug(
+      `Changes: ${allChanges.length} row(s) across [${requestedTables.join(',')}], hasMore=${hasMore}, nextCursor=${nextCursor}`,
+    );
+
+    return { nextCursor, hasMore, changes: allChanges };
   }
 
   /**
@@ -223,16 +287,17 @@ export class SyncService {
 
   /**
    * Route a single sync operation to the correct domain handler.
-   * Tables with no registered handler are logged and skipped.
+   *
+   * Add cases here as domain tables are introduced (products, orders, etc.).
+   * Tables with no registered handler are logged and skipped — safe to deploy
+   * before the corresponding handler is implemented.
    */
   private async processOperation(
     op: SyncOperation,
-    _userId: number,
-    _activeStoreId: number | null,
-    _tx: unknown,
+    userId: number,
+    activeStoreId: number | null,
+    tx: unknown,
   ): Promise<void> {
-    this.logger.warn(
-      `No handler registered for sync table "${op.table}" — operation ${op.id} skipped`,
-    );
+    await this.syncHandlerFactory.handle(op, userId, activeStoreId, tx);
   }
 }

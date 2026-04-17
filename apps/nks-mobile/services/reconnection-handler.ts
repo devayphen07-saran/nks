@@ -22,13 +22,13 @@
 import { tokenManager } from "@nks/mobile-utils";
 import type { AuthResponse } from "@nks/api-manager";
 import { setCredentials, setUnauthenticated } from "../store/auth-slice";
-import { JWTManager } from "../lib/jwt-manager";
-import { offlineSession } from "../lib/offline-session";
+import { JWTManager } from '../lib/auth/jwt-manager';
+import { offlineSession } from '../lib/auth/offline-session';
 import { clearAllTables } from "../lib/local-db";
-import { runSync } from "../lib/sync-engine";
-import { fetchWithTimeout } from "../lib/fetch-with-timeout";
-import { createLogger } from "../lib/logger";
-import { refreshTokenAttempt } from "../lib/refresh-token-attempt";
+import { runSync } from '../lib/sync/sync-engine';
+import { fetchWithTimeout } from '../lib/utils/fetch-with-timeout';
+import { createLogger } from '../lib/utils/logger';
+import { refreshTokenAttempt } from '../lib/auth/refresh-token-attempt';
 import type { AppDispatch } from "../store";
 
 const log = createLogger("ReconnectionHandler");

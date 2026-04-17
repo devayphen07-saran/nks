@@ -1,4 +1,4 @@
-const VALID_OPS = new Set(['PUT', 'PATCH', 'DELETE']);
+const VALID_OPS = new Set(['create', 'update', 'delete']);
 
 export class SyncDataValidator {
   /**

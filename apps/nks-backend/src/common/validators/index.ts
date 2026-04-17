@@ -7,3 +7,4 @@ export { DeviceValidator } from './device.validator';
 export { EmailValidator } from './email.validator';
 export { PhoneValidator } from './phone.validator';
 export { PasswordValidator } from './password.validator';
+export { SessionValidator, DeviceTypeEnum, AuthMethodEnum } from './session.validator';

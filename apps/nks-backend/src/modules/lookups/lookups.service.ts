@@ -118,19 +118,18 @@ export class LookupsService {
 
   /**
    * Update an existing lookup value, enforcing it belongs to the given category.
+   * Uses a single JOIN query instead of two sequential round-trips.
    */
   async updateLookupValue(
     categoryCode: string,
     id: number,
     dto: UpdateLookupValueDto,
   ): Promise<LookupValueAdminResponse> {
-    const category = await this.repository.findCodeCategoryByCode(categoryCode);
-    if (!category) {
-      throw new NotFoundException(`Category '${categoryCode}' not found`);
-    }
-    const value = await this.repository.findCodeValueById(id);
+    const value = await this.repository.findCodeValueByIdAndCategory(id, categoryCode);
     if (!value) {
-      throw new NotFoundException(`Lookup value with ID ${id} not found`);
+      throw new NotFoundException(
+        `Lookup value with ID ${id} not found in category '${categoryCode}'`,
+      );
     }
     const updated = await this.repository.updateCodeValue(id, dto);
     if (!updated) {
@@ -141,15 +140,14 @@ export class LookupsService {
 
   /**
    * Delete a lookup value, enforcing it belongs to the given category.
+   * Uses a single JOIN query instead of two sequential round-trips.
    */
   async deleteLookupValue(categoryCode: string, id: number): Promise<void> {
-    const category = await this.repository.findCodeCategoryByCode(categoryCode);
-    if (!category) {
-      throw new NotFoundException(`Category '${categoryCode}' not found`);
-    }
-    const value = await this.repository.findCodeValueById(id);
+    const value = await this.repository.findCodeValueByIdAndCategory(id, categoryCode);
     if (!value) {
-      throw new NotFoundException(`Lookup value with ID ${id} not found`);
+      throw new NotFoundException(
+        `Lookup value with ID ${id} not found in category '${categoryCode}'`,
+      );
     }
     await this.repository.deleteCodeValue(id);
   }

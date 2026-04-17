@@ -3,6 +3,8 @@ export interface SyncChange {
   id: number;
   operation: 'upsert' | 'delete';
   data: Record<string, unknown> | null;
+  /** Unix ms timestamp of the row's updated_at — used by mobile to advance its per-table cursor */
+  updatedAt: number;
 }
 
 export interface ChangesResponse {

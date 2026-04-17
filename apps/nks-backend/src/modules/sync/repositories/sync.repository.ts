@@ -24,6 +24,30 @@ export interface RouteChangeRow {
   deletedAt: Date | null;
 }
 
+export interface StateChangeRow {
+  id: number;
+  guuid: string;
+  stateName: string;
+  stateCode: string;
+  gstStateCode: string | null;
+  isUnionTerritory: boolean;
+  isActive: boolean;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+
+export interface DistrictChangeRow {
+  id: number;
+  guuid: string;
+  districtName: string;
+  districtCode: string | null;
+  lgdCode: string | null;
+  stateFk: number;
+  isActive: boolean;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+
 @Injectable()
 export class SyncRepository {
   constructor(@InjectDb() private readonly db: Db) {}
@@ -101,6 +125,56 @@ export class SyncRepository {
       .limit(limit + 1);
 
     return rows as RouteChangeRow[];
+  }
+
+  /**
+   * Fetch states changed since a given timestamp.
+   * Returns full rows including deleted_at for soft-delete propagation.
+   */
+  async getStateChanges(cursorMs: number, limit: number): Promise<StateChangeRow[]> {
+    const cursorDate = new Date(cursorMs);
+    const rows = await this.db
+      .select({
+        id: schema.state.id,
+        guuid: schema.state.guuid,
+        stateName: schema.state.stateName,
+        stateCode: schema.state.stateCode,
+        gstStateCode: schema.state.gstStateCode,
+        isUnionTerritory: schema.state.isUnionTerritory,
+        isActive: schema.state.isActive,
+        updatedAt: schema.state.updatedAt,
+        deletedAt: schema.state.deletedAt,
+      })
+      .from(schema.state)
+      .where(gt(schema.state.updatedAt, cursorDate))
+      .orderBy(schema.state.updatedAt)
+      .limit(limit + 1);
+    return rows as StateChangeRow[];
+  }
+
+  /**
+   * Fetch districts changed since a given timestamp.
+   * Returns full rows including deleted_at for soft-delete propagation.
+   */
+  async getDistrictChanges(cursorMs: number, limit: number): Promise<DistrictChangeRow[]> {
+    const cursorDate = new Date(cursorMs);
+    const rows = await this.db
+      .select({
+        id: schema.district.id,
+        guuid: schema.district.guuid,
+        districtName: schema.district.districtName,
+        districtCode: schema.district.districtCode,
+        lgdCode: schema.district.lgdCode,
+        stateFk: schema.district.stateFk,
+        isActive: schema.district.isActive,
+        updatedAt: schema.district.updatedAt,
+        deletedAt: schema.district.deletedAt,
+      })
+      .from(schema.district)
+      .where(gt(schema.district.updatedAt, cursorDate))
+      .orderBy(schema.district.updatedAt)
+      .limit(limit + 1);
+    return rows as DistrictChangeRow[];
   }
 
   /**

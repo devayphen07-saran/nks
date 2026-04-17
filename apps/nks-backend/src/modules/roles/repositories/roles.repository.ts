@@ -78,7 +78,9 @@ export class RolesRepository {
    * - Platform-level roles (SUPER_ADMIN, USER) have storeFk = NULL (storeName = null in result)
    * - Store-scoped roles have storeFk = storeId (storeName populated from store table)
    */
-  async findUserRolesWithCompany(userId: number): Promise<UserRoleWithStoreRow[]> {
+  async findUserRolesWithCompany(
+    userId: number,
+  ): Promise<UserRoleWithStoreRow[]> {
     return this.db
       .select({
         roleId: userRoleMapping.roleFk,
@@ -101,7 +103,9 @@ export class RolesRepository {
   }
 
   /** Get route permissions (path + CRUD flags) for a single role ID. */
-  async findRoutePermissionsByRoleId(roleId: number): Promise<RoutePermission[]> {
+  async findRoutePermissionsByRoleId(
+    roleId: number,
+  ): Promise<RoutePermission[]> {
     return this.db
       .select({
         routeId: schema.routes.id,
@@ -115,7 +119,10 @@ export class RolesRepository {
         canExport: schema.roleRouteMapping.canExport,
       })
       .from(schema.roleRouteMapping)
-      .innerJoin(schema.routes, eq(schema.roleRouteMapping.routeFk, schema.routes.id))
+      .innerJoin(
+        schema.routes,
+        eq(schema.roleRouteMapping.routeFk, schema.routes.id),
+      )
       .where(
         and(
           eq(schema.roleRouteMapping.roleFk, roleId),
@@ -127,7 +134,9 @@ export class RolesRepository {
   }
 
   /** Get all allowed routes (with CRUD flags) for a set of role IDs. */
-  async findRoutesByRoleIds(roleIds: number[]): Promise<RouteWithPermissionsRow[]> {
+  async findRoutesByRoleIds(
+    roleIds: number[],
+  ): Promise<RouteWithPermissionsRow[]> {
     if (roleIds.length === 0) return [];
     return this.db
       .selectDistinctOn([schema.routes.routePath], {
@@ -277,7 +286,11 @@ export class RolesRepository {
    * Soft-delete ALL role assignments for a user in a specific store.
    * Called when a user is removed from a store.
    */
-  async removeAllStoreRoles(userFk: number, storeFk: number, tx?: Db): Promise<void> {
+  async removeAllStoreRoles(
+    userFk: number,
+    storeFk: number,
+    tx?: Db,
+  ): Promise<void> {
     const client = tx ?? this.db;
     await client
       .update(userRoleMapping)
@@ -294,7 +307,12 @@ export class RolesRepository {
   /**
    * Get all active role assignments for a user in a specific store.
    */
-  async getActiveRolesForStore(userFk: number, storeFk: number): Promise<Pick<UserRoleRow, 'roleId' | 'roleCode' | 'isSystem' | 'isPrimary'>[]> {
+  async getActiveRolesForStore(
+    userFk: number,
+    storeFk: number,
+  ): Promise<
+    Pick<UserRoleRow, 'roleId' | 'roleCode' | 'isSystem' | 'isPrimary'>[]
+  > {
     return this.db
       .select({
         roleId: userRoleMapping.roleFk,
@@ -396,7 +414,9 @@ export class RolesRepository {
     const [role] = await this.db
       .select()
       .from(schema.roles)
-      .where(and(eq(schema.roles.guuid, guuid), eq(schema.roles.isActive, true)))
+      .where(
+        and(eq(schema.roles.guuid, guuid), eq(schema.roles.isActive, true)),
+      )
       .limit(1);
     return role ?? null;
   }
@@ -522,9 +542,7 @@ export class RolesRepository {
     const [roleRecord] = await tx
       .select({ id: schema.roles.id })
       .from(schema.roles)
-      .where(
-        and(eq(schema.roles.code, roleCode), isNull(schema.roles.storeFk)),
-      )
+      .where(and(eq(schema.roles.code, roleCode), isNull(schema.roles.storeFk)))
       .limit(1);
 
     if (!roleRecord) return;

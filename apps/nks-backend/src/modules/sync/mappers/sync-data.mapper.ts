@@ -1,4 +1,4 @@
-import type { RouteChangeRow } from '../repositories/sync.repository';
+import type { RouteChangeRow, StateChangeRow, DistrictChangeRow } from '../repositories/sync.repository';
 import type { SyncChange } from '../dto/responses';
 
 export class SyncDataMapper {
@@ -11,6 +11,7 @@ export class SyncDataMapper {
       table: 'routes',
       id: row.id,
       operation: row.deletedAt ? 'delete' : 'upsert',
+      updatedAt: row.updatedAt.getTime(),
       data: row.deletedAt
         ? null
         : {
@@ -27,6 +28,56 @@ export class SyncDataMapper {
             isPublic: row.isPublic,
             isActive: row.isActive,
             createdAt: row.createdAt.toISOString(),
+            updatedAt: row.updatedAt.toISOString(),
+            deletedAt: null,
+          },
+    };
+  }
+
+  /**
+   * Map a raw state DB row into a SyncChange payload for mobile clients.
+   */
+  static stateRowToChange(row: StateChangeRow): SyncChange {
+    return {
+      table: 'state',
+      id: row.id,
+      operation: row.deletedAt ? 'delete' : 'upsert',
+      updatedAt: row.updatedAt.getTime(),
+      data: row.deletedAt
+        ? null
+        : {
+            id: row.id,
+            guuid: row.guuid,
+            stateName: row.stateName,
+            stateCode: row.stateCode,
+            gstStateCode: row.gstStateCode,
+            isUnionTerritory: row.isUnionTerritory,
+            isActive: row.isActive,
+            updatedAt: row.updatedAt.toISOString(),
+            deletedAt: null,
+          },
+    };
+  }
+
+  /**
+   * Map a raw district DB row into a SyncChange payload for mobile clients.
+   */
+  static districtRowToChange(row: DistrictChangeRow): SyncChange {
+    return {
+      table: 'district',
+      id: row.id,
+      operation: row.deletedAt ? 'delete' : 'upsert',
+      updatedAt: row.updatedAt.getTime(),
+      data: row.deletedAt
+        ? null
+        : {
+            id: row.id,
+            guuid: row.guuid,
+            districtName: row.districtName,
+            districtCode: row.districtCode,
+            lgdCode: row.lgdCode,
+            stateFk: row.stateFk,
+            isActive: row.isActive,
             updatedAt: row.updatedAt.toISOString(),
             deletedAt: null,
           },

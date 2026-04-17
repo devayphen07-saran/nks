@@ -51,7 +51,7 @@ const codeValueSelect = {
 export class LookupsRepository {
   constructor(@InjectDb() private readonly db: NodePgDatabase<typeof schema>) {}
 
-  private queryCodeValues(categoryCode: string) {
+  private queryCodeValues(categoryCode: string, limit = 200) {
     return this.db
       .select(codeValueSelect)
       .from(codeValue)
@@ -64,7 +64,8 @@ export class LookupsRepository {
           isNull(codeValue.deletedAt),
         ),
       )
-      .orderBy(codeValue.sortOrder);
+      .orderBy(codeValue.sortOrder)
+      .limit(limit);
   }
 
   async getSalutations(): Promise<CodeValueRow[]> {
@@ -199,6 +200,30 @@ export class LookupsRepository {
       .select(codeValueSelect)
       .from(codeValue)
       .where(and(eq(codeValue.id, id), isNull(codeValue.deletedAt)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * Fetch a code_value by id and verify it belongs to categoryCode in one query.
+   * Returns null if the value does not exist, is deleted, or belongs to a different category.
+   * Use this instead of calling findCodeCategoryByCode + findCodeValueById separately.
+   */
+  async findCodeValueByIdAndCategory(
+    id: number,
+    categoryCode: string,
+  ): Promise<CodeValueRow | null> {
+    const [row] = await this.db
+      .select(codeValueSelect)
+      .from(codeValue)
+      .innerJoin(codeCategory, eq(codeValue.categoryFk, codeCategory.id))
+      .where(
+        and(
+          eq(codeValue.id, id),
+          eq(codeCategory.code, categoryCode),
+          isNull(codeValue.deletedAt),
+        ),
+      )
       .limit(1);
     return row ?? null;
   }

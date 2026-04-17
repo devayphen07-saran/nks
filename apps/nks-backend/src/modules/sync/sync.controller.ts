@@ -48,6 +48,8 @@ export class SyncController {
       req.user.userId,
       query.cursor,
       query.storeId,
+      query.tables,
+      query.limit,
     );
 
     return ApiResponse.ok(result, 'Sync changes fetched');
@@ -70,7 +72,7 @@ export class SyncController {
   async syncPush(
     @Req() req: AuthenticatedRequest,
     @Body() body: SyncPushDto,
-  ): Promise<ApiResponse<{ processed: number }>> {
+  ): Promise<ApiResponse<{ processed: number; rejected: number; status: 'ok' | 'partial' }>> {
     const result = await this.syncService.processPushBatch(
       body.operations,
       req.user.userId,
