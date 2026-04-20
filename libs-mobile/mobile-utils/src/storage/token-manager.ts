@@ -11,8 +11,15 @@ let _expiredFired = false;
 
 const SESSION_KEY = "nks_session";
 
-/** Session data older than 15 minutes triggers a background re-fetch. */
-export const SESSION_STALE_MS = 15 * 60 * 1000;
+/**
+ * Session data older than this triggers a background re-fetch.
+ *
+ * Set to ~50% of the access token TTL (15 min) so the proactive refresh
+ * fires while the token is still valid. A value too close to the TTL
+ * (e.g. 15 min) means the token is already expired when the refresh
+ * runs, causing a 401 → reactive refresh race.
+ */
+export const SESSION_STALE_MS = 7 * 60 * 1000;
 
 /** SecureStore hard limit is 2048 bytes — stay comfortably under. */
 const MAX_BYTES = 1800;

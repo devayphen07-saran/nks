@@ -1,5 +1,5 @@
 import React, { ReactElement, useMemo } from "react";
-import { Modal } from "react-native";
+import { Modal, ViewStyle } from "react-native";
 
 import {
   SelectAnimatedSheetContainer,
@@ -26,7 +26,7 @@ export interface SelectProps<T> {
   onChange: (value: T | undefined) => void;
   placeholder?: string;
   disabled?: boolean;
-  style?: any;
+  style?: ViewStyle;
   multiple?: boolean;
   Header?: React.ReactNode;
   renderItem: (value: T, onSelectItem: (value: T) => void, isSelected: boolean) => ReactElement;
@@ -131,7 +131,8 @@ export function SelectGeneric<T>({
                 renderItem(
                   item,
                   (i) => {
-                    if (!(item as any).disabled && !(item as any).isHidden) {
+                    const _item = item as { disabled?: boolean; isHidden?: boolean };
+                  if (!_item.disabled && !_item.isHidden) {
                       onChange(i);
                       setVisible(false);
                     }

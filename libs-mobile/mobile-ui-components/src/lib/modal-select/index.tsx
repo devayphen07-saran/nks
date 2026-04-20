@@ -99,9 +99,8 @@ export function ModalSelect<T>({
           <ThemedFlatList
             data={options}
             keyExtractor={
-              keyExtractor || ((item, index) => String((item as any)[valueKey]) + index)
+              keyExtractor || ((item, index) => String(item[valueKey]) + index)
             }
-            
             scrollEnabled={true}
             renderItem={(info: { item: T; index: number }) =>
               renderItem(
@@ -110,7 +109,7 @@ export function ModalSelect<T>({
                   onChange(i);
                   setOpen(false);
                 },
-                (selectedValue as any)?.[valueKey] === (info.item as any)?.[valueKey]
+                selectedValue?.[valueKey] === info.item[valueKey]
               )
             }
             ItemSeparatorComponent={() => <Separator />}
@@ -159,6 +158,6 @@ const SheetBar = styled(View)(() => ({
 }));
 
 const NoDataText = styled(Text)(({ theme }) => ({
-  color: theme.color.default.active || "#6b7280",
+  color: theme.color.default.active,
   fontSize: 15,
 }));

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { ActivityIndicator, Modal, TouchableOpacity, TouchableWithoutFeedback } from "react-native";
 import styled from "styled-components/native";
 import { X } from "lucide-react-native";
-import { ColorType } from "@nks/mobile-theme";
+import { useMobileTheme } from "@nks/mobile-theme";
 import { LucideIcon, LucideIconNameType } from "../lucide-icon";
 
 interface BorderConfig {
@@ -36,6 +36,7 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
   border,
   loading,
 }) => {
+  const { theme } = useMobileTheme();
   const [imageLoading, setImageLoading] = useState(false);
   const [error, setError] = useState(false);
   const [open, setOpen] = useState(false);
@@ -57,13 +58,13 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
         >
           {loading ? (
             <Centered>
-              <ActivityIndicator color={ColorType.grey} />
+              <ActivityIndicator color={theme.color.grey.main} />
             </Centered>
           ) : showFallback ? (
             <Centered>
               <LucideIcon
                 name={fallbackIcon}
-                color={fallbackIconColor || ColorType.grey}
+                color={fallbackIconColor || theme.color.grey.main}
                 size={iconSize || size * 0.4}
               />
             </Centered>
@@ -71,7 +72,7 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
             <>
               {imageLoading && (
                 <Centered>
-                  <ActivityIndicator color={ColorType.grey} />
+                  <ActivityIndicator color={theme.color.grey.main} />
                 </Centered>
               )}
               <StyledImage
@@ -97,7 +98,7 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
               style={{ position: "absolute", top: 50, right: 10, zIndex: 2 }}
               onPress={() => setOpen(false)}
             >
-              <X color="#fff" size={28} />
+              <X color={theme.colorWhite} size={28} />
             </TouchableOpacity>
 
             <PreviewImage source={{ uri }} resizeMode="contain" onError={() => setError(true)} />

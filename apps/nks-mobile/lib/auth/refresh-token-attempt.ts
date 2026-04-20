@@ -85,6 +85,9 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
           : {}),
       },
       ...(result?.offlineToken ? { offlineToken: result.offlineToken } : {}),
+      ...(result?.offlineSessionSignature
+        ? { offlineSessionSignature: result.offlineSessionSignature }
+        : {}),
     };
 
     await tokenManager.persistSession(updated);

@@ -442,9 +442,32 @@ function _timeout(ms: number, message: string): Promise<never> {
 }
 
 /**
+ * Deterministic JSON serialisation with sorted keys.
+ *
+ * Ensures the same logical object produces the identical string on any JS engine
+ * (Hermes on mobile, V8 on server). Standard JSON.stringify does not guarantee
+ * key order, causing signature mismatches on legitimate operations.
+ */
+function canonicalJson(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'boolean' || typeof value === 'number') return JSON.stringify(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return '[' + value.map(canonicalJson).join(',') + ']';
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  const entries = keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`);
+  return '{' + entries.join(',') + '}';
+}
+
+/**
  * SHA-256 keyed hash for operation signing.
- * Format: SHA256(signingKey:op:table:JSON(opData))
+ * Format: SHA256(signingKey:op:table:canonicalJson(opData))
  * Mirrors SyncService.verifyOperationSignature() on the backend.
+ *
+ * Uses canonical JSON (sorted keys) to ensure cross-engine consistency
+ * between Hermes (mobile) and V8 (server).
  */
 async function _signOperation(
   op: string,
@@ -452,7 +475,7 @@ async function _signOperation(
   opData: Record<string, unknown>,
   signingKey: string,
 ): Promise<string> {
-  const canonical = `${op}:${table}:${JSON.stringify(opData)}`;
+  const canonical = `${op}:${table}:${canonicalJson(opData)}`;
   const input = `${signingKey}:${canonical}`;
   return ExpoCrypto.digestStringAsync(ExpoCrypto.CryptoDigestAlgorithm.SHA256, input);
 }

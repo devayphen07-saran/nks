@@ -1,7 +1,2 @@
-export function useLocalDb() {
-  return null;
-}
-
-export function usePendingSync() {
-  return null;
-}
+// Intentionally empty — useLocalDb and usePendingSync were stubs that returned null.
+// Remove this file once the local-db index export is cleaned up.

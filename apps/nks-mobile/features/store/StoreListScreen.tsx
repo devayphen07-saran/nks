@@ -50,6 +50,7 @@ export function StoreListScreen() {
   const [myStores, setMyStores] = useState<Store[]>([]);
   const [invitedStores, setInvitedStores] = useState<Store[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "own" | "invited">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -59,6 +60,7 @@ export function StoreListScreen() {
 
   const fetchStores = useCallback(() => {
     setIsLoading(true);
+    setFetchError(null);
     dispatch(getMyStores({}))
       .unwrap()
       .then((res) => {
@@ -67,7 +69,7 @@ export function StoreListScreen() {
         setInvitedStores(data?.invitedStores ?? []);
       })
       .catch(() => {
-        // Silently fail — empty lists already shown
+        setFetchError("Failed to load stores. Pull down to retry.");
       })
       .finally(() => setIsLoading(false));
   }, [dispatch]);
@@ -89,7 +91,7 @@ export function StoreListScreen() {
       s.storeCode?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  const handleSelectStore = useCallback(async (store: Store) => {
+  const handleSelectStore = useCallback(async (_store: Store) => {
     router.replace("/(protected)/(store)/store");
   }, []);
 
@@ -196,6 +198,12 @@ export function StoreListScreen() {
         </FilterRow>
       </HeaderControls>
 
+      {fetchError && (
+        <ErrorBanner>
+          <Typography.Caption color={theme.colorError}>{fetchError}</Typography.Caption>
+        </ErrorBanner>
+      )}
+
       <FlatListScaffold
         data={filteredStores}
         renderItem={renderItem}
@@ -251,4 +259,10 @@ const PendingBadge = styled.View`
   background-color: ${({ theme }) => theme.colorWarningBg};
   border-radius: 20px;
   padding: 3px 8px;
+`;
+
+const ErrorBanner = styled.View`
+  background-color: ${({ theme }) => theme.colorErrorBg};
+  padding: 10px 16px;
+  margin: 0 0 8px 0;
 `;

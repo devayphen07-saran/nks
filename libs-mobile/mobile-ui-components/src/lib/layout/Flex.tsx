@@ -41,37 +41,33 @@ export const StyledFlex: React.FC<FlexProps> = styled.View<FlexProps>`
     if (flex !== undefined) styles.flex = flex;
     if (gap !== undefined) {
       if (typeof gap === "number") styles.gap = gap;
-      else if (theme.sizing && (gap as any) in theme.sizing)
-        styles.gap = (theme.sizing as any)[gap];
+      else if (theme.sizing && gap in theme.sizing)
+        styles.gap = theme.sizing[gap as keyof SizeType];
     }
 
     if (padding !== undefined) {
       if (typeof padding === "number") styles.padding = padding;
-      else if (theme.sizing && (padding as any) in theme.sizing)
-        styles.padding = (theme.sizing as any)[padding];
+      else if (theme.sizing && padding in theme.sizing)
+        styles.padding = theme.sizing[padding as keyof SizeType];
     }
 
     if (margin !== undefined) {
       if (typeof margin === "number") styles.margin = margin;
-      else if (theme.sizing && (margin as any) in theme.sizing)
-        styles.margin = (theme.sizing as any)[margin];
+      else if (theme.sizing && margin in theme.sizing)
+        styles.margin = theme.sizing[margin as keyof SizeType];
     }
 
     if (width !== undefined) styles.width = width;
     if (height !== undefined) styles.height = height;
 
     if (bg) {
-      const colorObj = theme.color as any;
-      if (colorObj?.[bg]?.main) styles.backgroundColor = colorObj[bg].main;
-      else if ((theme as any)[bg]) styles.backgroundColor = (theme as any)[bg];
+      const colorEntry = (theme.color as Record<string, { main?: string } | undefined>)[bg];
+      if (colorEntry?.main) styles.backgroundColor = colorEntry.main;
+      else if (bg in theme) styles.backgroundColor = (theme as unknown as Record<string, unknown>)[bg];
       else styles.backgroundColor = bg;
     }
 
-    if (radius !== undefined) {
-      if (typeof radius === "number") styles.borderRadius = radius;
-      else if (theme.borderRadius && (radius as any) in theme.borderRadius)
-        styles.borderRadius = (theme.borderRadius as any)[radius];
-    }
+    if (radius !== undefined) styles.borderRadius = radius;
 
     if (border) {
       styles.borderWidth = 1;

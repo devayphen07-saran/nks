@@ -94,9 +94,7 @@ export const Avatar: React.FC<AvatarProps> = ({
         <StatusDot
           size={size * 0.3}
           shape={shape}
-          color={
-            status === "active" ? theme.colorSuccess || "#52c41a" : theme.colorError || "#ff4d4f"
-          }
+          color={status === "active" ? theme.colorSuccess : theme.colorError}
         />
       )}
     </AvatarWrapper>
@@ -130,7 +128,7 @@ const AvatarContainer = styled(TouchableOpacity)<{
   justifyContent: "center",
   overflow: "hidden",
   borderWidth: showBorder ? (borderWidth ?? 1) : hasImage ? 1 : 0,
-  borderColor: borderColor ?? theme.colorBorderSecondary ?? "#f0f0f0",
+  borderColor: borderColor ?? theme.colorBorderSecondary,
 }));
 
 const StyledImage = styled.Image<{
@@ -154,7 +152,7 @@ const StatusDot = styled.View<{
   height: size,
   borderRadius: size / 2,
   borderWidth: 2,
-  borderColor: theme.colorWhite || "#ffffff",
+  borderColor: theme.colorWhite,
   backgroundColor: color,
 }));
 
