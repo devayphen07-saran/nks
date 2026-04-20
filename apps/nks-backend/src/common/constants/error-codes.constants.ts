@@ -1,5 +1,5 @@
 /**
- * Application-wide error code constants.
+ * Application-wide error code constants — single source of truth.
  *
  * Convention:  <DOMAIN>_<ENTITY>_<REASON>
  *
@@ -40,14 +40,30 @@ export const ErrorCode = {
   AUTH_TOKEN_MISSING: 'AUTH_TOKEN_MISSING',
   AUTH_REFRESH_TOKEN_INVALID: 'AUTH_REFRESH_TOKEN_INVALID',
   AUTH_REFRESH_TOKEN_EXPIRED: 'AUTH_REFRESH_TOKEN_EXPIRED',
+  AUTH_REFRESH_TOKEN_REVOKED: 'AUTH_REFRESH_TOKEN_REVOKED',
   AUTH_SESSION_NOT_FOUND: 'AUTH_SESSION_NOT_FOUND',
   AUTH_SESSION_EXPIRED: 'AUTH_SESSION_EXPIRED',
+  AUTH_SESSION_CREATE_FAILED: 'AUTH_SESSION_CREATE_FAILED',
+  AUTH_SESSION_ROTATION_FAILED: 'AUTH_SESSION_ROTATION_FAILED',
+  AUTH_SESSION_COMPROMISED: 'AUTH_SESSION_COMPROMISED',
+  AUTH_INVALID_SESSION_TOKEN: 'AUTH_INVALID_SESSION_TOKEN',
+  AUTH_INVALID_SESSION_ID: 'AUTH_INVALID_SESSION_ID',
+  AUTH_FORBIDDEN_SESSION: 'AUTH_FORBIDDEN_SESSION',
+  AUTH_DEVICE_MISMATCH: 'AUTH_DEVICE_MISMATCH',
+  AUTH_INVALID_JWT_AUDIENCE: 'AUTH_INVALID_JWT_AUDIENCE',
   AUTH_PROVIDER_NOT_SUPPORTED: 'AUTH_PROVIDER_NOT_SUPPORTED',
   AUTH_OAUTH_STATE_MISMATCH: 'AUTH_OAUTH_STATE_MISMATCH',
   AUTH_PASSWORD_TOO_WEAK: 'AUTH_PASSWORD_TOO_WEAK',
+  AUTH_PASSWORD_REQUIRED: 'AUTH_PASSWORD_REQUIRED',
+  AUTH_PASSWORD_ALREADY_SET: 'AUTH_PASSWORD_ALREADY_SET',
+  AUTH_EMAIL_NOT_SET: 'AUTH_EMAIL_NOT_SET',
+  AUTH_INVALID_PHONE: 'AUTH_INVALID_PHONE',
+  AUTH_INVALID_EMAIL: 'AUTH_INVALID_EMAIL',
+  AUTH_NO_ADMIN_EXISTS: 'AUTH_NO_ADMIN_EXISTS',
 
   // ─── OTP ────────────────────────────────────────────────────────────────────
   OTP_INVALID: 'OTP_INVALID',
+  OTP_NOT_FOUND: 'OTP_NOT_FOUND',
   OTP_EXPIRED: 'OTP_EXPIRED',
   OTP_ALREADY_USED: 'OTP_ALREADY_USED',
   OTP_MAX_ATTEMPTS_EXCEEDED: 'OTP_MAX_ATTEMPTS_EXCEEDED',
@@ -98,9 +114,11 @@ export const ErrorCode = {
   STATE_ALREADY_EXISTS: 'STATE_ALREADY_EXISTS',
   CITY_NOT_FOUND: 'CITY_NOT_FOUND',
   CITY_ALREADY_EXISTS: 'CITY_ALREADY_EXISTS',
-  ADMIN_DIVISION_NOT_FOUND: 'ADMIN_DIVISION_NOT_FOUND', // Generic for counties, districts, departments, etc.
+  ADMIN_DIVISION_NOT_FOUND: 'ADMIN_DIVISION_NOT_FOUND',
   POSTAL_CODE_NOT_FOUND: 'POSTAL_CODE_NOT_FOUND',
   POSTAL_CODE_ALREADY_EXISTS: 'POSTAL_CODE_ALREADY_EXISTS',
+  LOC_INVALID_STATE_CODE: 'LOC_INVALID_STATE_CODE',
+  LOC_INVALID_PINCODE: 'LOC_INVALID_PINCODE',
 
   // ─── Address ────────────────────────────────────────────────────────────────
   ADDRESS_NOT_FOUND: 'ADDRESS_NOT_FOUND',
@@ -129,6 +147,26 @@ export const ErrorCode = {
   VOLUME_NOT_FOUND: 'VOLUME_NOT_FOUND',
   ENTITY_NOT_FOUND: 'ENTITY_NOT_FOUND',
 
+  // ─── Entity Status ──────────────────────────────────────────────────────────
+  ENT_INVALID_CODE_FORMAT: 'ENT_INVALID_CODE_FORMAT',
+  ENT_STATUS_NOT_FOUND: 'ENT_STATUS_NOT_FOUND',
+
+  // ─── User Preferences / Pagination ──────────────────────────────────────────
+  USR_INVALID_PAGE_SIZE: 'USR_INVALID_PAGE_SIZE',
+  USR_INVALID_PAGE: 'USR_INVALID_PAGE',
+  USR_INVALID_THEME: 'USR_INVALID_THEME',
+  USR_INVALID_TIMEZONE: 'USR_INVALID_TIMEZONE',
+  USR_PREFERENCES_NOT_FOUND: 'USR_PREFERENCES_NOT_FOUND',
+
+  // ─── Status ─────────────────────────────────────────────────────────────────
+  STA_INVALID_CODE: 'STA_INVALID_CODE',
+  STA_STATUS_NOT_FOUND: 'STA_STATUS_NOT_FOUND',
+
+  // ─── Codes ──────────────────────────────────────────────────────────────────
+  COD_INVALID_VALUE: 'COD_INVALID_VALUE',
+  COD_CODE_NOT_FOUND: 'COD_CODE_NOT_FOUND',
+  COD_VALUE_NOT_FOUND: 'COD_VALUE_NOT_FOUND',
+
   // ─── File / Upload ──────────────────────────────────────────────────────────
   FILE_UPLOAD_FAILED: 'FILE_UPLOAD_FAILED',
   FILE_TOO_LARGE: 'FILE_TOO_LARGE',
@@ -152,3 +190,99 @@ export const ErrorCode = {
 
 /** Convenience type for all valid error code strings. */
 export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Human-readable messages keyed by ErrorCode value
+// ─────────────────────────────────────────────────────────────────────────────
+export const ErrorMessages: Record<string, string> = {
+  // General
+  [ErrorCode.INTERNAL_SERVER_ERROR]: 'An internal server error occurred. Please try again later.',
+  [ErrorCode.VALIDATION_ERROR]: 'Invalid input provided.',
+  [ErrorCode.BAD_REQUEST]: 'The request is invalid. Please check your input.',
+  [ErrorCode.NOT_FOUND]: 'The requested resource was not found.',
+  [ErrorCode.CONFLICT]: 'A conflict occurred with the current state of the resource.',
+  [ErrorCode.UNPROCESSABLE_ENTITY]: 'The request could not be processed.',
+  [ErrorCode.TOO_MANY_REQUESTS]: 'Too many requests. Please try again later.',
+  [ErrorCode.FORBIDDEN]: 'You do not have permission to access this resource.',
+  [ErrorCode.UNAUTHORIZED]: 'You are not authorized to access this resource.',
+
+  // Auth
+  [ErrorCode.AUTH_INVALID_CREDENTIALS]: 'Invalid credentials.',
+  [ErrorCode.AUTH_ACCOUNT_DISABLED]: 'Account is disabled.',
+  [ErrorCode.AUTH_ACCOUNT_LOCKED]: 'Account locked due to too many failed attempts. Please try again later.',
+  [ErrorCode.AUTH_EMAIL_NOT_VERIFIED]: 'Email address has not been verified.',
+  [ErrorCode.AUTH_TOKEN_EXPIRED]: 'Token has expired.',
+  [ErrorCode.AUTH_TOKEN_INVALID]: 'Invalid or expired token.',
+  [ErrorCode.AUTH_TOKEN_MISSING]: 'Authentication token is missing.',
+  [ErrorCode.AUTH_REFRESH_TOKEN_INVALID]: 'Invalid refresh token.',
+  [ErrorCode.AUTH_REFRESH_TOKEN_EXPIRED]: 'Refresh token has expired.',
+  [ErrorCode.AUTH_REFRESH_TOKEN_REVOKED]: 'Refresh token has been revoked. All sessions terminated.',
+  [ErrorCode.AUTH_SESSION_NOT_FOUND]: 'Session not found.',
+  [ErrorCode.AUTH_SESSION_EXPIRED]: 'Session has expired.',
+  [ErrorCode.AUTH_SESSION_CREATE_FAILED]: 'Failed to create session.',
+  [ErrorCode.AUTH_SESSION_ROTATION_FAILED]: 'Failed to rotate session.',
+  [ErrorCode.AUTH_SESSION_COMPROMISED]: 'Session compromised. Please log in again.',
+  [ErrorCode.AUTH_INVALID_SESSION_TOKEN]: 'Invalid session token.',
+  [ErrorCode.AUTH_INVALID_SESSION_ID]: 'Invalid session ID.',
+  [ErrorCode.AUTH_FORBIDDEN_SESSION]: 'You can only manage your own sessions.',
+  [ErrorCode.AUTH_DEVICE_MISMATCH]: 'Refresh token device mismatch.',
+  [ErrorCode.AUTH_INVALID_JWT_AUDIENCE]: 'Invalid JWT audience.',
+  [ErrorCode.AUTH_PASSWORD_TOO_WEAK]: 'Password does not meet strength requirements. Must be at least 12 characters with uppercase, lowercase, number, and special character.',
+  [ErrorCode.AUTH_PASSWORD_REQUIRED]: 'Password is required when adding an email address.',
+  [ErrorCode.AUTH_PASSWORD_ALREADY_SET]: 'A password is already set on this account. Use the change-password flow instead.',
+  [ErrorCode.AUTH_EMAIL_NOT_SET]: 'No email address on this account. Add an email via profile-complete first.',
+  [ErrorCode.AUTH_INVALID_PHONE]: 'Invalid phone number format. Use +91XXXXXXXXXX or 10-digit number starting with 6-9.',
+  [ErrorCode.AUTH_INVALID_EMAIL]: 'Invalid email format.',
+  [ErrorCode.AUTH_NO_ADMIN_EXISTS]: 'No admin account exists. Create the first admin using email and password before using OTP login.',
+  [ErrorCode.USER_BLOCKED]: 'Account is blocked. Please contact support.',
+
+  // OTP
+  [ErrorCode.OTP_INVALID]: 'Invalid OTP format. Expected 6 digits.',
+  [ErrorCode.OTP_NOT_FOUND]: 'OTP request not found or already used.',
+  [ErrorCode.OTP_EXPIRED]: 'OTP has expired.',
+  [ErrorCode.OTP_ALREADY_USED]: 'OTP has already been used.',
+  [ErrorCode.OTP_MAX_ATTEMPTS_EXCEEDED]: 'Maximum OTP attempts exceeded.',
+  [ErrorCode.OTP_SEND_FAILED]: 'Failed to send OTP.',
+
+  // User
+  [ErrorCode.USER_NOT_FOUND]: 'User not found.',
+  [ErrorCode.USER_EMAIL_ALREADY_EXISTS]: 'Email is already in use.',
+
+  // Location
+  [ErrorCode.STATE_NOT_FOUND]: 'State not found.',
+  [ErrorCode.POSTAL_CODE_NOT_FOUND]: 'Pincode not found.',
+  [ErrorCode.ADMIN_DIVISION_NOT_FOUND]: 'District not found.',
+  [ErrorCode.LOC_INVALID_STATE_CODE]: 'Invalid state code format. Expected 2 uppercase letters (e.g., KA, MH, DL).',
+  [ErrorCode.LOC_INVALID_PINCODE]: 'Invalid pincode format. Expected 6 digits (e.g., 110001).',
+
+  // Entity Status
+  [ErrorCode.ENT_INVALID_CODE_FORMAT]: 'Invalid entity code format. Use lowercase alphanumeric, underscores, or dashes.',
+  [ErrorCode.ENT_STATUS_NOT_FOUND]: 'Status not found.',
+  [ErrorCode.ENTITY_NOT_FOUND]: 'Entity not found.',
+
+  // User Preferences / Pagination
+  [ErrorCode.USR_INVALID_PAGE_SIZE]: 'Page size must be between 1 and 100.',
+  [ErrorCode.USR_INVALID_PAGE]: 'Page number must be at least 1.',
+  [ErrorCode.USR_INVALID_THEME]: 'Invalid theme. Allowed values: light, dark, auto.',
+  [ErrorCode.USR_INVALID_TIMEZONE]: 'Invalid timezone. Please provide a valid IANA timezone.',
+  [ErrorCode.USR_PREFERENCES_NOT_FOUND]: 'User preferences not found.',
+
+  // Status
+  [ErrorCode.STA_INVALID_CODE]: 'Invalid status code.',
+  [ErrorCode.STA_STATUS_NOT_FOUND]: 'Status not found.',
+
+  // Codes
+  [ErrorCode.COD_INVALID_VALUE]: 'Invalid code value.',
+  [ErrorCode.COD_CODE_NOT_FOUND]: 'Code not found.',
+  [ErrorCode.COD_VALUE_NOT_FOUND]: 'Code value not found.',
+};
+
+/**
+ * Returns a typed { errorCode, message } payload for a given ErrorCode key.
+ * Keeps the code+message pair in sync — no risk of mismatching them at call sites.
+ *
+ * Usage:  throw new UnauthorizedException(errPayload(ErrorCode.AUTH_INVALID_CREDENTIALS));
+ */
+export function errPayload(code: ErrorCodeType): { errorCode: string; message: string } {
+  return { errorCode: code, message: ErrorMessages[code] ?? code };
+}

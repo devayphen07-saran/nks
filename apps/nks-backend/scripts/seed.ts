@@ -22,6 +22,7 @@ import {
   seedRoutes,
   seedRoleRouteMappings,
   seedRoleEntityPermissions,
+  seedRoleEntityPermissionsAdmin,
   seedTaxAgencies,
   seedTaxNames,
   seedTaxLevels,
@@ -29,11 +30,8 @@ import {
   seedCommodityCodes,
   seedTaxRateMaster,
   // Subscription System
-  seedLookupValues,
   seedCurrencies,
   seedSubscriptionStatus,
-  // Master Code Table
-  seedCodeTable,
   // New Lookup Tables
   seedStoreLegalTypes,
   seedStoreCategories,
@@ -94,7 +92,10 @@ async function runMigrations(client: any) {
     try {
       const sql = fs.readFileSync(filePath, 'utf-8');
       // Split by Drizzle's statement-breakpoint marker and run each statement individually
-      const statements = sql.split('--> statement-breakpoint').map((s: string) => s.trim()).filter(Boolean);
+      const statements = sql
+        .split('--> statement-breakpoint')
+        .map((s: string) => s.trim())
+        .filter(Boolean);
       for (const stmt of statements) {
         try {
           await client.query(stmt);
@@ -140,10 +141,12 @@ const seeds = [
   { name: 'volumes', fn: seedVolumes },
   { name: 'entity', fn: seedEntities },
   { name: 'system_roles', fn: seedSystemRoles },
+  { name: 'entity_type', fn: seedEntityTypes }, // ← Must run before role_entity_permission
   { name: 'routes', fn: seedRoutes },
-  { name: 'role_route_mapping', fn: seedRoleRouteMappings }, // ← SUPER_ADMIN admin routes
-  { name: 'role_entity_permission', fn: seedRoleEntityPermissions }, // ← Entity permissions for STAFF, STORE_MANAGER, CASHIER, DELIVERY
-  // New Lookup Tables
+  { name: 'role_route_mapping', fn: seedRoleRouteMappings },
+  { name: 'role_entity_permission', fn: seedRoleEntityPermissions },
+  { name: 'role_entity_permission_admin', fn: seedRoleEntityPermissionsAdmin },
+  // Lookup Tables
   { name: 'store_legal_type', fn: seedStoreLegalTypes },
   { name: 'store_category', fn: seedStoreCategories },
   { name: 'address_type', fn: seedAddressTypes },
@@ -156,9 +159,7 @@ const seeds = [
   { name: 'tax_filing_frequency', fn: seedTaxFilingFrequencies },
   { name: 'plan_type', fn: seedPlanTypes },
   { name: 'tax_line_status', fn: seedTaxLineStatuses },
-  { name: 'entity_type', fn: seedEntityTypes },
   // Subscription System
-  { name: 'lookup_values', fn: seedLookupValues }, // ← plan types and frequencies
   { name: 'currencies', fn: seedCurrencies },
   { name: 'subscription_status', fn: seedSubscriptionStatus },
   // Tax Engine (runs after country — tax_agencies references country)
@@ -169,8 +170,6 @@ const seeds = [
   // Tax Master Data (commodity codes and rates for multi-country support)
   { name: 'commodity_codes', fn: seedCommodityCodes },
   { name: 'tax_rate_master', fn: seedTaxRateMaster },
-  // Master Code Table
-  { name: 'code_table', fn: seedCodeTable },
 ];
 
 async function seed() {

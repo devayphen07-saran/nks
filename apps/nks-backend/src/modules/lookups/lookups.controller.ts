@@ -16,7 +16,8 @@ import { ApiResponse } from '../../common/utils/api-response';
 import { Public } from '../../common/decorators/public.decorator';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RBACGuard } from '../../common/guards/rbac.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { RequireEntityPermission } from '../../common/decorators/require-entity-permission.decorator';
+import { EntityCodes, PermissionActions } from '../../common/constants/entity-codes.constants';
 import { LookupsService } from './lookups.service';
 import type {
   SalutationsListResponse,
@@ -151,13 +152,13 @@ export class LookupsController {
 
   /**
    * GET /admin/lookups
-   * SUPER_ADMIN — Sidebar: all code-based lookup categories with value counts.
+   * All code-based lookup categories with value counts.
    */
   @Get('admin')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.LOOKUP, action: PermissionActions.VIEW })
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get all lookup types (SUPER_ADMIN)' })
+  @ApiOperation({ summary: 'Get all lookup types' })
   async getAllLookupTypes(): Promise<ApiResponse<LookupTypesListResponse>> {
     const data = await this.lookupsService.getAllLookupTypes();
     return ApiResponse.ok(data, 'Lookup types retrieved successfully');
@@ -165,13 +166,13 @@ export class LookupsController {
 
   /**
    * GET /admin/lookups/:code
-   * SUPER_ADMIN — Values list for a selected lookup type.
+   * Values list for a selected lookup type.
    */
   @Get('admin/:code')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.LOOKUP, action: PermissionActions.VIEW })
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get values for a lookup type (SUPER_ADMIN)' })
+  @ApiOperation({ summary: 'Get values for a lookup type' })
   async getLookupValues(
     @Param('code') code: string,
   ): Promise<ApiResponse<LookupValuesListResponse>> {
@@ -181,14 +182,14 @@ export class LookupsController {
 
   /**
    * POST /admin/lookups/:code
-   * SUPER_ADMIN — Add a new value to a lookup type.
+   * Add a new value to a lookup type.
    */
   @Post('admin/:code')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.LOOKUP, action: PermissionActions.CREATE })
   @ApiBearerAuth()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a lookup value (SUPER_ADMIN)' })
+  @ApiOperation({ summary: 'Create a lookup value' })
   async createLookupValue(
     @Param('code') code: string,
     @Body() dto: CreateLookupValueDto,
@@ -199,13 +200,13 @@ export class LookupsController {
 
   /**
    * PUT /admin/lookups/:code/:id
-   * SUPER_ADMIN — Update an existing lookup value.
+   * Update an existing lookup value.
    */
   @Put('admin/:code/:id')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.LOOKUP, action: PermissionActions.EDIT })
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update a lookup value (SUPER_ADMIN)' })
+  @ApiOperation({ summary: 'Update a lookup value' })
   async updateLookupValue(
     @Param('code') code: string,
     @Param('id', ParseIntPipe) id: number,
@@ -217,14 +218,14 @@ export class LookupsController {
 
   /**
    * DELETE /admin/lookups/:code/:id
-   * SUPER_ADMIN — Remove a lookup value.
+   * Remove a lookup value.
    */
   @Delete('admin/:code/:id')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.LOOKUP, action: PermissionActions.DELETE })
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete a lookup value (SUPER_ADMIN)' })
+  @ApiOperation({ summary: 'Delete a lookup value' })
   async deleteLookupValue(
     @Param('code') code: string,
     @Param('id', ParseIntPipe) id: number,

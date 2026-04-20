@@ -3,7 +3,8 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RBACGuard } from '../../common/guards/rbac.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { RequireEntityPermission } from '../../common/decorators/require-entity-permission.decorator';
+import { EntityCodes, PermissionActions } from '../../common/constants/entity-codes.constants';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { ApiResponse } from '../../common/utils/api-response';
 import { ListUsersQueryDto, ListUsersQuerySchema, type UserResponseDto } from './dto';
@@ -17,11 +18,10 @@ export class UsersController {
 
   /**
    * GET /users
-   * List all users. SUPER_ADMIN only.
-   * Supports optional search (name, email, phone) and pagination.
+   * List all users with optional search and pagination.
    */
   @Get()
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.USER, action: PermissionActions.VIEW })
   @ApiOperation({
     summary: 'List all users',
     description:

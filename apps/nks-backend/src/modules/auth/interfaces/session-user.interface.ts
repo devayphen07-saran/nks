@@ -14,6 +14,7 @@
  *   `activeStoreId` → store the user selected after login (null for global sessions)
  */
 export interface SessionUserRole {
+  roleId: number;
   roleCode: string;
   storeId: number | null;
   storeName: string | null;

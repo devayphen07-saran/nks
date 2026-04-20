@@ -16,7 +16,8 @@ import {
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { CodesService } from './codes.service';
 import { Public } from '../../common/decorators/public.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { RequireEntityPermission } from '../../common/decorators/require-entity-permission.decorator';
+import { EntityCodes, PermissionActions } from '../../common/constants/entity-codes.constants';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import type { AuthenticatedRequest } from '../../common/guards/auth.guard';
@@ -25,9 +26,7 @@ import { ApiResponse } from '../../common/utils/api-response';
 import {
   UpdateCodeValueDto,
   CreateCodeCategoryDto,
-  CreateCodeCategorySchema,
   CreateCodeValueDto,
-  CreateCodeValueSchema,
   GetCodeValuesQuerySchema,
   GetCodeValuesQueryDto,
 } from './dto/codes-request.dto';
@@ -40,8 +39,8 @@ export class CodesController {
 
   @Get('categories')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'List all code categories (SUPER_ADMIN only)' })
+  @RequireEntityPermission({ entityCode: EntityCodes.CODE_CATEGORY, action: PermissionActions.VIEW })
+  @ApiOperation({ summary: 'List all code categories' })
   async getCategories(): Promise<ApiResponse<CodeCategoryResponseDto[]>> {
     const data = await this.service.getAllCategories();
     return ApiResponse.ok(data, 'Code categories fetched');
@@ -49,11 +48,11 @@ export class CodesController {
 
   @Post('categories')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.CODE_CATEGORY, action: PermissionActions.CREATE })
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a new code category (SUPER_ADMIN only)' })
+  @ApiOperation({ summary: 'Create a new code category' })
   async createCategory(
-    @Body(new ZodValidationPipe(CreateCodeCategorySchema)) dto: CreateCodeCategoryDto,
+    @Body() dto: CreateCodeCategoryDto,
   ): Promise<ApiResponse<CodeCategoryResponseDto>> {
     const data = await this.service.createCategory(dto);
     return ApiResponse.ok(data, 'Code category created');
@@ -61,12 +60,12 @@ export class CodesController {
 
   @Post(':categoryCode/values')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.CODE_VALUE, action: PermissionActions.CREATE })
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Add a value to a category (SUPER_ADMIN only)' })
+  @ApiOperation({ summary: 'Add a value to a category' })
   async createValue(
     @Param('categoryCode') categoryCode: string,
-    @Body(new ZodValidationPipe(CreateCodeValueSchema)) dto: CreateCodeValueDto,
+    @Body() dto: CreateCodeValueDto,
   ): Promise<ApiResponse<CodeValueResponseDto>> {
     const data = await this.service.createValue(categoryCode.toUpperCase(), dto);
     return ApiResponse.ok(data, 'Code value created');
@@ -91,8 +90,8 @@ export class CodesController {
 
   @Put('values/:id')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'Edit a non-system value (SUPER_ADMIN only)' })
+  @RequireEntityPermission({ entityCode: EntityCodes.CODE_VALUE, action: PermissionActions.EDIT })
+  @ApiOperation({ summary: 'Edit a non-system value' })
   async updateValue(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateCodeValueDto,
@@ -104,9 +103,9 @@ export class CodesController {
 
   @Delete('values/:id')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.CODE_VALUE, action: PermissionActions.DELETE })
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Soft-delete a non-system value (SUPER_ADMIN only)' })
+  @ApiOperation({ summary: 'Soft-delete a non-system value' })
   async deleteValue(
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthenticatedRequest,

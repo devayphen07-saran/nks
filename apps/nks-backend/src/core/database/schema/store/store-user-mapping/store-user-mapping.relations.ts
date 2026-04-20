@@ -2,7 +2,7 @@ import { relations } from 'drizzle-orm';
 import { storeUserMapping } from './store-user-mapping.table';
 import { store } from '../../store/store';
 import { users } from '../../auth/users';
-import { codeValue } from '../../lookups/code-value/code-value.table';
+import { designationType } from '../../lookups/designation-type/designation-type.table';
 
 export const storeUserMappingRelations = relations(
   storeUserMapping,
@@ -30,9 +30,9 @@ export const storeUserMappingRelations = relations(
       references: [users.id],
       relationName: 'storeUserDeletedBy',
     }),
-    designation: one(codeValue, {
+    designation: one(designationType, {
       fields: [storeUserMapping.designationFk],
-      references: [codeValue.id],
+      references: [designationType.id],
       relationName: 'designation',
     }),
   }),

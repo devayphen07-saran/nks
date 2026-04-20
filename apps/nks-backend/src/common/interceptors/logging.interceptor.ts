@@ -26,10 +26,14 @@ export class LoggingInterceptor implements NestInterceptor {
     const { method, url } = req;
     const start = Date.now();
 
+    const requestId = req.headers['x-request-id'] as string | undefined;
+
     return next.handle().pipe(
       tap(() => {
         const ms = Date.now() - start;
-        this.logger.log(`${method} ${url} → ${res.statusCode} (${ms}ms)`);
+        this.logger.log(
+          `${method} ${url} → ${res.statusCode} (${ms}ms)${requestId ? ` [${requestId}]` : ''}`,
+        );
       }),
     );
   }

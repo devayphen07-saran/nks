@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../constants/error-codes.constants';
 
 /**
  * EmailValidator — centralised email format validation.
@@ -11,8 +11,8 @@ export class EmailValidator {
   static validate(email: string): void {
     if (!email || typeof email !== 'string' || !this.EMAIL_REGEX.test(email.trim())) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.AUTH_INVALID_EMAIL,
-        message: ErrorMessages[ErrorCodes.AUTH_INVALID_EMAIL],
+        errorCode: ErrorCode.AUTH_INVALID_EMAIL,
+        message: ErrorMessages[ErrorCode.AUTH_INVALID_EMAIL],
       });
     }
   }

@@ -15,6 +15,6 @@ export const VerifyEmailOtpSchema = z.object({
 export class VerifyEmailOtpDto extends createZodDto(VerifyEmailOtpSchema) {}
 
 export class EmailVerifyResponseDto {
-  verified: boolean;
-  nextStep: 'setPassword' | 'complete';
+  verified!: boolean;
+  nextStep!: 'setPassword' | 'complete';
 }

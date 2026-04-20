@@ -118,10 +118,11 @@ export class SyncRepository {
    * Record an idempotency key as processed.
    * Must be called inside the same transaction as the mutation.
    */
-  async logIdempotencyKey(key: string, tx?: Db): Promise<void> {
+  async logIdempotencyKey(key: string, requestHash: string, tx?: Db): Promise<void> {
     const conn = tx ?? this.db;
     await conn.insert(schema.idempotencyLog).values({
       key,
+      requestHash,
       processedAt: new Date(),
     });
   }

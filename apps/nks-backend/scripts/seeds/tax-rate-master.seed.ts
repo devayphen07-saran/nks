@@ -1,5 +1,5 @@
 import type { Db } from './types.js';
-import { taxRateMaster, country, commodityCodes, store } from '../../src/core/database/schema';
+import { taxRateMaster, country, commodityCodes, store } from '../../src/core/database/schema/index.js';
 import { eq } from 'drizzle-orm';
 
 /**

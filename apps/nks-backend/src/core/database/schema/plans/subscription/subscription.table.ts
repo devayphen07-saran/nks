@@ -1,4 +1,4 @@
-import { pgTable, bigint, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, bigint, timestamp, index } from 'drizzle-orm/pg-core';
 import { baseEntity, auditFields } from '../../base.entity';
 import { users } from '../../auth/users';
 import { store } from '../../store/store';
@@ -38,7 +38,12 @@ export const subscription = pgTable('subscription', {
 
   // Audit Fields
   ...auditFields(() => users.id),
-});
+},
+(table) => [
+  index('subscription_plan_fk_idx').on(table.planFk),
+  index('subscription_status_fk_idx').on(table.statusFk),
+],
+);
 
 // Type Exports
 export type Subscription = typeof subscription.$inferSelect;

@@ -8,7 +8,11 @@ import { SyncDataValidator } from './validators/sync-data.validator';
 import { RevokedDevicesRepository } from '../auth/repositories/revoked-devices.repository';
 import { JWTConfigService } from '../../config/jwt.config';
 import { SyncHandlerFactory } from './handlers/sync-handler.factory';
-import type { SyncOperation, ChangesResponse, OfflineSessionContext } from './dto';
+import type {
+  SyncOperation,
+  ChangesResponse,
+  OfflineSessionContext,
+} from './dto';
 
 export type { ChangesResponse };
 
@@ -16,15 +20,27 @@ const DEFAULT_SYNC_LIMIT = 200;
 
 /** Keys whose values must never appear in logs — tokens, credentials, PII. */
 const SENSITIVE_KEYS = new Set([
-  'password', 'token', 'secret', 'key', 'apiKey', 'accessToken',
-  'refreshToken', 'sessionToken', 'otp', 'pin', 'cvv', 'cardNumber',
+  'password',
+  'token',
+  'secret',
+  'key',
+  'apiKey',
+  'accessToken',
+  'refreshToken',
+  'sessionToken',
+  'otp',
+  'pin',
+  'cvv',
+  'cardNumber',
 ]);
 
 /**
  * Returns a copy of opData with values of known sensitive keys replaced by '[REDACTED]'.
  * Use this whenever opData needs to appear in a log message.
  */
-function sanitizeOpData(data: Record<string, unknown>): Record<string, unknown> {
+function sanitizeOpData(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data)) {
     result[k] = SENSITIVE_KEYS.has(k.toLowerCase()) ? '[REDACTED]' : v;
@@ -34,6 +50,30 @@ function sanitizeOpData(data: Record<string, unknown>): Record<string, unknown> 
 
 /** Tables supported for pull sync. Mobile sends a subset via the `tables` query param. */
 const SUPPORTED_TABLES = new Set(['state', 'district', 'routes']);
+
+/**
+ * Deterministic JSON serialisation with sorted keys.
+ *
+ * Ensures the same logical object produces the identical string on any JS engine
+ * (Hermes on mobile, V8 on server). Standard JSON.stringify does not guarantee
+ * key order — {a:1,b:2} and {b:2,a:1} can serialise differently, causing
+ * signature mismatches on legitimate operations.
+ */
+function canonicalJson(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'boolean' || typeof value === 'number')
+    return JSON.stringify(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return '[' + value.map(canonicalJson).join(',') + ']';
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  const entries = keys.map(
+    (k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`,
+  );
+  return '{' + entries.join(',') + '}';
+}
 
 @Injectable()
 export class SyncService {
@@ -50,20 +90,32 @@ export class SyncService {
   /**
    * Process a batch of sync push operations from the mobile offline sync queue.
    *
-   * All valid operations are executed inside a SINGLE database transaction —
-   * the batch is all-or-nothing at the DB level. Validation failures (bad op,
-   * signature mismatch) are counted as `rejected` and excluded from the transaction
-   * before it opens, so they never affect the rollback decision.
+   * Two-phase processing:
    *
-   * Each mutation is paired with an idempotency log write inside the same
-   * transaction so a crash between the two is never possible.
+   * **Phase 1 (pre-transaction):** Validates every op (op type, signature).
+   * Invalid ops are counted as `rejected` and never touch the DB.
+   *
+   * **Phase 2 (single atomic transaction):** All ops that passed Phase 1 are
+   * executed in one transaction. If any applied op throws, the entire batch
+   * rolls back (all-or-nothing for the applied set). Idempotency duplicates
+   * and hash mismatches are skipped/rejected within the transaction without
+   * causing a rollback.
+   *
+   * Response contract:
+   * - `processed`: ops successfully applied in this transaction
+   * - `rejected`: ops that failed validation (Phase 1) or idempotency mismatch (Phase 2)
+   * - `status`: 'ok' if rejected === 0, 'partial' otherwise
    */
   async processPushBatch(
     operations: SyncOperation[],
     userId: number,
     activeStoreId: number | null,
     offlineSession?: OfflineSessionContext,
-  ): Promise<{ processed: number; rejected: number; status: 'ok' | 'partial' }> {
+  ): Promise<{
+    processed: number;
+    rejected: number;
+    status: 'ok' | 'partial';
+  }> {
     if (offlineSession) {
       await this.validateOfflineSessionSignature(offlineSession);
     }
@@ -84,10 +136,11 @@ export class SyncService {
 
       if (signingKey) {
         if (!this.verifyOperationSignature(op, signingKey)) {
-          this.logger.warn(
-            `Operation ${op.id} rejected — signature mismatch`,
-            { table: op.table, op: op.op, data: sanitizeOpData(op.opData) },
-          );
+          this.logger.warn(`Operation ${op.id} rejected — signature mismatch`, {
+            table: op.table,
+            op: op.op,
+            data: sanitizeOpData(op.opData),
+          });
           rejected++;
           continue;
         }
@@ -103,15 +156,31 @@ export class SyncService {
       await this.syncRepository.withTransaction(async (tx) => {
         for (const op of validOps) {
           const idempotencyKey = `${op.clientId}-${op.id}`;
-          const alreadySeen = await this.syncRepository.isAlreadyProcessed(idempotencyKey, tx);
+          const requestHash = this.hashOperation(op);
 
-          if (alreadySeen) {
-            this.logger.log(`Duplicate skipped: ${idempotencyKey}`);
+          const existingHash = await this.syncRepository.findProcessedEntry(
+            idempotencyKey,
+            tx,
+          );
+
+          if (existingHash !== null) {
+            if (existingHash !== requestHash) {
+              this.logger.warn(
+                `Idempotency key ${idempotencyKey} reused with different payload — rejected`,
+              );
+              rejected++;
+            } else {
+              this.logger.log(`Duplicate skipped: ${idempotencyKey}`);
+            }
             continue;
           }
 
           await this.processOperation(op, userId, activeStoreId, tx);
-          await this.syncRepository.logIdempotencyKey(idempotencyKey, tx);
+          await this.syncRepository.logIdempotencyKey(
+            idempotencyKey,
+            requestHash,
+            tx,
+          );
           processed++;
         }
       });
@@ -122,26 +191,58 @@ export class SyncService {
   }
 
   /**
-   * Fetch changes since a given cursor for pull-based sync.
+   * Parse a compound cursor string "timestampMs:rowId" into its components.
+   * Returns { ts: 0, id: 0 } for the initial cursor "0:0" or invalid input.
+   */
+  private parseCursor(cursor: string): { ts: number; id: number } {
+    const parts = cursor.split(':');
+    if (parts.length !== 2) return { ts: 0, id: 0 };
+    const ts = parseInt(parts[0], 10);
+    const id = parseInt(parts[1], 10);
+    if (isNaN(ts) || isNaN(id)) return { ts: 0, id: 0 };
+    return { ts, id };
+  }
+
+  /**
+   * Build a compound cursor string from the last row in a change set.
+   * Uses (updatedAt, id) to guarantee every row is delivered exactly once
+   * even when multiple rows share the same updated_at timestamp.
+   */
+  private buildNextCursor(
+    changes: import('./dto/responses').SyncChange[],
+    fallback: string,
+  ): string {
+    if (changes.length === 0) return fallback;
+    const last = changes[changes.length - 1];
+    return `${last.updatedAt}:${last.id}`;
+  }
+
+  /**
+   * Fetch changes since a given compound cursor for pull-based sync.
    *
-   * Validates store membership, then fetches all requested tables since cursorMs.
+   * Validates store membership, then fetches all requested tables since the cursor.
    * Each table is fetched independently so mobile can advance per-table cursors.
-   * nextCursor = max updatedAt across all returned rows.
+   * Cursor format: "timestampMs:rowId" — breaks ties when rows share the same updated_at.
    */
   async getChanges(
     userId: number,
-    cursorMs: number,
+    cursor: string,
     storeGuuid: string,
     tablesCsv: string,
     limit: number = DEFAULT_SYNC_LIMIT,
   ): Promise<ChangesResponse> {
-    const storeId = await this.syncRepository.verifyStoreMembership(userId, storeGuuid);
+    const storeId = await this.syncRepository.verifyStoreMembership(
+      userId,
+      storeGuuid,
+    );
 
     if (!storeId) {
       throw new ForbiddenException(
         'You do not have access to this store or it does not exist.',
       );
     }
+
+    const { ts: cursorMs, id: cursorId } = this.parseCursor(cursor);
 
     const requestedTables = tablesCsv
       .split(',')
@@ -152,25 +253,34 @@ export class SyncService {
 
     for (const table of requestedTables) {
       if (table === 'state') {
-        const rows = await this.syncRepository.getStateChanges(cursorMs, limit);
+        const rows = await this.syncRepository.getStateChanges(
+          cursorMs,
+          cursorId,
+          limit,
+        );
         const slice = rows.length > limit ? rows.slice(0, limit) : rows;
         allChanges.push(...slice.map(SyncDataMapper.stateRowToChange));
       } else if (table === 'district') {
-        const rows = await this.syncRepository.getDistrictChanges(cursorMs, limit);
+        const rows = await this.syncRepository.getDistrictChanges(
+          cursorMs,
+          cursorId,
+          limit,
+        );
         const slice = rows.length > limit ? rows.slice(0, limit) : rows;
         allChanges.push(...slice.map(SyncDataMapper.districtRowToChange));
       } else if (table === 'routes') {
-        const rows = await this.syncRepository.getRouteChanges(cursorMs, limit);
+        const rows = await this.syncRepository.getRouteChanges(
+          cursorMs,
+          cursorId,
+          limit,
+        );
         const slice = rows.length > limit ? rows.slice(0, limit) : rows;
         allChanges.push(...slice.map(SyncDataMapper.routeRowToChange));
       }
     }
 
     const hasMore = allChanges.length >= limit;
-    const nextCursor =
-      allChanges.length > 0
-        ? Math.max(...allChanges.map((c) => c.updatedAt))
-        : cursorMs;
+    const nextCursor = this.buildNextCursor(allChanges, cursor);
 
     this.logger.debug(
       `Changes: ${allChanges.length} row(s) across [${requestedTables.join(',')}], hasMore=${hasMore}, nextCursor=${nextCursor}`,
@@ -180,10 +290,25 @@ export class SyncService {
   }
 
   /**
+   * Compute a SHA-256 digest of the canonical operation payload.
+   * Used as the `request_hash` in the idempotency log to detect
+   * replays where the same key is resubmitted with different data.
+   */
+  private hashOperation(op: SyncOperation): string {
+    const payload = `${op.op}:${op.table}:${canonicalJson(op.opData)}`;
+    return crypto.createHash('sha256').update(payload).digest('hex');
+  }
+
+  /**
    * Verify a single operation's signature against the session signing key.
    *
-   * Mobile computes: SHA256(sessionSignature + ":" + op + ":" + table + ":" + JSON.stringify(opData))
+   * Mobile computes: SHA256(signingKey:op:table:canonicalJson(opData))
    * We replicate that computation server-side and compare with timing-safe equal.
+   *
+   * Uses canonical JSON (sorted keys, deterministic) to ensure cross-engine
+   * consistency between Hermes (mobile) and V8 (server). Without this,
+   * JSON.stringify key order is engine-dependent and the same logical payload
+   * can produce different signatures.
    *
    * Returns true if signature is valid or if no signature was provided (graceful degradation
    * for older clients that predate this feature). Returns false if signature is present but wrong.
@@ -193,13 +318,13 @@ export class SyncService {
     signingKey: string,
   ): boolean {
     if (!op.signature) {
-      // No signature — older client or client without session context. Allow through
-      // but log so we can tighten to hard-reject once all clients are updated.
-      this.logger.debug(`Operation ${op.id} has no signature — passing without verification`);
+      this.logger.debug(
+        `Operation ${op.id} has no signature — passing without verification`,
+      );
       return true;
     }
 
-    const canonical = `${op.op}:${op.table}:${JSON.stringify(op.opData)}`;
+    const canonical = `${op.op}:${op.table}:${canonicalJson(op.opData)}`;
     const input = `${signingKey}:${canonical}`;
     const expected = crypto.createHash('sha256').update(input).digest('hex');
 
@@ -216,14 +341,18 @@ export class SyncService {
    * Throws ForbiddenException if the signature is missing, mismatched, or
    * the session has expired — preventing tampered payloads from being accepted.
    */
-  private async validateOfflineSessionSignature(session: OfflineSessionContext): Promise<void> {
+  private async validateOfflineSessionSignature(
+    session: OfflineSessionContext,
+  ): Promise<void> {
     if (!session) return;
 
     if (session.offlineValidUntil < Date.now()) {
       throw new ForbiddenException('Offline session has expired');
     }
 
-    const secret = this.configService.getOrThrow<string>('OFFLINE_SESSION_HMAC_SECRET');
+    const secret = this.configService.getOrThrow<string>(
+      'OFFLINE_SESSION_HMAC_SECRET',
+    );
     const isValid = verifyOfflineSession(
       {
         userId: session.userId,
@@ -262,9 +391,13 @@ export class SyncService {
     // Graceful degradation: older clients that do not yet send offlineToken are
     // still accepted — the HMAC + device revocation checks above remain the primary guard.
     if (session.offlineToken) {
-      let jwtPayload: ReturnType<typeof this.jwtConfigService.verifyOfflineToken>;
+      let jwtPayload: ReturnType<
+        typeof this.jwtConfigService.verifyOfflineToken
+      >;
       try {
-        jwtPayload = this.jwtConfigService.verifyOfflineToken(session.offlineToken);
+        jwtPayload = this.jwtConfigService.verifyOfflineToken(
+          session.offlineToken,
+        );
       } catch {
         throw new ForbiddenException('Offline token is invalid or expired');
       }
@@ -273,12 +406,16 @@ export class SyncService {
       const jwtRolesSorted = [...jwtPayload.roles].sort().join(',');
       const hmacRolesSorted = [...session.roles].sort().join(',');
       if (jwtRolesSorted !== hmacRolesSorted) {
-        throw new ForbiddenException('Offline token roles do not match session');
+        throw new ForbiddenException(
+          'Offline token roles do not match session',
+        );
       }
 
       // Cross-validate: JWT activeStoreId must match HMAC-signed storeId
       if (jwtPayload.activeStoreId !== session.storeId) {
-        throw new ForbiddenException('Offline token store does not match session');
+        throw new ForbiddenException(
+          'Offline token store does not match session',
+        );
       }
     }
   }

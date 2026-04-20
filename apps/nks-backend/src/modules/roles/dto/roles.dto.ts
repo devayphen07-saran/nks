@@ -10,7 +10,7 @@ import { z } from 'zod';
 
 // ─── Create Role ─────────────────────────────────────────────────────────────
 // Custom roles are store-scoped. Roles table now ONLY contains store-scoped roles.
-// System roles (SUPER_ADMIN, USER, STORE_OWNER, STAFF) are defined as enums, not here.
+// System roles (SUPER_ADMIN, USER, STORE_OWNER) are seeded rows — not created via this DTO.
 export const CreateRoleSchema = z.object({
   storeId: z.number().int().positive('Store ID is required for all custom roles'),
   name: z.string().min(2).max(100),

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Observable, throwError, TimeoutError } from 'rxjs';
 import { catchError, timeout } from 'rxjs/operators';
+import { SERVER_CONSTANTS } from '../constants/app-constants';
 
 /**
  * Enforces a global request timeout.
@@ -20,7 +21,7 @@ import { catchError, timeout } from 'rxjs/operators';
 export class TimeoutInterceptor implements NestInterceptor {
   intercept(_context: ExecutionContext, next: CallHandler): Observable<any> {
     return next.handle().pipe(
-      timeout(30000), // 30 seconds
+      timeout(SERVER_CONSTANTS.REQUEST_TIMEOUT_MS),
       catchError((err) => {
         if (err instanceof TimeoutError) {
           return throwError(

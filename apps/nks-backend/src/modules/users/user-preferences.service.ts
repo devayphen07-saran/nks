@@ -1,5 +1,5 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../../common/constants/error-codes.constants';
 import { UserPreferencesValidator } from './validators';
 import { AuthorizationValidator } from '../../common/validators/authorization.validator';
 import { UserPreferencesRepository } from './repositories/user-preferences.repository';
@@ -101,8 +101,8 @@ export class UserPreferencesService {
     // Authorization check: User can only delete their own preferences unless SUPER_ADMIN
     if (userId !== deletedBy && !isSuperAdmin) {
       throw new ForbiddenException({
-        errorCode: ErrorCodes.GEN_FORBIDDEN,
-        message: ErrorMessages[ErrorCodes.GEN_FORBIDDEN],
+        errorCode: ErrorCode.FORBIDDEN,
+        message: ErrorMessages[ErrorCode.FORBIDDEN],
       });
     }
 

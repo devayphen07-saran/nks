@@ -94,6 +94,10 @@ export const communication = pgTable(
     index('communication_record_idx').on(table.recordId),
     index('communication_type_idx').on(table.communicationTypeFk),
     index('communication_dial_country_idx').on(table.dialCountryFk),
+
+    // Contact lookup indexes — email and phone are searched frequently
+    index('communication_email_idx').on(table.email),
+    index('communication_phone_idx').on(table.phoneNumber),
   ],
 );
 

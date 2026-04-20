@@ -292,6 +292,15 @@ export class AuthUsersRepository {
   }
 
   /**
+   * Run a callback inside a database transaction.
+   * Used by services that need to span multiple repository calls atomically
+   * without holding a direct reference to the DB connection.
+   */
+  async withTransaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
+    return this.db.transaction(fn);
+  }
+
+  /**
    * CRITICAL: Create user + auth provider + assign initial role in a single atomic transaction.
    *
    * This method encapsulates the entire user registration flow:
@@ -317,9 +326,9 @@ export class AuthUsersRepository {
     authProviderData: {
       providerId: string;
       accountId: string;
-      password: string;
+      password: string | null;
       isVerified: boolean;
-    },
+    } | null,
     onRoleAssignment: (
       tx: NodePgDatabase<typeof schema>,
       userId: number,
@@ -335,17 +344,18 @@ export class AuthUsersRepository {
 
         if (!created) return null;
 
-        // Step 2: Create auth provider
-        await tx.insert(schema.userAuthProvider).values({
-          userId: created.id,
-          providerId: authProviderData.providerId,
-          accountId: authProviderData.accountId,
-          password: authProviderData.password,
-          isVerified: authProviderData.isVerified,
-        });
+        // Step 2: Create auth provider (only if provider data supplied)
+        if (authProviderData) {
+          await tx.insert(schema.userAuthProvider).values({
+            userId: created.id,
+            providerId: authProviderData.providerId,
+            accountId: authProviderData.accountId,
+            password: authProviderData.password,
+            isVerified: authProviderData.isVerified,
+          });
+        }
 
         // Step 3: Assign initial role (SUPER_ADMIN if first, else USER)
-        // Callback handles the role resolution and assignment with proper transaction context
         await onRoleAssignment(tx, created.id);
 
         return created;

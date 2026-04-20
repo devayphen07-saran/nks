@@ -64,10 +64,9 @@ export type UpdateRole = Partial<Omit<NewRole, 'id'>>;
 
 // System role codes that are reserved and cannot be used for custom roles
 // These are seeded as rows in the roles table with storeFk=NULL and isEditable=false
-export type SystemRoleCode = 'SUPER_ADMIN' | 'USER' | 'STORE_OWNER' | 'STAFF';
+export type SystemRoleCode = 'SUPER_ADMIN' | 'USER' | 'STORE_OWNER';
 export const SYSTEM_ROLE_CODES = [
   'SUPER_ADMIN',
   'USER',
   'STORE_OWNER',
-  'STAFF',
 ] as const;

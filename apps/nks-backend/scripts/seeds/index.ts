@@ -11,6 +11,7 @@ export { seedSystemRoles } from './system-roles.seed';
 export { seedRoutes } from './routes.seed';
 export { seedRoleRouteMappings } from './role-route-mapping.seed';
 export { seedRoleEntityPermissions } from './role-entity-permission.seed';
+export { seedRoleEntityPermissionsAdmin } from './role-entity-permission-admin.seed';
 
 // New Lookup Tables
 export { seedStoreLegalTypes } from './store-legal-type.seed';
@@ -40,9 +41,6 @@ export { seedCommodityCodes } from './commodity-codes.seed';
 export { seedTaxRateMaster } from './tax-rate-master.seed';
 
 // Subscription System
-export { seedLookupValues } from './lookup-values.seed';
 export { seedCurrencies } from './currencies.seed';
 export { seedSubscriptionStatus } from './subscription-status.seed';
 
-// Master Code Table
-export { seedCodeTable } from './code-table.seed';

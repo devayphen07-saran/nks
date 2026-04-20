@@ -3,16 +3,17 @@ import { z } from 'zod';
 
 // ─── Request DTOs ──────────────────────────────────────────────────────────────
 
-const CreateLookupValueSchema = z.object({
+export const CreateLookupValueSchema = z.object({
   code:        z.string().min(1).max(50).toUpperCase(),
   label:       z.string().min(1).max(100),
   description: z.string().max(255).optional(),
   sortOrder:   z.number().int().optional(),
 });
 
-export class CreateLookupValueDto extends createZodDto(CreateLookupValueSchema) {}
+export const UpdateLookupValueSchema = CreateLookupValueSchema.partial();
 
-export class UpdateLookupValueDto extends createZodDto(CreateLookupValueSchema.partial()) {}
+export class CreateLookupValueDto extends createZodDto(CreateLookupValueSchema) {}
+export class UpdateLookupValueDto extends createZodDto(UpdateLookupValueSchema) {}
 
 // ─── Response ──────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../constants/error-codes.constants';
 
 /**
  * BaseValidator
@@ -13,7 +13,7 @@ export class BaseValidator {
   static validatePositiveInteger(
     value: unknown,
     fieldName: string = 'ID',
-    errorCode: string = ErrorCodes.GEN_INVALID_INPUT,
+    errorCode: string = ErrorCode.VALIDATION_ERROR,
   ): void {
     if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
       throw new BadRequestException({
@@ -30,7 +30,7 @@ export class BaseValidator {
   static validateNotEmpty(
     value: unknown,
     fieldName: string = 'Value',
-    errorCode: string = ErrorCodes.GEN_INVALID_INPUT,
+    errorCode: string = ErrorCode.VALIDATION_ERROR,
   ): void {
     if (value === null || value === undefined || value === '') {
       throw new BadRequestException({
@@ -48,7 +48,7 @@ export class BaseValidator {
     value: string,
     pattern: RegExp,
     fieldName: string = 'Value',
-    errorCode: string = ErrorCodes.GEN_INVALID_INPUT,
+    errorCode: string = ErrorCode.VALIDATION_ERROR,
   ): void {
     if (!pattern.test(value)) {
       throw new BadRequestException({
@@ -66,7 +66,7 @@ export class BaseValidator {
     value: unknown,
     allowedValues: (string | number)[],
     fieldName: string = 'Value',
-    errorCode: string = ErrorCodes.GEN_INVALID_INPUT,
+    errorCode: string = ErrorCode.VALIDATION_ERROR,
   ): void {
     if (!allowedValues.includes(value as string | number)) {
       throw new BadRequestException({
@@ -102,7 +102,7 @@ export class BaseValidator {
     minLength: number,
     maxLength: number,
     fieldName: string = 'Value',
-    errorCode: string = ErrorCodes.GEN_INVALID_INPUT,
+    errorCode: string = ErrorCode.VALIDATION_ERROR,
   ): void {
     if (value.length < minLength || value.length > maxLength) {
       throw new BadRequestException({
@@ -121,7 +121,7 @@ export class BaseValidator {
     min: number,
     max: number,
     fieldName: string = 'Value',
-    errorCode: string = ErrorCodes.GEN_INVALID_INPUT,
+    errorCode: string = ErrorCode.VALIDATION_ERROR,
   ): void {
     if (value < min || value > max) {
       throw new BadRequestException({

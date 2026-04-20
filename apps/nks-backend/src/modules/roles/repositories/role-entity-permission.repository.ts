@@ -4,14 +4,13 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../../core/database/schema';
 import { entityType } from '../../../core/database/schema/lookups/entity-type/entity-type.table';
 import { roleEntityPermission } from '../../../core/database/schema/rbac/role-entity-permission/role-entity-permission.table';
-import { eq, and, inArray, isNull } from 'drizzle-orm';
+import { eq, and, inArray, isNull, sql, gt, or } from 'drizzle-orm';
 import { RolesRepository } from './roles.repository';
 import type {
   EntityPermission,
   RoleEntityPermissions,
 } from '../dto/role-response.dto';
 
-type RoleEntityPermissionRow = typeof roleEntityPermission.$inferSelect;
 
 @Injectable()
 export class RoleEntityPermissionRepository {
@@ -19,65 +18,6 @@ export class RoleEntityPermissionRepository {
     @InjectDb() private readonly db: NodePgDatabase<typeof schema>,
     private readonly rolesRepository: RolesRepository,
   ) {}
-
-  /**
-   * Get permission for specific role and entity.
-   * Accepts entityCode string and looks up entity_type to find FK.
-   */
-  async getPermission(
-    roleId: number,
-    entityCode: string,
-  ): Promise<EntityPermission | null> {
-    const entityTypeId = await this.resolveEntityTypeId(entityCode);
-    if (!entityTypeId) return null;
-
-    const [mapping] = await this.db
-      .select()
-      .from(roleEntityPermission)
-      .where(
-        and(
-          eq(roleEntityPermission.roleFk, roleId),
-          eq(roleEntityPermission.entityTypeFk, entityTypeId),
-          eq(roleEntityPermission.isActive, true),
-        ),
-      )
-      .limit(1);
-
-    if (!mapping) return null;
-
-    return {
-      canView: mapping.canView,
-      canCreate: mapping.canCreate,
-      canEdit: mapping.canEdit,
-      canDelete: mapping.canDelete,
-      deny: mapping.deny,
-    };
-  }
-
-  /**
-   * Check if role has specific permission on entity.
-   */
-  async checkPermission(
-    roleId: number,
-    entityCode: string,
-    action: 'view' | 'create' | 'edit' | 'delete',
-  ): Promise<boolean> {
-    const permission = await this.getPermission(roleId, entityCode);
-    if (!permission) return false;
-
-    switch (action) {
-      case 'view':
-        return permission.canView;
-      case 'create':
-        return permission.canCreate;
-      case 'edit':
-        return permission.canEdit;
-      case 'delete':
-        return permission.canDelete;
-      default:
-        return false;
-    }
-  }
 
   /**
    * Create or update entity permission for a role.
@@ -94,36 +34,12 @@ export class RoleEntityPermissionRepository {
       return false;
     }
 
-    const [existing] = await this.db
-      .select()
-      .from(roleEntityPermission)
-      .where(
-        and(
-          eq(roleEntityPermission.roleFk, roleId),
-          eq(roleEntityPermission.entityTypeFk, entityTypeId),
-        ),
-      )
-      .limit(1);
-
-    if (existing) {
-      await this.db
-        .update(roleEntityPermission)
-        .set({
-          canView: permission.canView ?? existing.canView,
-          canCreate: permission.canCreate ?? existing.canCreate,
-          canEdit: permission.canEdit ?? existing.canEdit,
-          canDelete: permission.canDelete ?? existing.canDelete,
-          deny: permission.deny ?? existing.deny,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(roleEntityPermission.roleFk, roleId),
-            eq(roleEntityPermission.entityTypeFk, entityTypeId),
-          ),
-        );
-    } else {
-      await this.db.insert(roleEntityPermission).values({
+    // Single atomic upsert — eliminates the select+insert/update race condition.
+    // ON CONFLICT: restore soft-deleted rows (isActive, deletedAt) and keep existing
+    // column values when the caller omits a field (sql`table.col` = current value).
+    await this.db
+      .insert(roleEntityPermission)
+      .values({
         roleFk: roleId,
         entityTypeFk: entityTypeId,
         canView: permission.canView ?? false,
@@ -133,8 +49,22 @@ export class RoleEntityPermissionRepository {
         deny: permission.deny ?? false,
         isActive: true,
         isSystem: false,
+      })
+      .onConflictDoUpdate({
+        target: [roleEntityPermission.roleFk, roleEntityPermission.entityTypeFk],
+        set: {
+          canView: permission.canView ?? sql`role_entity_permission.can_view`,
+          canCreate: permission.canCreate ?? sql`role_entity_permission.can_create`,
+          canEdit: permission.canEdit ?? sql`role_entity_permission.can_edit`,
+          canDelete: permission.canDelete ?? sql`role_entity_permission.can_delete`,
+          deny: permission.deny ?? sql`role_entity_permission.deny`,
+          // Restore soft-deleted row — deletePermission() sets isActive=false + deletedAt.
+          isActive: true,
+          deletedAt: null,
+          updatedAt: new Date(),
+        },
       });
-    }
+
     return true;
   }
 
@@ -157,6 +87,7 @@ export class RoleEntityPermissionRepository {
           inArray(schema.userRoleMapping.storeFk, storeIds),
           isNull(schema.userRoleMapping.deletedAt),
           eq(schema.userRoleMapping.isActive, true),
+          or(isNull(schema.userRoleMapping.expiresAt), gt(schema.userRoleMapping.expiresAt, new Date())),
         ),
       );
 
@@ -189,21 +120,14 @@ export class RoleEntityPermissionRepository {
   }
 
   /**
-   * Get combined permissions for user in a specific store.
-   * Returns entity permissions merged across all roles (union grant, but DENY overrides).
+   * Get combined permissions for pre-loaded role IDs.
+   * Used by PermissionEvaluatorService when roleIds are already on request.user
+   * (populated by AuthGuard) — avoids the extra getActiveRolesForStore DB round-trip.
    */
-  async getUserEntityPermissions(
-    userId: number,
-    storeId: number,
+  async getEntityPermissionsForRoleIds(
+    roleIds: number[],
   ): Promise<RoleEntityPermissions> {
-    const storeRoles = await this.rolesRepository.getActiveRolesForStore(
-      userId,
-      storeId,
-    );
-
-    if (storeRoles.length === 0) return {};
-
-    const roleIds = storeRoles.map((r) => r.roleId);
+    if (roleIds.length === 0) return {};
 
     const permissions = await this.db
       .select({
@@ -227,6 +151,18 @@ export class RoleEntityPermissionRepository {
       );
 
     return this.mergeEntityPermissions(permissions);
+  }
+
+  /**
+   * Get combined permissions for user in a specific store.
+   * Falls back to querying roles from DB — use only when request.user.roles is unavailable.
+   */
+  async getUserEntityPermissions(
+    userId: number,
+    storeId: number,
+  ): Promise<RoleEntityPermissions> {
+    const storeRoles = await this.rolesRepository.getActiveRolesForStore(userId, storeId);
+    return this.getEntityPermissionsForRoleIds(storeRoles.map((r) => r.roleId));
   }
 
   /**
@@ -298,50 +234,6 @@ export class RoleEntityPermissionRepository {
       );
   }
 
-  /** Create a new entity permission using entity code (looks up FK). Returns null if entity type not found. */
-  async create(
-    roleId: number,
-    entityCode: string,
-    data: Partial<EntityPermission>,
-  ): Promise<RoleEntityPermissionRow | null> {
-    const entityTypeId = await this.resolveEntityTypeId(entityCode);
-    if (!entityTypeId) return null;
-
-    const [created] = await this.db
-      .insert(roleEntityPermission)
-      .values({
-        roleFk: roleId,
-        entityTypeFk: entityTypeId,
-        canView: data.canView ?? false,
-        canCreate: data.canCreate ?? false,
-        canEdit: data.canEdit ?? false,
-        canDelete: data.canDelete ?? false,
-        deny: data.deny ?? false,
-        isActive: true,
-        isSystem: false,
-      })
-      .returning();
-    return created;
-  }
-
-  /** Delete by role and entity code (hard delete for cleanup). */
-  async deleteByRoleAndEntity(
-    roleId: number,
-    entityCode: string,
-  ): Promise<void> {
-    const entityTypeId = await this.resolveEntityTypeId(entityCode);
-    if (!entityTypeId) return;
-
-    await this.db
-      .delete(roleEntityPermission)
-      .where(
-        and(
-          eq(roleEntityPermission.roleFk, roleId),
-          eq(roleEntityPermission.entityTypeFk, entityTypeId),
-        ),
-      );
-  }
-
   // ─── Private Helpers ───────────────────────────────────────────────────────
 
   /** Resolve entity_type FK by code. Returns null if not found. */
@@ -371,7 +263,8 @@ export class RoleEntityPermissionRepository {
     }>,
   ): RoleEntityPermissions {
     const result: RoleEntityPermissions = {};
-    permissions.forEach((perm) => {
+
+    for (const perm of permissions) {
       if (!result[perm.entityCode]) {
         result[perm.entityCode] = {
           canView: false,
@@ -381,16 +274,26 @@ export class RoleEntityPermissionRepository {
           deny: false,
         };
       }
-      result[perm.entityCode].canView =
-        result[perm.entityCode].canView || perm.canView;
-      result[perm.entityCode].canCreate =
-        result[perm.entityCode].canCreate || perm.canCreate;
-      result[perm.entityCode].canEdit =
-        result[perm.entityCode].canEdit || perm.canEdit;
-      result[perm.entityCode].canDelete =
-        result[perm.entityCode].canDelete || perm.canDelete;
-      result[perm.entityCode].deny = result[perm.entityCode].deny || perm.deny;
-    });
+
+      const entry = result[perm.entityCode];
+
+      // DENY-OVERRIDES-GRANT: once any role denies, suppress all grants so that
+      // any caller reading the merged object gets an accurate picture without
+      // needing to know to check deny first.
+      if (perm.deny) {
+        entry.deny = true;
+        entry.canView = false;
+        entry.canCreate = false;
+        entry.canEdit = false;
+        entry.canDelete = false;
+      } else if (!entry.deny) {
+        // Only OR-merge grants when no deny has been applied yet.
+        entry.canView = entry.canView || perm.canView;
+        entry.canCreate = entry.canCreate || perm.canCreate;
+        entry.canEdit = entry.canEdit || perm.canEdit;
+        entry.canDelete = entry.canDelete || perm.canDelete;
+      }
+    }
 
     return result;
   }

@@ -1,0 +1,17 @@
+export default [
+  { code: 'GENERAL_STORE', label: 'General Store',      description: 'Multi-product retail store'   },
+  { code: 'GROCERY',       label: 'Grocery',            description: 'Supermarket / Grocery Store'  },
+  { code: 'PHARMACY',      label: 'Pharmacy',           description: 'Medicine & Health Products'   },
+  { code: 'APPAREL',       label: 'Apparel',            description: 'Clothing & Fashion'           },
+  { code: 'FOOTWEAR',      label: 'Footwear',           description: 'Shoes & Footwear'             },
+  { code: 'ELECTRONICS',   label: 'Electronics',        description: 'Electronics & Gadgets'        },
+  { code: 'FURNITURE',     label: 'Furniture',          description: 'Home Furniture'               },
+  { code: 'JEWELLERY',     label: 'Jewellery',          description: 'Gold & Silver Jewellery'      },
+  { code: 'BEAUTY',        label: 'Beauty & Cosmetics', description: 'Cosmetics & Beauty Products'  },
+  { code: 'RESTAURANT',    label: 'Restaurant',         description: 'Food & Beverage'              },
+  { code: 'CAFE',          label: 'Cafe',               description: 'Coffee Shop / Cafe'           },
+  { code: 'BAKERY',        label: 'Bakery',             description: 'Bakery & Confectionery'       },
+  { code: 'HARDWARE',      label: 'Hardware',           description: 'Tools & Hardware'             },
+  { code: 'STATIONARY',    label: 'Stationary',         description: 'Books & Stationary'           },
+  { code: 'SPORTS',        label: 'Sports',             description: 'Sports & Fitness'             },
+];

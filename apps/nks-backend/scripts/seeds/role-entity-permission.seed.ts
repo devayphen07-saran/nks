@@ -1,13 +1,12 @@
-import { roleEntityPermission, roles } from '../../src/core/database/schema';
-import { entityType } from '../../src/core/database/schema/lookups/entity-type/entity-type.table';
-import { eq } from 'drizzle-orm';
+import { roleEntityPermission, roles } from '../../src/core/database/schema/index.js';
+import { entityType } from '../../src/core/database/schema/lookups/entity-type/entity-type.table.js';
 import type { Db } from './types.js';
 
 /**
  * Seed role-entity permissions for all system and custom roles.
  *
  * Defines granular permissions per entity per role
- * System roles: SUPER_ADMIN, STORE_OWNER, STAFF (stored in roles table with storeFk = NULL)
+ * System roles: SUPER_ADMIN, USER, STORE_OWNER (stored in roles table with storeFk = NULL)
  * Custom roles: STORE_MANAGER, CASHIER, DELIVERY
  *
  * Entities: users, store, contact_person, customers, suppliers,
@@ -17,99 +16,43 @@ import type { Db } from './types.js';
  * Custom roles are created via API after stores exist.
  */
 
-// Permission matrix: role -> entity -> permissions
-const PERMISSION_MATRIX = {
-  // SUPER_ADMIN: Platform-wide administrator with full access to all entities
+// Permission shorthand
+type Perms = { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
+const ALL: Perms  = { canView: true,  canCreate: true,  canEdit: true,  canDelete: true };
+const VIEW: Perms = { canView: true,  canCreate: false, canEdit: false, canDelete: false };
+
+/**
+ * Business domain permissions — entity codes must match entity-type.seed.ts.
+ * Platform admin permissions are in role-entity-permission-admin.seed.ts.
+ */
+const PERMISSION_MATRIX: Record<string, Record<string, Perms>> = {
+  // SUPER_ADMIN: bypassed by RBACGuard, seeded for completeness
   SUPER_ADMIN: {
-    users: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    store: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    contact_person: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    customers: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    suppliers: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    products: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    orders: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    purchase_orders: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    invoices: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+    PRODUCT:        ALL,
+    CUSTOMER:       ALL,
+    VENDOR:         ALL,
+    INVOICE:        ALL,
+    PURCHASE_ORDER: ALL,
+    TRANSACTION:    ALL,
+    PAYMENT:        ALL,
+    INVENTORY:      ALL,
+    REPORT:         ALL,
   },
 
-  // STORE_OWNER: Full access to their store, except cannot delete store or users
+  // STORE_OWNER: Full access to business entities
   STORE_OWNER: {
-    users: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-    store: { canView: true, canCreate: false, canEdit: true, canDelete: false },
-    contact_person: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    customers: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    suppliers: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    products: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    orders: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    purchase_orders: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    invoices: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+    PRODUCT:        ALL,
+    CUSTOMER:       ALL,
+    VENDOR:         ALL,
+    INVOICE:        ALL,
+    PURCHASE_ORDER: ALL,
+    TRANSACTION:    ALL,
+    PAYMENT:        ALL,
+    INVENTORY:      ALL,
+    REPORT:         VIEW,
   },
 
-  // STAFF: Minimal access, view-only for store and customers by default
-  // Actual access depends on custom role assignment via API
-  STAFF: {
-    users: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    store: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-    contact_person: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    customers: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    suppliers: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    products: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    orders: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    purchase_orders: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    invoices: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-  },
-
-  // STORE_MANAGER: Full access to most entities except users/store deletion
-  STORE_MANAGER: {
-    users: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-    store: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-    contact_person: { canView: true, canCreate: true, canEdit: true, canDelete: true },
-    customers: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-    suppliers: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-    products: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-    orders: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-    purchase_orders: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-    invoices: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-  },
-
-  // CASHIER: Limited to payment-related entities
-  CASHIER: {
-    users: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    store: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-    contact_person: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    customers: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-    suppliers: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    products: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-    orders: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-    purchase_orders: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    invoices: { canView: true, canCreate: true, canEdit: false, canDelete: false }, // Can view & create invoices (payments)
-  },
-
-  // DELIVERY: Limited to orders and shipment tracking
-  DELIVERY: {
-    users: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    store: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-    contact_person: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    customers: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-    suppliers: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    products: { canView: true, canCreate: false, canEdit: false, canDelete: false },
-    orders: { canView: true, canCreate: false, canEdit: true, canDelete: false }, // Can update order status
-    purchase_orders: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    invoices: { canView: true, canCreate: false, canEdit: false, canDelete: false }, // View only
-  },
 };
-
-const ENTITIES = [
-  'users',
-  'store',
-  'contact_person',
-  'customers',
-  'suppliers',
-  'products',
-  'orders',
-  'purchase_orders',
-  'invoices',
-];
 
 export async function seedRoleEntityPermissions(db: Db) {
   // Step 1: Get all roles from roles table
@@ -134,10 +77,7 @@ export async function seedRoleEntityPermissions(db: Db) {
       continue;
     }
 
-    for (const entityCode of ENTITIES) {
-      const entityPerms = permMatrix[entityCode as keyof typeof permMatrix];
-      if (!entityPerms) continue;
-
+    for (const [entityCode, entityPerms] of Object.entries(permMatrix)) {
       const entityTypeId = entityTypesMap.get(entityCode);
       if (!entityTypeId) {
         console.warn(
@@ -154,7 +94,6 @@ export async function seedRoleEntityPermissions(db: Db) {
         canEdit: entityPerms.canEdit,
         canDelete: entityPerms.canDelete,
         isActive: true,
-        isSystem: true,
       });
     }
   }

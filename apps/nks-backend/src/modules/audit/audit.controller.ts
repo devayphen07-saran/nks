@@ -9,7 +9,8 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RBACGuard } from '../../common/guards/rbac.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { RequireEntityPermission } from '../../common/decorators/require-entity-permission.decorator';
+import { EntityCodes, PermissionActions } from '../../common/constants/entity-codes.constants';
 import { ApiResponse } from '../../common/utils/api-response';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { AuditService } from './audit.service';
@@ -29,8 +30,8 @@ export class AuditController {
    * Restricted to SUPER_ADMIN only.
    */
   @Get()
-  @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'List audit logs with filtering (SUPER_ADMIN)' })
+  @RequireEntityPermission({ entityCode: EntityCodes.AUDIT_LOG, action: PermissionActions.VIEW })
+  @ApiOperation({ summary: 'List audit logs with filtering' })
   async getLogs(
     @Query(new ZodValidationPipe(AuditListQuerySchema)) query: AuditListQueryDto,
   ): Promise<ApiResponse<{ items: AuditLogResponseDto[] }>> {
@@ -45,8 +46,8 @@ export class AuditController {
    * Restricted to SUPER_ADMIN only.
    */
   @Get(':id')
-  @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'Get a single audit log by ID (SUPER_ADMIN)' })
+  @RequireEntityPermission({ entityCode: EntityCodes.AUDIT_LOG, action: PermissionActions.VIEW })
+  @ApiOperation({ summary: 'Get a single audit log by ID' })
   async getById(
     @Param('id', ParseIntPipe) id: number,
   ): Promise<ApiResponse<AuditLogResponseDto>> {

@@ -3,7 +3,9 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { ErrorCode } from '../constants/error-codes.constants';
 import type { AuthenticatedRequest } from './auth.guard';
 
 /**
@@ -22,13 +24,23 @@ export class OwnershipGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user;
 
-    if (user?.isSuperAdmin) return true;
+    if (!user?.userId) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.UNAUTHORIZED,
+        message: 'User not found or authenticated',
+      });
+    }
+
+    if (user.isSuperAdmin) return true;
 
     const paramUserId =
       Number(request.params?.userId) || Number(request.params?.id);
 
-    if (!paramUserId || user?.userId !== paramUserId) {
-      throw new ForbiddenException('You can only access your own resources');
+    if (!paramUserId || user.userId !== paramUserId) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+        message: 'You can only access your own resources',
+      });
     }
 
     return true;

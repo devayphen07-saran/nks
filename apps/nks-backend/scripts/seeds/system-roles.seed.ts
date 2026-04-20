@@ -1,5 +1,5 @@
-import { roles } from '../../src/core/database/schema';
-import type { Db } from './types';
+import { roles } from '../../src/core/database/schema/index.js';
+import type { Db } from './types.js';
 
 export interface SystemRoleSeed {
   code: string;
@@ -26,12 +26,6 @@ export const SYSTEM_ROLES: SystemRoleSeed[] = [
     roleName: 'Store Owner',
     description: 'Full access to their store.',
     sortOrder: 3,
-  },
-  {
-    code: 'STAFF',
-    roleName: 'Staff',
-    description: 'Access via custom role assignment.',
-    sortOrder: 4,
   },
 ];
 

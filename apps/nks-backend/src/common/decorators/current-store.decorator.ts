@@ -1,4 +1,5 @@
-import { createParamDecorator, ExecutionContext, BadRequestException } from '@nestjs/common';
+import { createParamDecorator, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { ErrorCode } from '../constants/error-codes.constants';
 import type { AuthenticatedRequest } from '../guards/auth.guard';
 
 /**
@@ -20,7 +21,8 @@ export const CurrentStore = createParamDecorator(
     const storeId = request.user?.activeStoreId;
 
     if (!storeId) {
-      throw new BadRequestException({
+      throw new ForbiddenException({
+        errorCode: ErrorCode.FORBIDDEN,
         message: 'No active store selected. User must select a store after login.',
       });
     }

@@ -94,6 +94,7 @@ export const userRoleMapping = pgTable(
     index('urm_store_idx').on(table.storeFk),
     index('urm_user_store_idx').on(table.userFk, table.storeFk),
     index('urm_expires_at_idx').on(table.expiresAt),
+    index('urm_assigned_by_idx').on(table.assignedBy),
   ],
 );
 

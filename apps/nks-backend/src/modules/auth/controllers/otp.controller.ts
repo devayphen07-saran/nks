@@ -102,7 +102,7 @@ export class OtpController {
   @ApiOperation({
     summary: 'Send OTP to email during onboarding (authenticated user)',
   })
-  async sendEmailOtp(@Body() dto: SendEmailOtpDto) {
+  async sendEmailOtp(@Body() dto: SendEmailOtpDto): Promise<ApiResponse<null>> {
     await this.otpService.sendEmailOtp(dto.email);
     return ApiResponse.ok(null, 'OTP sent to email');
   }
@@ -114,7 +114,7 @@ export class OtpController {
   @ApiOperation({
     summary: 'Verify email OTP and mark email as verified',
   })
-  async verifyEmailOtp(@Body() dto: VerifyEmailOtpDto) {
+  async verifyEmailOtp(@Body() dto: VerifyEmailOtpDto): Promise<ApiResponse<null>> {
     await this.otpService.verifyEmailOtp(dto);
     return ApiResponse.ok(null, 'Email verified successfully');
   }

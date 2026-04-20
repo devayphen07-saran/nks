@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../../../common/constants/error-codes.constants';
 
 /**
  * Status Existence Validator
@@ -12,8 +12,8 @@ export class StatusExistsValidator {
   static validate(statusId: number | null | undefined): void {
     if (!statusId || typeof statusId !== 'number' || statusId <= 0) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.STA_STATUS_NOT_FOUND,
-        message: ErrorMessages[ErrorCodes.STA_STATUS_NOT_FOUND],
+        errorCode: ErrorCode.STA_STATUS_NOT_FOUND,
+        message: ErrorMessages[ErrorCode.STA_STATUS_NOT_FOUND],
       });
     }
   }

@@ -29,7 +29,7 @@ export class AuthFlowOrchestrator {
   async executeAuthFlow(
     user: {
       id: number;
-      guuid?: string | null;
+      guuid: string;
       email: string | null;
       name: string;
       emailVerified: boolean;
@@ -49,7 +49,7 @@ export class AuthFlowOrchestrator {
     const session = await this.sessionService.createSessionForUser(user.id, deviceInfo);
 
     const tokenPair = await this.tokenService.createTokenPair(
-      user.guuid || '',
+      user.guuid,
       session.token,
       session.userRoles,
       session.userEmail,

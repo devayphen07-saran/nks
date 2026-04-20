@@ -36,6 +36,7 @@ const AuthSessionSchema = z.object({
   refreshExpiresAt: z.string(),
   defaultStore: z
     .object({
+      id: z.number(),
       guuid: z.string(),
     })
     .nullable(),
@@ -66,7 +67,7 @@ export class RefreshTokenResponseDto extends createZodDto(AuthSessionSchema) {}
  */
 export interface AuthResponseEnvelope {
   user: z.infer<typeof AuthMinimalUserSchema>;
-  session: z.infer<typeof AuthSessionSchema>;
+  session: z.infer<typeof AuthSessionSchema>; // defaultStore includes { id, guuid }
   offlineToken?: string;
   /** HMAC-SHA256 of the offline session payload, signed server-side.
    *  Mobile stores this and checks its presence on load; the signing secret

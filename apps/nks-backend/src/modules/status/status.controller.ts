@@ -20,7 +20,8 @@ import { Public } from '../../common/decorators/public.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RBACGuard } from '../../common/guards/rbac.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { RequireEntityPermission } from '../../common/decorators/require-entity-permission.decorator';
+import { EntityCodes, PermissionActions } from '../../common/constants/entity-codes.constants';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { SessionUser } from '../auth/interfaces/session-user.interface';
 
@@ -43,13 +44,13 @@ export class StatusController {
 
   /**
    * GET /statuses/all
-   * SUPER_ADMIN — returns all statuses including inactive, with optional search.
+   * Returns all statuses including inactive, with optional search.
    */
   @Get('all')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.STATUS, action: PermissionActions.VIEW })
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'List all statuses including inactive (SUPER_ADMIN)' })
+  @ApiOperation({ summary: 'List all statuses including inactive' })
   async getAllStatuses(
     @Query(new ZodValidationPipe(GetAllStatusesQuerySchema)) query: GetAllStatusesQueryDto,
   ): Promise<ApiResponse<StatusListResponse>> {
@@ -59,14 +60,14 @@ export class StatusController {
 
   /**
    * POST /statuses
-   * SUPER_ADMIN — create a new status with visual styling.
+   * Create a new status with visual styling.
    */
   @Post()
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.STATUS, action: PermissionActions.CREATE })
   @ApiBearerAuth()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a new status (SUPER_ADMIN)' })
+  @ApiOperation({ summary: 'Create a new status' })
   async createStatus(
     @Body() dto: CreateStatusDto,
     @CurrentUser() user: SessionUser,
@@ -77,13 +78,13 @@ export class StatusController {
 
   /**
    * PUT /statuses/:guuid
-   * SUPER_ADMIN — update name, colors, bold, active flag. Code is immutable.
+   * Update name, colors, bold, active flag. Code is immutable.
    */
   @Put(':guuid')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.STATUS, action: PermissionActions.EDIT })
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update a status (SUPER_ADMIN)' })
+  @ApiOperation({ summary: 'Update a status' })
   async updateStatus(
     @Param('guuid') guuid: string,
     @Body() dto: UpdateStatusDto,
@@ -95,14 +96,14 @@ export class StatusController {
 
   /**
    * DELETE /statuses/:guuid
-   * SUPER_ADMIN — soft delete. Blocked for isSystem = true statuses.
+   * Soft delete. Blocked for isSystem = true statuses.
    */
   @Delete(':guuid')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({ entityCode: EntityCodes.STATUS, action: PermissionActions.DELETE })
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete a status (SUPER_ADMIN, system statuses protected)' })
+  @ApiOperation({ summary: 'Delete a status (system statuses protected)' })
   async deleteStatus(
     @Param('guuid') guuid: string,
     @CurrentUser() user: SessionUser,

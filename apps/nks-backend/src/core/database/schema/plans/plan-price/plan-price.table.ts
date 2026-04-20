@@ -1,4 +1,4 @@
-import { pgTable, varchar, bigint, integer, boolean, numeric } from 'drizzle-orm/pg-core';
+import { pgTable, varchar, bigint, integer, boolean, numeric, index } from 'drizzle-orm/pg-core';
 import { baseEntity, auditFields } from '../../base.entity';
 import { users } from '../../auth/users';
 import { plans } from '../../plans/plans';
@@ -46,7 +46,13 @@ export const planPrice = pgTable('plan_price', {
 
   // Audit Fields
   ...auditFields(() => users.id),
-});
+},
+(table) => [
+  index('plan_price_plan_fk_idx').on(table.planFk),
+  index('plan_price_currency_fk_idx').on(table.currencyFk),
+  index('plan_price_frequency_fk_idx').on(table.frequencyFk),
+],
+);
 
 export type PlanPrice = typeof planPrice.$inferSelect;
 export type NewPlanPrice = typeof planPrice.$inferInsert;

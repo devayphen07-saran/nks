@@ -15,8 +15,8 @@ import {
   JWT_AUDIENCE,
   OFFLINE_JWT_TTL_DAYS,
   OFFLINE_JWT_EXPIRATION,
-  SYSTEM_ROLE_STORE_OWNER,
 } from '../../auth.constants';
+import { SystemRoleCodes } from '../../../../common/constants/system-role-codes.constant';
 
 /**
  * TokenService
@@ -124,7 +124,7 @@ export class TokenService {
   async buildAuthResponse(
     user: {
       id: number;
-      guuid?: string | null;
+      guuid: string;
       email: string | null;
       name: string;
       emailVerified: boolean;
@@ -145,7 +145,7 @@ export class TokenService {
       new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     const storeOwnerRoleId = await this.authUtils.getCachedSystemRoleId(
-      SYSTEM_ROLE_STORE_OWNER,
+      SystemRoleCodes.STORE_OWNER,
     );
     const primaryStore = storeOwnerRoleId
       ? await this.rolesRepository.findPrimaryStoreForUser(
@@ -159,11 +159,11 @@ export class TokenService {
       (await this.permissionsService.getUserPermissions(user.id));
 
     const primaryStoreId =
-      permissions.roles.find((r) => r.isPrimary && r.storeId)?.storeId ?? null;
+      permissions.roles?.find((r) => r.isPrimary && r.storeId)?.storeId ?? null;
 
     const offlineToken = this.jwtConfigService.signOfflineToken(
       {
-        sub: user.guuid ?? '',
+        sub: user.guuid,
         ...(user.email ? { email: user.email } : {}),
         roles: permissions.roles.map((r) => r.roleCode),
         stores: permissions.roles
@@ -195,7 +195,7 @@ export class TokenService {
       {
         user: {
           id: user.id,
-          guuid: user.guuid ?? '',
+          guuid: user.guuid,
           email: user.email,
           name: user.name,
           phoneNumber: user.phoneNumber ?? null,
@@ -204,7 +204,7 @@ export class TokenService {
         session: { token, expiresAt, sessionId },
       },
       tokenPair,
-      primaryStore ? { guuid: primaryStore.guuid } : null,
+      primaryStore && primaryStoreId ? { id: primaryStoreId, guuid: primaryStore.guuid } : null,
       sessionId,
       expiresAt,
       refreshExpiresAt,

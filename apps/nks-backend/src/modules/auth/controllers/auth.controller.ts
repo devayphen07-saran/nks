@@ -13,7 +13,6 @@ import {
   HttpStatus,
   UseGuards,
   UnauthorizedException,
-  Logger,
 } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../../../common/guards/auth.guard';
 import type { Request, Response } from 'express';
@@ -31,6 +30,7 @@ import {
   RefreshTokenDto,
   AuthResponseEnvelope,
   MeResponseDto,
+  SyncTimeDto,
 } from '../dto';
 import { OnboardingCompleteDto, OnboardingCompleteResponseDto } from '../dto/onboarding.dto';
 import { SessionListDto } from '../dto/permissions.dto';
@@ -42,14 +42,13 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { RateLimit } from '../../../common/decorators/rate-limit.decorator';
 import { JWTConfigService } from '../../../config/jwt.config';
 import type { SessionUser } from '../interfaces/session-user.interface';
+import { AUTH_CONSTANTS } from '../../../common/constants/app-constants';
 
 @ApiTags('Auth')
 @Controller('auth')
 @UseGuards(AuthGuard)
 @ApiBearerAuth()
 export class AuthController {
-  private readonly logger = new Logger(AuthController.name);
-
   constructor(
     private readonly authService: AuthService,
     private readonly passwordAuthService: PasswordAuthService,
@@ -174,18 +173,12 @@ export class AuthController {
   ): Promise<ApiResponse<null>> {
     const token = this.parseSessionCookie(req);
     if (token) {
-      try {
-        await this.authService.logout(token);
-      } catch (err) {
-        this.logger.warn(
-          `Failed to revoke session during logout: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
+      await this.authService.logout(token);
     }
     res.clearCookie('nks_session', {
       httpOnly: true,
       sameSite: 'strict',
-      secure: process.env['NODE_ENV'] === 'production',
+      secure: AUTH_CONSTANTS.SESSION.COOKIE_SECURE,
       path: '/',
     });
     return ApiResponse.ok(null, 'Logged out');
@@ -353,9 +346,9 @@ export class AuthController {
     summary: 'Sync device clock with server time',
     description: 'Returns the offset between server and device time in seconds. Used by mobile for clock drift detection before offline operations.',
   })
-  getSyncTime(@Body() body: { deviceTime?: number }): ApiResponse<{ serverTime: number; offset: number }> {
+  getSyncTime(@Body() dto: SyncTimeDto): ApiResponse<{ serverTime: number; offset: number }> {
     const serverTime = Math.floor(Date.now() / 1000);
-    const offset = body.deviceTime != null ? serverTime - body.deviceTime : 0;
+    const offset = serverTime - dto.deviceTime;
     return ApiResponse.ok({ serverTime, offset }, 'Server time');
   }
 

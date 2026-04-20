@@ -28,6 +28,7 @@ interface AuthResult {
 }
 
 export type UserRoleEntry = {
+  roleId: number;
   roleCode:
     | (typeof STORE_CONSTANTS.STAFF_ROLES)[number]
     | typeof STORE_CONSTANTS.CUSTOMER_ROLE
@@ -61,7 +62,7 @@ export class AuthMapper {
   static toAuthResponseEnvelope(
     authResult: AuthResult,
     tokenPair?: TokenPair,
-    defaultStore?: { guuid: string } | null,
+    defaultStore?: { id: number; guuid: string } | null,
     sessionId?: string, // Business logic: must be generated in service
     expiresAt?: string | Date, // Business logic: TTL calculation must be in service
     refreshExpiresAt?: string | Date, // Business logic: TTL calculation must be in service
@@ -130,10 +131,12 @@ export class AuthMapper {
    */
   static mapToRoleEntries(
     rows: Array<{
+      roleId?: number | null;
       roleCode?: string;
       code?: string;
       storeFk?: number | null;
       storeName?: string | null;
+      isPrimary?: boolean | null;
     }>,
     storeIdOverride?: number,
     assignedAt?: string, // Business logic: timestamp must be generated in service
@@ -147,13 +150,11 @@ export class AuthMapper {
     return rows.map((r) => {
       const roleCode = (r.roleCode ?? r.code) as UserRoleEntry['roleCode'];
       return {
+        roleId: r.roleId ?? 0,
         roleCode,
         storeId: storeIdOverride ?? r.storeFk ?? null,
         storeName: r.storeName ?? null,
-        // Primary role: STORE_OWNER (user owns the store) or global role with no store scope
-        isPrimary:
-          roleCode === 'STORE_OWNER' ||
-          (r.storeFk === null && roleCode === 'SUPER_ADMIN'),
+        isPrimary: r.isPrimary ?? false,
         assignedAt, // Transformation only - value provided by service
         expiresAt: null,
       };

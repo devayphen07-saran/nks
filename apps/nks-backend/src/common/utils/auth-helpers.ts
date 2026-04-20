@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import type { AuthResponseEnvelope } from '../../modules/auth/dto';
 import { DeviceValidator } from '../validators';
+import { AUTH_CONSTANTS } from '../constants/app-constants';
 
 /**
  * Shared utilities for auth controllers
@@ -47,7 +48,7 @@ export class AuthControllerHelpers {
     res.cookie('nks_session', token, {
       httpOnly: true,
       sameSite: 'strict',
-      secure: process.env['NODE_ENV'] === 'production',
+      secure: AUTH_CONSTANTS.SESSION.COOKIE_SECURE,
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       path: '/',
     });

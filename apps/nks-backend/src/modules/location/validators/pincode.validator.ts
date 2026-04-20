@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../../../common/constants/error-codes.constants';
 
 /**
  * Pincode Validator
@@ -14,8 +14,8 @@ export class PincodeValidator {
   static validate(pincode: string): void {
     if (!pincode || typeof pincode !== 'string' || !this.PINCODE_REGEX.test(pincode.trim())) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.LOC_INVALID_PINCODE,
-        message: ErrorMessages[ErrorCodes.LOC_INVALID_PINCODE],
+        errorCode: ErrorCode.LOC_INVALID_PINCODE,
+        message: ErrorMessages[ErrorCode.LOC_INVALID_PINCODE],
       });
     }
   }

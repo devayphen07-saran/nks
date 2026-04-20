@@ -4,23 +4,25 @@ import { RolesRepository } from './repositories/roles.repository';
 import { RoleEntityPermissionRepository } from './repositories/role-entity-permission.repository';
 import { RolesController } from './roles.controller';
 import { RBACGuard } from '../../common/guards/rbac.guard';
-import { PermissionChecker } from '../../common/utils/permission-checker';
+import { PermissionEvaluatorService } from './permission-evaluator.service';
+import { StoresModule } from '../stores/stores.module';
 
 @Module({
+  imports: [StoresModule],
   controllers: [RolesController],
   providers: [
     RolesService,
     RolesRepository,
     RoleEntityPermissionRepository,
     RBACGuard,
-    PermissionChecker,
+    PermissionEvaluatorService,
   ],
   exports: [
     RolesService,
     RolesRepository,
     RoleEntityPermissionRepository,
     RBACGuard,
-    PermissionChecker,
+    PermissionEvaluatorService,
   ],
 })
 export class RolesModule {}

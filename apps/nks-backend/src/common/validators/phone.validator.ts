@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../constants/error-codes.constants';
 
 /** Dial code used for phone normalisation. Overrideable for non-India deployments. */
 export const DEFAULT_DIAL_CODE = process.env['DEFAULT_DIAL_CODE'] ?? '+91';
@@ -16,8 +16,8 @@ export class PhoneValidator {
   static validate(phone: string): void {
     if (!phone || typeof phone !== 'string' || !this.PHONE_REGEX.test(phone.trim())) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.AUTH_INVALID_PHONE,
-        message: ErrorMessages[ErrorCodes.AUTH_INVALID_PHONE],
+        errorCode: ErrorCode.AUTH_INVALID_PHONE,
+        message: ErrorMessages[ErrorCode.AUTH_INVALID_PHONE],
       });
     }
   }

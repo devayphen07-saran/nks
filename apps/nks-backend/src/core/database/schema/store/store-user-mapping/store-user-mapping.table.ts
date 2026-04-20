@@ -8,7 +8,7 @@ import {
 import { sql } from 'drizzle-orm';
 import { users } from '../../auth/users';
 import { store } from '../../store/store';
-import { codeValue } from '../../lookups/code-value/code-value.table';
+import { designationType } from '../../lookups/designation-type/designation-type.table';
 import { coreEntity } from '../../base.entity';
 
 /**
@@ -35,9 +35,9 @@ export const storeUserMapping = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
 
-    // Designation from code_value (DESIGNATION category: CEO, STORE_MGR, CASHIER, etc.)
+    // Designation from designation_type lookup (CEO, STORE_MGR, CASHIER, etc.)
     designationFk: bigint('designation_fk', { mode: 'number' }).references(
-      () => codeValue.id,
+      () => designationType.id,
       { onDelete: 'set null' },
     ),
 

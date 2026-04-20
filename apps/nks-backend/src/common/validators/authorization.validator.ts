@@ -1,5 +1,6 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../core/constants/error-codes';
+import { ForbiddenException } from '@nestjs/common';
+import { ErrorCode, ErrorMessages } from '../constants/error-codes.constants';
+import { SystemRoleCodes } from '../constants/system-role-codes.constant';
 
 /**
  * Authorization Validator
@@ -19,8 +20,8 @@ export class AuthorizationValidator {
 
     if (resourceOwnerId !== requestingUserId) {
       throw new ForbiddenException({
-        errorCode: ErrorCodes.GEN_FORBIDDEN,
-        message: ErrorMessages[ErrorCodes.GEN_FORBIDDEN],
+        errorCode: ErrorCode.FORBIDDEN,
+        message: ErrorMessages[ErrorCode.FORBIDDEN],
       });
     }
   }
@@ -41,8 +42,8 @@ export class AuthorizationValidator {
 
     if (!hasRole) {
       throw new ForbiddenException({
-        errorCode: ErrorCodes.GEN_FORBIDDEN,
-        message: ErrorMessages[ErrorCodes.GEN_FORBIDDEN],
+        errorCode: ErrorCode.FORBIDDEN,
+        message: ErrorMessages[ErrorCode.FORBIDDEN],
       });
     }
   }
@@ -57,13 +58,13 @@ export class AuthorizationValidator {
   ): void {
     if (isSuperAdmin) return; // SUPER_ADMIN can assign any role
 
-    const roleHierarchy = ['USER', 'STAFF', 'STORE_OWNER', 'SUPER_ADMIN'];
+    const roleHierarchy = ['USER', 'STAFF', SystemRoleCodes.STORE_OWNER, SystemRoleCodes.SUPER_ADMIN];
     const requestingLevel = roleHierarchy.indexOf(requestingUserRole);
     const targetLevel = roleHierarchy.indexOf(targetRole);
 
     if (targetLevel >= requestingLevel) {
       throw new ForbiddenException({
-        errorCode: ErrorCodes.GEN_FORBIDDEN,
+        errorCode: ErrorCode.FORBIDDEN,
         message: 'Cannot assign role equal to or higher than your own',
       });
     }
@@ -81,8 +82,8 @@ export class AuthorizationValidator {
 
     if (!userStores.includes(targetStoreId)) {
       throw new ForbiddenException({
-        errorCode: ErrorCodes.GEN_FORBIDDEN,
-        message: ErrorMessages[ErrorCodes.GEN_FORBIDDEN],
+        errorCode: ErrorCode.FORBIDDEN,
+        message: ErrorMessages[ErrorCode.FORBIDDEN],
       });
     }
   }
@@ -96,7 +97,7 @@ export class AuthorizationValidator {
   ): void {
     if (isRequired && !isEmailVerified) {
       throw new ForbiddenException({
-        errorCode: ErrorCodes.GEN_FORBIDDEN,
+        errorCode: ErrorCode.FORBIDDEN,
         message: 'Email verification required',
       });
     }
@@ -111,7 +112,7 @@ export class AuthorizationValidator {
   ): void {
     if (!allowedStatuses.includes(status)) {
       throw new ForbiddenException({
-        errorCode: ErrorCodes.GEN_FORBIDDEN,
+        errorCode: ErrorCode.FORBIDDEN,
         message: `Account status must be one of: ${allowedStatuses.join(', ')}`,
       });
     }
@@ -123,7 +124,7 @@ export class AuthorizationValidator {
   static validateUserActive(deletedAt: Date | null): void {
     if (deletedAt) {
       throw new ForbiddenException({
-        errorCode: ErrorCodes.GEN_FORBIDDEN,
+        errorCode: ErrorCode.FORBIDDEN,
         message: 'User account is deactivated',
       });
     }
@@ -141,9 +142,9 @@ export class AuthorizationValidator {
     const roles = Array.isArray(targetUserRole)
       ? targetUserRole
       : [targetUserRole];
-    if (roles.includes('SUPER_ADMIN')) {
+    if (roles.includes(SystemRoleCodes.SUPER_ADMIN)) {
       throw new ForbiddenException({
-        errorCode: ErrorCodes.GEN_FORBIDDEN,
+        errorCode: ErrorCode.FORBIDDEN,
         message: 'Cannot modify SUPER_ADMIN users',
       });
     }

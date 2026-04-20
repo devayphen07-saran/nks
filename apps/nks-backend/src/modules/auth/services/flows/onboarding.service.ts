@@ -4,17 +4,12 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../../../core/constants/error-codes';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../../../../core/database/schema';
-import { InjectDb } from '../../../../core/database/inject-db.decorator';
+import { ErrorCode, ErrorMessages } from '../../../../common/constants/error-codes.constants';
 import { OnboardingCompleteDto, OnboardingCompleteResponseDto } from '../../dto';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { AuthProviderRepository } from '../../repositories/auth-provider.repository';
 import { OtpService } from '../otp/otp.service';
 import { PasswordService } from '../security/password.service';
-
-type Db = NodePgDatabase<typeof schema>;
 
 /**
  * OnboardingService
@@ -23,7 +18,6 @@ type Db = NodePgDatabase<typeof schema>;
  *   - Adding email + password after phone-OTP login
  *   - Adding phone number after email login
  *
- *
  * OTP sending is intentionally done outside the transaction so that DB changes
  * are committed before the external API call, and a failed OTP send does not
  * roll back the credential update.
@@ -31,7 +25,6 @@ type Db = NodePgDatabase<typeof schema>;
 @Injectable()
 export class OnboardingService {
   constructor(
-    @InjectDb() private readonly db: Db,
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly authProviderRepository: AuthProviderRepository,
     private readonly otpService: OtpService,
@@ -43,14 +36,14 @@ export class OnboardingService {
     dto: OnboardingCompleteDto,
   ): Promise<OnboardingCompleteResponseDto> {
     const user = await this.authUsersRepository.findById(userId);
-    if (!user) throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_USER_NOT_FOUND, message: ErrorMessages[ErrorCodes.AUTH_USER_NOT_FOUND] });
+    if (!user) throw new UnauthorizedException({ errorCode: ErrorCode.USER_NOT_FOUND, message: ErrorMessages[ErrorCode.USER_NOT_FOUND] });
 
     let emailVerificationSent = false;
     let phoneVerificationSent = false;
     let nextStep: 'verifyEmail' | 'verifyPhone' | 'complete' = 'complete';
 
     if (dto.email && !dto.password) {
-      throw new BadRequestException({ errorCode: ErrorCodes.AUTH_PASSWORD_REQUIRED, message: ErrorMessages[ErrorCodes.AUTH_PASSWORD_REQUIRED] });
+      throw new BadRequestException({ errorCode: ErrorCode.AUTH_PASSWORD_REQUIRED, message: ErrorMessages[ErrorCode.AUTH_PASSWORD_REQUIRED] });
     }
 
     // Hash password outside the transaction — bcrypt/argon2 is CPU-heavy and
@@ -58,7 +51,7 @@ export class OnboardingService {
     const passwordHash =
       dto.email && dto.password ? await this.passwordService.hash(dto.password) : null;
 
-    await this.db.transaction(async (tx) => {
+    await this.authUsersRepository.withTransaction(async (tx) => {
       await this.authUsersRepository.update(userId, { name: dto.name }, tx);
 
       if (dto.email) {
@@ -67,7 +60,7 @@ export class OnboardingService {
           userId,
           tx,
         );
-        if (emailTaken) throw new ConflictException({ errorCode: ErrorCodes.AUTH_EMAIL_ALREADY_IN_USE, message: ErrorMessages[ErrorCodes.AUTH_EMAIL_ALREADY_IN_USE] });
+        if (emailTaken) throw new ConflictException({ errorCode: ErrorCode.USER_EMAIL_ALREADY_EXISTS, message: ErrorMessages[ErrorCode.USER_EMAIL_ALREADY_EXISTS] });
 
         await this.authUsersRepository.update(
           userId,

@@ -78,7 +78,7 @@ export class Msg91Service {
       }
       return data;
     } catch (error) {
-      this.logger.error(`MSG91 ${path} error: ${error.message}`);
+      this.logger.error(`MSG91 ${path} error: ${(error as Error).message}`);
       throw error;
     }
   }

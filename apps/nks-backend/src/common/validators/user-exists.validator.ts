@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../constants/error-codes.constants';
 
 /**
  * User Existence Validator
@@ -12,8 +12,8 @@ export class UserExistsValidator {
   static validate(userId: number | null | undefined): void {
     if (!userId || typeof userId !== 'number' || userId <= 0) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.AUTH_USER_NOT_FOUND,
-        message: ErrorMessages[ErrorCodes.AUTH_USER_NOT_FOUND],
+        errorCode: ErrorCode.USER_NOT_FOUND,
+        message: ErrorMessages[ErrorCode.USER_NOT_FOUND],
       });
     }
   }

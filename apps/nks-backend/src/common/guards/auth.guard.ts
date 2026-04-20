@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import {
   CanActivate,
   ExecutionContext,
@@ -5,8 +6,9 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { and, eq, gt, isNull, or } from 'drizzle-orm';
+import { and, eq, gt, isNotNull, isNull, or } from 'drizzle-orm';
 import { InjectDb } from '../../core/database/inject-db.decorator';
 import * as schema from '../../core/database/schema';
 import { userRoleMapping } from '../../core/database/schema/auth/user-role-mapping';
@@ -17,18 +19,14 @@ import type { Request } from 'express';
 import { SessionUser, SessionUserRole } from 'src/modules/auth/interfaces/session-user.interface';
 import { fireAndForgetWithRetry } from '../utils/retry';
 import { extractCookieValue } from '../utils/cookie.utils';
+import { SystemRoleCodes } from '../constants/system-role-codes.constant';
 import { LAST_ACTIVE_THROTTLE_MS } from '../../modules/auth/auth.constants';
 import { SessionsRepository } from '../../modules/auth/repositories/sessions.repository';
-import { JtiBlocklistService } from '../../modules/auth/services/token/jti-blocklist.service';
 
 /** Extend Express Request with strongly-typed user fields. */
 export interface AuthenticatedRequest extends Request {
   user: SessionUser;
   session: { id: string; token: string; expiresAt: Date };
-  /** Cached per-request permission codes (populated by PermissionGuard). */
-  userPermissions?: Set<string>;
-  /** Cached per-request SUPER_ADMIN flag (populated by PermissionGuard). */
-  isSuperAdmin?: boolean;
 }
 
 /** Type-safe Express Request cookies (from cookie-parser middleware) */
@@ -40,13 +38,16 @@ interface ParsedCookies {
 @Injectable()
 export class AuthGuard implements CanActivate {
   private readonly logger = new Logger(AuthGuard.name);
+  private readonly ipHmacSecret: string;
 
   constructor(
     private readonly reflector: Reflector,
     @InjectDb() private readonly db: NodePgDatabase<typeof schema>,
     private readonly sessionsRepository: SessionsRepository,
-    private readonly jtiBlocklist: JtiBlocklistService,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.ipHmacSecret = this.configService.getOrThrow<string>('IP_HMAC_SECRET');
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -84,12 +85,32 @@ export class AuthGuard implements CanActivate {
       });
     }
 
-    // 2. Validate session directly from database (BetterAuth's getSession() has issues)
-    const [dbSession] = await this.db
-      .select()
+    // 2. Validate session + JTI blocklist in a single atomic query.
+    // A LEFT JOIN on jti_blocklist eliminates the TOCTOU race where a concurrent
+    // logout could insert the JTI into the blocklist between a session fetch and
+    // a subsequent separate blocklist query — both are now read in one snapshot.
+    //
+    // SECURITY NOTE: Session tokens are stored as raw opaque bytes (BetterAuth default).
+    // A read-only DB breach would expose all active sessions. Hardening path: store
+    // sha256(token) and look up by hash — requires forking BetterAuth session creation.
+    const [row] = await this.db
+      .select({
+        session: schema.userSession,
+        revokedJti: schema.jtiBlocklist.jti,
+      })
       .from(schema.userSession)
+      .leftJoin(
+        schema.jtiBlocklist,
+        and(
+          isNotNull(schema.userSession.jti),
+          eq(schema.jtiBlocklist.jti, schema.userSession.jti),
+          gt(schema.jtiBlocklist.expiresAt, new Date()),
+        ),
+      )
       .where(eq(schema.userSession.token, sessionToken))
       .limit(1);
+
+    const dbSession = row?.session;
 
     if (!dbSession) {
       throw new UnauthorizedException({
@@ -106,9 +127,8 @@ export class AuthGuard implements CanActivate {
       });
     }
 
-    // 3b. Check JTI blocklist — rejects tokens that were revoked mid-flight
-    // (e.g., session terminated while a 15-min JWT was still in flight).
-    if (dbSession.jti && await this.jtiBlocklist.isBlocked(dbSession.jti)) {
+    // 3b. JTI revocation — caught atomically in the JOIN above.
+    if (row?.revokedJti) {
       throw new UnauthorizedException({
         errorCode: ErrorCode.AUTH_TOKEN_INVALID,
         message: 'Token has been revoked.',
@@ -124,6 +144,7 @@ export class AuthGuard implements CanActivate {
         .limit(1),
       this.db
         .select({
+          roleId: userRoleMapping.roleFk,
           roleCode: schema.roles.code,
           storeFk: userRoleMapping.storeFk,
           storeName: schema.store.storeName,
@@ -154,7 +175,6 @@ export class AuthGuard implements CanActivate {
       });
     }
 
-    // Build sessionData for compatibility with rest of code
     const sessionData = {
       id: String(dbSession.id),
       token: dbSession.token,
@@ -162,23 +182,7 @@ export class AuthGuard implements CanActivate {
     };
     const user = dbUser;
 
-    // 2. Validate user ID exists and is valid
-    if (!user?.id) {
-      throw new UnauthorizedException({
-        errorCode: ErrorCode.AUTH_SESSION_EXPIRED,
-        message: 'User ID is missing from session',
-      });
-    }
-
-    // 3. Validate session data
-    if (!sessionData?.id || !sessionData?.expiresAt) {
-      throw new UnauthorizedException({
-        errorCode: ErrorCode.AUTH_SESSION_EXPIRED,
-        message: 'Invalid session data',
-      });
-    }
-
-    // 4. Map BetterAuth user to our SessionUser shape.
+    // Map BetterAuth user to our SessionUser shape.
     // BetterAuth extends the user type with custom plugin fields at runtime;
     // we widen the type once here rather than casting per-field.
     type BetterAuthUser = typeof user & {
@@ -195,6 +199,7 @@ export class AuthGuard implements CanActivate {
     const u = user as BetterAuthUser;
 
     const roles: SessionUserRole[] = roleRows.map((r) => ({
+      roleId: r.roleId,
       roleCode: r.roleCode,
       storeId: r.storeFk ?? null,
       storeName: r.storeName ?? null,
@@ -203,7 +208,28 @@ export class AuthGuard implements CanActivate {
       expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
     }));
     const primaryRole = roleRows.find((r) => r.isPrimary)?.roleCode ?? roleRows[0]?.roleCode ?? null;
-    const isSuperAdmin = roles.some((r) => r.roleCode === 'SUPER_ADMIN');
+    const isSuperAdmin = roles.some((r) => r.roleCode === SystemRoleCodes.SUPER_ADMIN);
+
+    // 5. Check if account is blocked BEFORE attaching user to request.
+    // Attaching first would expose a blocked user's profile to exception filters
+    // and logging interceptors on the error path.
+    if (u.isBlocked) {
+      // CRITICAL: Delete sessions BEFORE throwing error (synchronous, not fire-and-forget)
+      try {
+        await this.sessionsRepository.deleteAllForUser(Number(u.id));
+        this.logger.warn(`Deleted all sessions for blocked user ${u.id}`);
+      } catch (err) {
+        this.logger.error(
+          `Failed to delete sessions for blocked user ${u.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        // Continue to throw auth error even if session deletion fails
+      }
+
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.USER_BLOCKED,
+        message: 'Account is blocked',
+      });
+    }
 
     (request as AuthenticatedRequest).user = {
       id: String(u.id),
@@ -228,32 +254,38 @@ export class AuthGuard implements CanActivate {
       activeStoreId: dbSession.activeStoreFk ?? null,
     };
 
-    // 5. Check if account is blocked — invalidate session immediately
-    if (u.isBlocked) {
-      // CRITICAL: Delete sessions BEFORE throwing error (synchronous, not fire-and-forget)
-      try {
-        await this.sessionsRepository.deleteAllForUser(Number(u.id));
-        this.logger.warn(`Deleted all sessions for blocked user ${u.id}`);
-      } catch (err) {
-        this.logger.error(
-          `Failed to delete sessions for blocked user ${u.id}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        // Continue to throw auth error even if session deletion fails
-      }
-
-      throw new UnauthorizedException({
-        errorCode: ErrorCode.USER_BLOCKED,
-        message: `Account is blocked${u.blockedReason ? ': ' + u.blockedReason : ''}`,
-      });
-    }
-
     (request as AuthenticatedRequest).session = {
       id: sessionData.id,
       token: sessionData.token,
       expiresAt: sessionData.expiresAt,
     };
 
-    // 6. Update lastActiveAt — throttled to once every 5 minutes to avoid
+    // 6. IP change detection — soft fraud signal, never rejects a request.
+    // Mobile clients legitimately switch IPs (WiFi → LTE) and corporate NAT
+    // may present a different IP per-request. A mismatch is a useful audit
+    // signal but not proof of hijacking. Skipped for sessions created before
+    // this feature was deployed (ipHash IS NULL).
+    //
+    // PREREQUISITE: Express must be configured with `app.set('trust proxy', ...)` for
+    // request.ip to reflect the real client IP rather than the reverse proxy address.
+    // Without this, every request appears to come from the same proxy IP and the
+    // check is a no-op (which is safe — it just produces no signal).
+    if (dbSession.ipHash) {
+      const requestIp = request.ip ?? '';
+      if (requestIp) {
+        const currentIpHash = crypto
+          .createHmac('sha256', this.ipHmacSecret)
+          .update(requestIp)
+          .digest('hex');
+        if (currentIpHash !== dbSession.ipHash) {
+          this.logger.warn(
+            `IP change detected: session=${dbSession.id} user=${dbSession.userId} — network switch or proxy change.`,
+          );
+        }
+      }
+    }
+
+    // 7. Update lastActiveAt — throttled to once every 5 minutes to avoid
     //    a DB write on every single authenticated request.
     const lastActive = user.lastActiveAt ? new Date(user.lastActiveAt).getTime() : 0;
     if (Date.now() - lastActive > LAST_ACTIVE_THROTTLE_MS) {
@@ -277,8 +309,11 @@ export class AuthGuard implements CanActivate {
   }
 
   /**
-   * Fallback cookie extraction from raw Cookie header
-   * (cookie-parser middleware should handle this, but this is a fallback)
+   * Fallback cookie extraction from raw Cookie header.
+   * cookie-parser middleware (registered globally in main.ts) should always
+   * populate request.cookies, making this path dead code in normal operation.
+   * Retained as a safety net in case middleware order changes or cookie-parser
+   * is removed — prevents a silent auth regression.
    */
   private extractNksSessionCookie(request: Request): string | undefined {
     return extractCookieValue(request.headers.cookie ?? '', 'nks_session');

@@ -5,10 +5,6 @@ import {
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq } from 'drizzle-orm';
-import { InjectDb } from '../../../../core/database/inject-db.decorator';
-import * as schema from '../../../../core/database/schema';
 import { JWTConfigService } from '../../../../config/jwt.config';
 import { RefreshTokenService } from '../session/refresh-token.service';
 import { SessionsRepository } from '../../repositories/sessions.repository';
@@ -19,11 +15,9 @@ import { AuthUtilsService } from '../shared/auth-utils.service';
 import {
   JWT_AUDIENCE,
   OFFLINE_JWT_EXPIRATION,
-  SYSTEM_ROLE_STORE_OWNER,
 } from '../../auth.constants';
-import { ErrorCodes, ErrorMessages } from '../../../../core/constants/error-codes';
-
-type Db = NodePgDatabase<typeof schema>;
+import { SystemRoleCodes } from '../../../../common/constants/system-role-codes.constant';
+import { ErrorCode, ErrorMessages } from '../../../../common/constants/error-codes.constants';
 
 export interface VerifyClaimsResponse {
   isValid: boolean;
@@ -48,7 +42,6 @@ export class TokenLifecycleService {
   private readonly logger = new Logger(TokenLifecycleService.name);
 
   constructor(
-    @InjectDb() private readonly db: Db,
     private readonly jwtConfigService: JWTConfigService,
     private readonly refreshTokenService: RefreshTokenService,
     private readonly sessionsRepository: SessionsRepository,
@@ -70,6 +63,7 @@ export class TokenLifecycleService {
     refreshExpiresAt: string;
     defaultStore: { guuid: string } | null;
     offlineToken: string;
+    rolesChanged: boolean;
   }> {
     // Step 1: Hash for DB lookup (token is fully opaque)
     const refreshTokenHash = crypto
@@ -82,13 +76,13 @@ export class TokenLifecycleService {
       await this.sessionsRepository.findByRefreshTokenHashForUpdate(
         refreshTokenHash,
       );
-    if (!session) throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_INVALID_REFRESH_TOKEN, message: ErrorMessages[ErrorCodes.AUTH_INVALID_REFRESH_TOKEN] });
+    if (!session) throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_REFRESH_TOKEN_INVALID, message: ErrorMessages[ErrorCode.AUTH_REFRESH_TOKEN_INVALID] });
 
     const isValidToken = this.refreshTokenService.verifyTokenHash(
       refreshToken,
       session.refreshTokenHash,
     );
-    if (!isValidToken) throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_INVALID_REFRESH_TOKEN, message: ErrorMessages[ErrorCodes.AUTH_INVALID_REFRESH_TOKEN] });
+    if (!isValidToken) throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_REFRESH_TOKEN_INVALID, message: ErrorMessages[ErrorCode.AUTH_REFRESH_TOKEN_INVALID] });
 
     // Step 2b: Theft detection — if token was already rotated, terminate all sessions
     if (session.refreshTokenRevokedAt !== null) {
@@ -104,15 +98,15 @@ export class TokenLifecycleService {
         session.userId,
         'TOKEN_REUSE',
       );
-      throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_SESSION_COMPROMISED, message: ErrorMessages[ErrorCodes.AUTH_SESSION_COMPROMISED] });
+      throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_SESSION_COMPROMISED, message: ErrorMessages[ErrorCode.AUTH_SESSION_COMPROMISED] });
     }
 
     if (session.expiresAt < new Date())
-      throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_SESSION_EXPIRED, message: ErrorMessages[ErrorCodes.AUTH_SESSION_EXPIRED] });
+      throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_SESSION_EXPIRED, message: ErrorMessages[ErrorCode.AUTH_SESSION_EXPIRED] });
 
     // Step 3a: Device binding — mobile tokens must match device
     if (session.deviceId !== null && session.deviceId !== deviceId) {
-      throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_DEVICE_MISMATCH, message: ErrorMessages[ErrorCodes.AUTH_DEVICE_MISMATCH] });
+      throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_DEVICE_MISMATCH, message: ErrorMessages[ErrorCode.AUTH_DEVICE_MISMATCH] });
     }
 
     // Step 3b: Refresh token expiry
@@ -120,7 +114,7 @@ export class TokenLifecycleService {
       session.refreshTokenExpiresAt &&
       session.refreshTokenExpiresAt < new Date()
     ) {
-      throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_REFRESH_TOKEN_EXPIRED, message: ErrorMessages[ErrorCodes.AUTH_REFRESH_TOKEN_EXPIRED] });
+      throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_REFRESH_TOKEN_EXPIRED, message: ErrorMessages[ErrorCode.AUTH_REFRESH_TOKEN_EXPIRED] });
     }
 
     // Step 4: Fetch permissions + user in parallel
@@ -139,27 +133,80 @@ export class TokenLifecycleService {
     const currentRoleHash = this.authUtils.hashRoles(userRoles);
     const accessTokenExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min
 
+    // Role change detection — compare current role hash against the hash stored
+    // at session creation time. A mismatch means an admin added/removed a role
+    // while this session was active. Logged as a warning; returned to caller so
+    // the client can refresh its permission snapshot without forcing re-login.
+    const rolesChanged =
+      session.roleHash !== null && currentRoleHash !== session.roleHash;
+    if (rolesChanged) {
+      this.logger.warn(
+        `Roles changed for user ${session.userId} during token refresh (session ${session.id}). Client will receive rolesChanged=true.`,
+      );
+    }
+
     // Step 5: Rotate session — BetterAuth issues a new opaque token
     const ctx = await this.authUtils.getBetterAuthContext();
     const createdSession = await ctx.internalAdapter.createSession(
       String(session.userId),
     );
     if (!createdSession)
-      throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_SESSION_ROTATION_FAILED, message: ErrorMessages[ErrorCodes.AUTH_SESSION_ROTATION_FAILED] });
+      throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_SESSION_ROTATION_FAILED, message: ErrorMessages[ErrorCode.AUTH_SESSION_ROTATION_FAILED] });
 
     const newSession = await this.sessionsRepository.findByToken(
       createdSession.token,
     );
     if (!newSession)
-      throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_SESSION_ROTATION_FAILED, message: ErrorMessages[ErrorCodes.AUTH_SESSION_ROTATION_FAILED] });
+      throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_SESSION_ROTATION_FAILED, message: ErrorMessages[ErrorCode.AUTH_SESSION_ROTATION_FAILED] });
 
-    // Step 6: Generate new refresh token
+    // Step 6: Generate new refresh token (in-memory only, not yet persisted)
     const { token: newRefreshToken, tokenHash: newRefreshTokenHash } =
       this.refreshTokenService.generateRefreshToken();
     const newRefreshTokenExpiresAt = new Date(
       Date.now() + 7 * 24 * 60 * 60 * 1000,
     ); // 7d
 
+    // Step 7: Atomically persist the new session + revoke the old refresh token.
+    // Re-validate activeStoreFk — user's role in that store may have been revoked since last login.
+    // IMPORTANT: JWT is signed AFTER this succeeds to prevent orphaned tokens.
+    const validatedActiveStoreFk =
+      session.activeStoreFk !== null &&
+      userRoles.some((r) => r.storeId === session.activeStoreFk)
+        ? session.activeStoreFk
+        : null;
+
+    const rotated = await this.sessionsRepository.rotateRefreshToken(
+      newSession.id,
+      {
+        roleHash: currentRoleHash,
+        deviceId: session.deviceId,
+        deviceName: session.deviceName,
+        deviceType: session.deviceType,
+        appVersion: session.appVersion,
+        activeStoreFk: validatedActiveStoreFk,
+        refreshTokenHash: newRefreshTokenHash,
+        refreshTokenExpiresAt: newRefreshTokenExpiresAt,
+        accessTokenExpiresAt,
+      },
+      session.id,
+    );
+
+    // CAS returned false — another refresh already rotated this token.
+    // This is a legitimate race (e.g. foreground + background refresh),
+    // NOT token theft. Reject so the caller re-reads the current token.
+    if (!rotated) {
+      this.logger.warn(
+        `Refresh race detected for session ${session.id} — another refresh already completed`,
+      );
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.AUTH_REFRESH_TOKEN_INVALID,
+        message: 'Refresh token was already rotated. Re-read the current token.',
+      });
+    }
+
+    // Step 8: Sign JWT only after session rotation is confirmed in DB.
+    // Signing before rotation risks an orphaned JWT that passes AuthGuard
+    // but has no live session backing it.
     const accessToken = this.jwtConfigService.signToken({
       sub: user.guuid,
       sid: newSession.guuid,
@@ -170,41 +217,9 @@ export class TokenLifecycleService {
       aud: JWT_AUDIENCE,
     });
 
-    // Step 7: Atomically update new session + revoke old refresh token.
-    // Uses tx directly (not via repository) so both writes share the same
-    // DB connection and are committed or rolled back together.
-    // Re-validate activeStoreFk — user's role in that store may have been revoked since last login
-    const validatedActiveStoreFk =
-      session.activeStoreFk !== null &&
-      userRoles.some((r) => r.storeId === session.activeStoreFk)
-        ? session.activeStoreFk
-        : null;
-
-    await this.db.transaction(async (tx) => {
-      await tx
-        .update(schema.userSession)
-        .set({
-          roleHash: currentRoleHash,
-          deviceId: session.deviceId,
-          deviceName: session.deviceName,
-          deviceType: session.deviceType,
-          appVersion: session.appVersion,
-          activeStoreFk: validatedActiveStoreFk,
-          refreshTokenHash: newRefreshTokenHash,
-          refreshTokenExpiresAt: newRefreshTokenExpiresAt,
-          accessTokenExpiresAt,
-        })
-        .where(eq(schema.userSession.id, newSession.id));
-
-      await tx
-        .update(schema.userSession)
-        .set({ refreshTokenRevokedAt: new Date(), revokedReason: 'ROTATION' })
-        .where(eq(schema.userSession.id, session.id));
-    });
-
     // Step 8: Fetch default store
     const storeOwnerRoleId = await this.authUtils.getCachedSystemRoleId(
-      SYSTEM_ROLE_STORE_OWNER,
+      SystemRoleCodes.STORE_OWNER,
     );
     const primaryStore = storeOwnerRoleId
       ? await this.rolesRepository.findPrimaryStoreForUser(
@@ -224,7 +239,7 @@ export class TokenLifecycleService {
             id: r.storeId as number,
             name: r.storeName as string,
           })),
-        activeStoreId: userRoles.find((r) => r.isPrimary && r.storeId)?.storeId ?? null,
+        activeStoreId: userRoles?.find((r) => r.isPrimary && r.storeId)?.storeId ?? null,
       },
       OFFLINE_JWT_EXPIRATION,
     );
@@ -240,6 +255,7 @@ export class TokenLifecycleService {
       refreshExpiresAt: newRefreshTokenExpiresAt.toISOString(),
       defaultStore: primaryStore ? { guuid: primaryStore.guuid } : null,
       offlineToken,
+      rolesChanged,
     };
   }
 
@@ -248,11 +264,11 @@ export class TokenLifecycleService {
       const payload = this.jwtConfigService.verifyToken(jwtToken);
 
       if (payload.aud !== JWT_AUDIENCE) {
-        throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_INVALID_JWT_AUDIENCE, message: ErrorMessages[ErrorCodes.AUTH_INVALID_JWT_AUDIENCE] });
+        throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_INVALID_JWT_AUDIENCE, message: ErrorMessages[ErrorCode.AUTH_INVALID_JWT_AUDIENCE] });
       }
 
       const user = await this.authUsersRepository.findByGuuid(payload.sub);
-      if (!user) throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_USER_NOT_FOUND, message: ErrorMessages[ErrorCodes.AUTH_USER_NOT_FOUND] });
+      if (!user) throw new UnauthorizedException({ errorCode: ErrorCode.USER_NOT_FOUND, message: ErrorMessages[ErrorCode.USER_NOT_FOUND] });
 
       const currentPermissions =
         await this.permissionsService.getUserPermissions(user.id);

@@ -47,12 +47,9 @@ export const roleEntityPermission = pgTable(
     deny: boolean('deny').notNull().default(false),
   },
   (table) => [
+    // Unique constraint implicitly creates a B-tree index on (roleFk, entityTypeFk) —
+    // no explicit index needed on the same columns.
     unique('role_entity_permission_unique_idx').on(
-      table.roleFk,
-      table.entityTypeFk,
-    ),
-    // Composite index for most common queries (role + entity lookup)
-    index('role_entity_permission_role_entity_idx').on(
       table.roleFk,
       table.entityTypeFk,
     ),

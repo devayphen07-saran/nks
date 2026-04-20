@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../../../../common/constants/error-codes.constants';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { Msg91Service } from '../providers/msg91.service';
@@ -113,15 +113,15 @@ export class OtpService {
     );
 
     if (!otpRecord) {
-      throw new BadRequestException({ errorCode: ErrorCodes.AUTH_OTP_NOT_FOUND, message: ErrorMessages[ErrorCodes.AUTH_OTP_NOT_FOUND] });
+      throw new BadRequestException({ errorCode: ErrorCode.OTP_NOT_FOUND, message: ErrorMessages[ErrorCode.OTP_NOT_FOUND] });
     }
 
     if (otpRecord.isUsed) {
-      throw new BadRequestException({ errorCode: ErrorCodes.AUTH_OTP_ALREADY_USED, message: ErrorMessages[ErrorCodes.AUTH_OTP_ALREADY_USED] });
+      throw new BadRequestException({ errorCode: ErrorCode.OTP_ALREADY_USED, message: ErrorMessages[ErrorCode.OTP_ALREADY_USED] });
     }
 
     if (otpRecord.expiresAt < new Date()) {
-      throw new BadRequestException({ errorCode: ErrorCodes.AUTH_OTP_EXPIRED, message: ErrorMessages[ErrorCodes.AUTH_OTP_EXPIRED] });
+      throw new BadRequestException({ errorCode: ErrorCode.OTP_EXPIRED, message: ErrorMessages[ErrorCode.OTP_EXPIRED] });
     }
 
     // 2. Verify with MSG91
@@ -183,11 +183,11 @@ export class OtpService {
     );
 
     if (!otpRecord) {
-      throw new BadRequestException({ errorCode: ErrorCodes.AUTH_OTP_NOT_FOUND, message: ErrorMessages[ErrorCodes.AUTH_OTP_NOT_FOUND] });
+      throw new BadRequestException({ errorCode: ErrorCode.OTP_NOT_FOUND, message: ErrorMessages[ErrorCode.OTP_NOT_FOUND] });
     }
 
     if (otpRecord.expiresAt < new Date()) {
-      throw new BadRequestException({ errorCode: ErrorCodes.AUTH_OTP_EXPIRED, message: ErrorMessages[ErrorCodes.AUTH_OTP_EXPIRED] });
+      throw new BadRequestException({ errorCode: ErrorCode.OTP_EXPIRED, message: ErrorMessages[ErrorCode.OTP_EXPIRED] });
     }
 
     if (otpRecord.attempts >= OTP_MAX_ATTEMPTS) {
@@ -201,7 +201,7 @@ export class OtpService {
     if (!isValid) {
       await this.otpRepository.incrementAttempts(otpRecord.id);
 
-      throw new BadRequestException({ errorCode: ErrorCodes.AUTH_INVALID_OTP, message: ErrorMessages[ErrorCodes.AUTH_INVALID_OTP] });
+      throw new BadRequestException({ errorCode: ErrorCode.OTP_INVALID, message: ErrorMessages[ErrorCode.OTP_INVALID] });
     }
 
     // Mark OTP as used
@@ -211,7 +211,7 @@ export class OtpService {
     const user = await this.authUsersRepository.findByEmail(email);
 
     if (!user) {
-      throw new BadRequestException({ errorCode: ErrorCodes.AUTH_USER_NOT_FOUND, message: ErrorMessages[ErrorCodes.AUTH_USER_NOT_FOUND] });
+      throw new BadRequestException({ errorCode: ErrorCode.USER_NOT_FOUND, message: ErrorMessages[ErrorCode.USER_NOT_FOUND] });
     }
 
     // Create or update email auth provider

@@ -134,9 +134,6 @@ export const STORE_CONSTANTS = {
   // Staff Roles (custom roles available for assignment to STAFF members)
   STAFF_ROLES: ['MANAGER', 'CASHIER', 'DELIVERY'] as const,
 
-  OWNER_ROLE: 'STORE_OWNER' as const,
-  ADMIN_ROLE: 'SUPER_ADMIN' as const,
-
   // Customer Role (non-authenticated access)
   CUSTOMER_ROLE: 'CUSTOMER' as const,
 

@@ -1,6 +1,11 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
+import { RolesRepository } from '../../../roles/repositories/roles.repository';
+import { AuthUtilsService } from '../shared/auth-utils.service';
+import { SystemRoleCodes } from '../../../../common/constants/system-role-codes.constant';
+import { ErrorCode } from '../../../../common/constants/error-codes.constants';
 import * as schema from '../../../../core/database/schema';
 
 /**
@@ -21,29 +26,43 @@ import * as schema from '../../../../core/database/schema';
 export class UserCreationService {
   private readonly logger = new Logger(UserCreationService.name);
 
-  constructor(private readonly authUsersRepository: AuthUsersRepository) {}
+  constructor(
+    private readonly authUsersRepository: AuthUsersRepository,
+    private readonly rolesRepository: RolesRepository,
+    private readonly authUtils: AuthUtilsService,
+  ) {}
 
   /**
    * Find or create user by phone number (after OTP verification confirms ownership).
    * Phone is guaranteed to be verified by MSG91 before calling this.
    *
+   * IMPORTANT: OTP users can only be created AFTER a SUPER_ADMIN exists.
+   * The first SUPER_ADMIN must be created via email/password registration.
+   * OTP users always get the USER role.
+   *
    * @param phone - Phone number (verified via OTP)
    * @returns User object with verified phone flag set
    */
-  async findOrCreateByPhone(phone: string): Promise<
-    typeof schema.users.$inferSelect
-  > {
-    // Find existing user
+  async findOrCreateByPhone(phone: string): Promise<typeof schema.users.$inferSelect> {
     let user = await this.authUsersRepository.findByPhone(phone);
 
     if (!user) {
-      // Create new user with phone number (first time login)
-      user = await this.authUsersRepository.create({
-        name: `User ${phone.slice(-4)}`,
-        phoneNumber: phone,
-        phoneNumberVerified: false,
-        iamUserId: crypto.randomUUID(),
-      });
+      // Block OTP registration if no SUPER_ADMIN exists yet.
+      // First admin must be created via email/password.
+      await this.ensureSuperAdminExists();
+
+      // Create user + USER role atomically.
+      // OTP users always get USER role (never SUPER_ADMIN).
+      user = await this.authUsersRepository.createUserWithInitialRole(
+        {
+          name: `User ${phone.slice(-4)}`,
+          phoneNumber: phone,
+          phoneNumberVerified: true,
+          iamUserId: crypto.randomUUID(),
+        },
+        null,
+        (tx, userId) => this.assignUserRole(tx, userId),
+      );
 
       if (!user) {
         throw new BadRequestException('Failed to create user');
@@ -56,9 +75,7 @@ export class UserCreationService {
     if (!user.phoneNumberVerified) {
       await this.authUsersRepository.verifyPhone(user.id);
       user = { ...user, phoneNumberVerified: true };
-      this.logger.log(
-        `Phone number verified for user ${user.id}: ${phone.slice(-4)}`,
-      );
+      this.logger.log(`Phone number verified for user ${user.id}: ${phone.slice(-4)}`);
     }
 
     return user;
@@ -75,17 +92,23 @@ export class UserCreationService {
     email: string,
     name?: string,
   ): Promise<typeof schema.users.$inferSelect> {
-    // Find existing user
     let user = await this.authUsersRepository.findByEmail(email);
 
     if (!user) {
-      // Create new user
-      user = await this.authUsersRepository.create({
-        name: name || email.split('@')[0],
-        email,
-        emailVerified: false,
-        iamUserId: crypto.randomUUID(),
-      });
+      // Block email OTP registration if no SUPER_ADMIN exists yet.
+      await this.ensureSuperAdminExists();
+
+      // Create user + USER role atomically.
+      user = await this.authUsersRepository.createUserWithInitialRole(
+        {
+          name: name || email.split('@')[0],
+          email,
+          emailVerified: true,
+          iamUserId: crypto.randomUUID(),
+        },
+        null,
+        (tx, userId) => this.assignUserRole(tx, userId),
+      );
 
       if (!user) {
         throw new BadRequestException('Failed to create user');
@@ -102,5 +125,35 @@ export class UserCreationService {
     }
 
     return user;
+  }
+
+  // ─── Private Helpers ───────────────────────────────────────────────────────
+
+  /**
+   * Guard: Reject registration if no SUPER_ADMIN exists yet.
+   * The first admin must be created via email/password registration.
+   */
+  private async ensureSuperAdminExists(): Promise<void> {
+    const superAdminRoleId = await this.authUtils.getCachedSystemRoleId(SystemRoleCodes.SUPER_ADMIN);
+    if (!superAdminRoleId) {
+      throw new Error('SUPER_ADMIN system role not found in DB — run db:seed before accepting registrations');
+    }
+    const exists = await this.rolesRepository.hasSuperAdmin(superAdminRoleId);
+    if (!exists) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.AUTH_NO_ADMIN_EXISTS,
+        message: 'No admin account exists. Create the first admin using email and password before using OTP login.',
+      });
+    }
+  }
+
+  /**
+   * Assign USER role within a transaction. OTP users never get SUPER_ADMIN.
+   */
+  private async assignUserRole(
+    tx: NodePgDatabase<typeof schema>,
+    userId: number,
+  ): Promise<void> {
+    await this.rolesRepository.assignRoleWithinTransaction(tx, userId, SystemRoleCodes.USER);
   }
 }

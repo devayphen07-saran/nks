@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../../../common/constants/error-codes.constants';
 
 /**
  * Pagination Validator
@@ -16,8 +16,8 @@ export class PaginationValidator {
   static validatePageSize(pageSize: number): void {
     if (!pageSize || pageSize < this.MIN_PAGE_SIZE || pageSize > this.MAX_PAGE_SIZE) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.USR_INVALID_PAGE_SIZE,
-        message: ErrorMessages[ErrorCodes.USR_INVALID_PAGE_SIZE],
+        errorCode: ErrorCode.USR_INVALID_PAGE_SIZE,
+        message: ErrorMessages[ErrorCode.USR_INVALID_PAGE_SIZE],
       });
     }
   }
@@ -27,9 +27,10 @@ export class PaginationValidator {
    */
   static validatePage(page: number): void {
     if (!page || page < this.MIN_PAGE) {
-      throw new BadRequestException(
-        `Page number must be at least ${this.MIN_PAGE}. Received: ${page}`,
-      );
+      throw new BadRequestException({
+        errorCode: ErrorCode.USR_INVALID_PAGE,
+        message: ErrorMessages[ErrorCode.USR_INVALID_PAGE],
+      });
     }
   }
 

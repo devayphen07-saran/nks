@@ -111,7 +111,7 @@ export const notifications = pgTable(
     // NOTE: status_fk must be matched against notification_status lookup table
     index('notifications_retry_idx')
       .on(table.statusFk, table.retryCount)
-      .where(sql`status_fk IN (SELECT id FROM notification_status WHERE code IN ('PENDING', 'FAILED'))`),
+      .where(sql`status_fk IN (1, 5)`), // 1 = PENDING, 5 = FAILED status IDs (seeded in notification_status)
 
     // Unique — one ticket per notification; used for O(1) receipt lookup.
     // PostgreSQL UNIQUE allows multiple NULL values — this is intentional:

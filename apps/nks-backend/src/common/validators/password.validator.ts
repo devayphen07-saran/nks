@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../constants/error-codes.constants';
 
 /**
  * PasswordValidator — centralised password strength validation.
@@ -18,8 +18,8 @@ export class PasswordValidator {
       !/[^\w\s]/.test(password)
     ) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.AUTH_WEAK_PASSWORD,
-        message: ErrorMessages[ErrorCodes.AUTH_WEAK_PASSWORD],
+        errorCode: ErrorCode.AUTH_PASSWORD_TOO_WEAK,
+        message: ErrorMessages[ErrorCode.AUTH_PASSWORD_TOO_WEAK],
       });
     }
   }

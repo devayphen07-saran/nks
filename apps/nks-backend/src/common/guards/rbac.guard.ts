@@ -6,36 +6,48 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { RoleEntityPermissionRepository } from '../../modules/roles/repositories/role-entity-permission.repository';
-import { PermissionChecker } from '../utils/permission-checker';
+import { PermissionEvaluatorService } from '../../modules/roles/permission-evaluator.service';
+import { StoresRepository } from '../../modules/stores/repositories/stores.repository';
+import { assertHasRoleInStore } from '../utils/permission-checker';
 import { ErrorCode } from '../constants/error-codes.constants';
-import { ROLES_KEY } from '../decorators/roles.decorator';
 import {
   REQUIRE_ENTITY_PERMISSION_KEY,
   EntityPermissionRequirement,
 } from '../decorators/require-entity-permission.decorator';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import type { AuthenticatedRequest } from './auth.guard';
 
 /**
- * RBACGuard — Role + entity permission access control.
+ * RBACGuard — Entity permission access control.
  *
- * Checks @Roles() and @RequireEntityPermission() on the same endpoint.
+ * Checks @RequireEntityPermission() on each endpoint.
  * SUPER_ADMIN bypasses all checks.
+ * Delegates permission evaluation to PermissionEvaluatorService.
  *
  * Usage:
  *   @UseGuards(AuthGuard, RBACGuard)
- *   @Roles('STORE_OWNER', 'MANAGER')
- *   @RequireEntityPermission('INVOICE', 'create')
+ *   @RequireEntityPermission({ entityCode: EntityCodes.INVOICE, action: 'create' })
+ *   async createInvoice() {}
+ *
+ * Or with the composite decorator:
+ *   @RequirePermission(EntityCodes.INVOICE, 'create')
  *   async createInvoice() {}
  */
 @Injectable()
 export class RBACGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly roleEntityPermissionRepository: RoleEntityPermissionRepository,
+    private readonly permissionEvaluator: PermissionEvaluatorService,
+    private readonly storesRepository: StoresRepository,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return true;
+
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user;
 
@@ -46,28 +58,9 @@ export class RBACGuard implements CanActivate {
       });
     }
 
-    // 1. Read roles + isSuperAdmin from request.user (embedded in session by AuthGuard — no DB query)
-    const roles = user.roles ?? [];
-    const isSuperAdmin = user.isSuperAdmin ?? false;
-    request.isSuperAdmin = isSuperAdmin;
+    // SUPER_ADMIN bypasses all entity permission checks
+    if (user.isSuperAdmin) return true;
 
-    // 2. SUPER_ADMIN bypasses everything
-    if (isSuperAdmin) return true;
-
-    // 3. Check required roles (@Roles decorator)
-    const requiredRoles = this.reflector.getAllAndOverride<string[]>(
-      ROLES_KEY,
-      [context.getHandler(), context.getClass()],
-    );
-
-    if (requiredRoles?.length) {
-      // Prevent privilege escalation: a user with STORE_OWNER in store A must not
-      // satisfy a @Roles check while their activeStoreId points to store B.
-      // A role with storeId=null is store-agnostic and always matches.
-      PermissionChecker.assertHasRequiredRoles(roles, requiredRoles, user.activeStoreId);
-    }
-
-    // 4. Check granular entity permission (@RequireEntityPermission decorator)
     const entityPermissionReq = this.reflector.getAllAndOverride<
       EntityPermissionRequirement | undefined
     >(REQUIRE_ENTITY_PERMISSION_KEY, [
@@ -75,58 +68,60 @@ export class RBACGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    if (entityPermissionReq) {
-      // Get storeId from authenticated user's active store (not from request parameters)
-      // This prevents users from accessing data from stores they don't have access to
-      const storeId = user.activeStoreId;
+    if (!entityPermissionReq) return true;
 
-      if (!storeId) {
-        throw new ForbiddenException({
-          errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
-          message: 'No active store selected',
-        });
-      }
+    const resolvedEntityCode = entityPermissionReq.entityCode;
+    if (!resolvedEntityCode) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+        message: 'Invalid permission configuration: entityCode is required',
+      });
+    }
 
-      // Verify the user actually holds a role in activeStoreId — guards against
-      // a session where activeStoreId was set to a store the user no longer belongs to
-      PermissionChecker.assertHasRoleInStore(roles, storeId);
+    // Get storeId from authenticated user's active store (not from request parameters).
+    // This prevents users from accessing data from stores they don't have access to.
+    const storeId = user.activeStoreId;
 
-      const hasEntityPermission =
-        await this.roleEntityPermissionRepository.getUserEntityPermissions(
-          user.userId,
-          storeId,
-        );
+    if (!storeId) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+        message: 'No active store selected',
+      });
+    }
 
-      const entityPerms = hasEntityPermission[entityPermissionReq.entityCode];
-      if (!entityPerms) {
-        throw new ForbiddenException({
-          errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
-          message: `No access to entity '${entityPermissionReq.entityCode}'`,
-        });
-      }
+    // Verify the store still exists and has not been soft-deleted.
+    // A user may hold a valid session with activeStoreId pointing to a store
+    // that was deleted after the session was created.
+    const store = await this.storesRepository.findActiveById(storeId);
+    if (!store) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+        message: 'Store not found',
+      });
+    }
+    if (store.deletedAt) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+        message: 'Store has been deleted',
+      });
+    }
 
-      // ───────────────────────────────────────────────────────────────
-      // PHASE 1: DENY-OVERRIDES-GRANT PATTERN
-      // ───────────────────────────────────────────────────────────────
-      // Check if explicitly DENIED (deny column in role_entity_permission)
-      // This must be checked BEFORE checking grant permissions
-      if (entityPerms.deny === true) {
-        throw new ForbiddenException({
-          errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
-          message: `Access explicitly DENIED to ${entityPermissionReq.action} '${entityPermissionReq.entityCode}' (deny override)`,
-        });
-      }
+    // Verify the user actually holds a role in activeStoreId — guards against
+    // a session where activeStoreId was set to a store the user no longer belongs to.
+    assertHasRoleInStore(user.roles ?? [], storeId);
 
-      const permissionKey =
-        `can${entityPermissionReq.action.charAt(0).toUpperCase()}${entityPermissionReq.action.slice(1)}` as keyof typeof entityPerms;
-      const hasAction = entityPerms[permissionKey];
+    const permitted = await this.permissionEvaluator.evaluate(
+      storeId,
+      resolvedEntityCode,
+      entityPermissionReq.action,
+      user.roles ?? [],
+    );
 
-      if (!hasAction) {
-        throw new ForbiddenException({
-          errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
-          message: `Insufficient permissions to ${entityPermissionReq.action} '${entityPermissionReq.entityCode}'`,
-        });
-      }
+    if (!permitted) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+        message: 'Insufficient permissions',
+      });
     }
 
     return true;

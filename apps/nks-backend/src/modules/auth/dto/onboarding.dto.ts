@@ -27,11 +27,11 @@ export class OnboardingCompleteDto extends createZodDto(OnboardingCompleteSchema
 
 export class OnboardingCompleteResponseDto {
   // True if email was provided and needs verification OTP
-  emailVerificationSent: boolean;
+  emailVerificationSent!: boolean;
   // True if phone was provided and needs verification OTP
-  phoneVerificationSent: boolean;
+  phoneVerificationSent!: boolean;
   // What the user should do next
-  nextStep: 'verifyEmail' | 'verifyPhone' | 'complete';
+  nextStep!: 'verifyEmail' | 'verifyPhone' | 'complete';
   // Message for user
-  message: string;
+  message!: string;
 }

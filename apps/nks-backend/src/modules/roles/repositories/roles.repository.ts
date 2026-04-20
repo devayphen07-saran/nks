@@ -1,13 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, inArray, and, ilike, or, sql, isNull } from 'drizzle-orm';
+import { eq, inArray, and, ilike, or, sql, isNull, gt } from 'drizzle-orm';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
 import * as schema from '../../../core/database/schema';
 import { userRoleMapping } from '../../../core/database/schema/auth/user-role-mapping';
 import type {
   UserRoleRow,
   UserRoleWithStoreRow,
-  AuthContextRow,
   RoutePermission,
   RouteWithPermissionsRow,
 } from '../dto/role-response.dto';
@@ -69,6 +68,7 @@ export class RolesRepository {
           eq(userRoleMapping.userFk, userId),
           eq(userRoleMapping.isActive, true),
           isNull(userRoleMapping.deletedAt),
+          or(isNull(userRoleMapping.expiresAt), gt(userRoleMapping.expiresAt, new Date())),
         ),
       );
   }
@@ -149,51 +149,6 @@ export class RolesRepository {
       .where(and(eq(schema.roles.code, code), eq(schema.roles.isActive, true)))
       .limit(1);
     return role ?? null;
-  }
-
-  /**
-   * Check if user is SUPER_ADMIN and return active store from session.
-   * Queries user_role_mapping instead of users.globalRole enum.
-   */
-  async getAuthContext(
-    userId: number,
-    sessionToken: string,
-  ): Promise<AuthContextRow> {
-    const superAdminRoleId = await this.findSystemRoleId('SUPER_ADMIN');
-
-    if (superAdminRoleId) {
-      const [saRow] = await this.db
-        .select({ id: userRoleMapping.id })
-        .from(userRoleMapping)
-        .where(
-          and(
-            eq(userRoleMapping.userFk, userId),
-            eq(userRoleMapping.roleFk, superAdminRoleId),
-            isNull(userRoleMapping.storeFk),
-            isNull(userRoleMapping.deletedAt),
-            eq(userRoleMapping.isActive, true),
-          ),
-        )
-        .limit(1);
-
-      if (saRow) return { isSuperAdmin: true, activeStoreFk: null };
-    }
-
-    const [sessionRow] = await this.db
-      .select({ activeStoreFk: schema.userSession.activeStoreFk })
-      .from(schema.userSession)
-      .where(
-        and(
-          eq(schema.userSession.token, sessionToken),
-          eq(schema.userSession.userId, userId),
-        ),
-      )
-      .limit(1);
-
-    return {
-      isSuperAdmin: false,
-      activeStoreFk: sessionRow?.activeStoreFk ?? null,
-    };
   }
 
   // ─── Role Assignment (user_role_mapping writes) ───────────────────────────
@@ -277,6 +232,7 @@ export class RolesRepository {
 
   /**
    * Get all active role assignments for a user in a specific store.
+   * Excludes expired temporary grants (expiresAt IS NULL OR expiresAt > NOW).
    */
   async getActiveRolesForStore(
     userFk: number,
@@ -299,33 +255,13 @@ export class RolesRepository {
           eq(userRoleMapping.storeFk, storeFk),
           isNull(userRoleMapping.deletedAt),
           eq(userRoleMapping.isActive, true),
+          // Exclude expired temporary grants
+          or(isNull(userRoleMapping.expiresAt), gt(userRoleMapping.expiresAt, new Date())),
         ),
       );
   }
 
   // ─── Role checks ──────────────────────────────────────────────────────────
-
-  /** Check if user has SUPER_ADMIN role. */
-  async isSuperAdmin(userId: number): Promise<boolean> {
-    const superAdminRoleId = await this.findSystemRoleId('SUPER_ADMIN');
-    if (!superAdminRoleId) return false;
-
-    const [row] = await this.db
-      .select({ id: userRoleMapping.id })
-      .from(userRoleMapping)
-      .where(
-        and(
-          eq(userRoleMapping.userFk, userId),
-          eq(userRoleMapping.roleFk, superAdminRoleId),
-          isNull(userRoleMapping.storeFk),
-          isNull(userRoleMapping.deletedAt),
-          eq(userRoleMapping.isActive, true),
-        ),
-      )
-      .limit(1);
-
-    return !!row;
-  }
 
   /** Check if user is the STORE_OWNER of a specific store (checked via store.owner_user_fk). */
   async isStoreOwner(userId: number, storeId: number): Promise<boolean> {
@@ -516,7 +452,11 @@ export class RolesRepository {
       .where(and(eq(schema.roles.code, roleCode), isNull(schema.roles.storeFk)))
       .limit(1);
 
-    if (!roleRecord) return;
+    if (!roleRecord) {
+      throw new InternalServerErrorException(
+        `assignRoleWithinTransaction: system role '${roleCode}' not found in database`,
+      );
+    }
 
     await tx.insert(userRoleMapping).values({
       userFk: userId,
@@ -524,6 +464,26 @@ export class RolesRepository {
       isPrimary: true,
       isActive: true,
     });
+  }
+
+  /**
+   * Check if any active SUPER_ADMIN user exists (non-transactional read).
+   * Used to gate OTP registration — OTP users cannot register until an admin exists.
+   */
+  async hasSuperAdmin(superAdminRoleId: number): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: userRoleMapping.id })
+      .from(userRoleMapping)
+      .where(
+        and(
+          eq(userRoleMapping.roleFk, superAdminRoleId),
+          isNull(userRoleMapping.storeFk),
+          isNull(userRoleMapping.deletedAt),
+          eq(userRoleMapping.isActive, true),
+        ),
+      )
+      .limit(1);
+    return !!row;
   }
 
   /**

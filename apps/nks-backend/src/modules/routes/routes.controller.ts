@@ -5,7 +5,8 @@ import { RouteMapper } from './mapper/route.mapper';
 import { ApiResponse } from '../../common/utils/api-response';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RBACGuard } from '../../common/guards/rbac.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { RequireEntityPermission } from '../../common/decorators/require-entity-permission.decorator';
+import { EntityCodes, PermissionActions } from '../../common/constants/entity-codes.constants';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import {
   UserRoutesResponseDto,
@@ -22,13 +23,13 @@ export class RoutesController {
 
   /**
    * GET /routes/admin
-   * Returns admin routes for the authenticated SUPER_ADMIN.
-   * RBACGuard enforces the SUPER_ADMIN role before this method runs.
+   * Returns admin routes for the authenticated user.
+   * RBACGuard enforces entity permission before this method runs.
    * Identity comes from the session — no path param needed.
    */
   @Get('admin')
-  @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'Get admin routes (SUPER_ADMIN)' })
+  @RequireEntityPermission({ entityCode: EntityCodes.ROUTE, action: PermissionActions.VIEW })
+  @ApiOperation({ summary: 'Get admin routes' })
   async getAdminRoutes(
     @CurrentUser() caller: SessionUser,
   ): Promise<ApiResponse<UserRoutesResponseDto>> {
@@ -43,6 +44,7 @@ export class RoutesController {
    * Available to any authenticated user who has a role in that store.
    */
   @Get('store/:storeGuuid')
+  @RequireEntityPermission({ entityCode: EntityCodes.ROUTE, action: PermissionActions.VIEW })
   @ApiOperation({ summary: 'Get store routes for authenticated user' })
   async getStoreRoutes(
     @Param('storeGuuid') storeGuuid: string,

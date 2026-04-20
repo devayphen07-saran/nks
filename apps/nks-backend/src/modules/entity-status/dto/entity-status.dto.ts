@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 // ─── Request ──────────────────────────────────────────────────────────────────
 
-const AssignStatusSchema = z.object({
+export const AssignStatusSchema = z.object({
   statusGuuid: z.string().uuid(),
 });
 

@@ -19,6 +19,7 @@ import { AuthUtilsService } from '../shared/auth-utils.service';
 import { JtiBlocklistService } from '../token/jti-blocklist.service';
 import { RevokedDevicesRepository } from '../../repositories/revoked-devices.repository';
 import type { SessionUserRole } from '../../interfaces/session-user.interface';
+import type { UserRoleEntry } from '../../mappers/auth-mapper';
 import type {
   UserSession,
   NewUserSession,
@@ -287,7 +288,7 @@ export class SessionService {
     expiresAt: Date;
     sessionGuuid: string;
     jwtToken?: string;
-    userRoles: SessionUserRole[];
+    userRoles: UserRoleEntry[];
     userEmail: string;
     permissions: Awaited<ReturnType<PermissionsService['getUserPermissions']>>;
   }> {

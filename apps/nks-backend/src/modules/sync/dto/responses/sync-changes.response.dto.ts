@@ -7,8 +7,17 @@ export interface SyncChange {
   updatedAt: number;
 }
 
+/**
+ * Compound cursor: "timestampMs:rowId"
+ *
+ * A plain ms-epoch cursor loses rows when two rows share the same updated_at
+ * and straddle a page boundary. The compound cursor breaks ties by row id,
+ * guaranteeing every row is delivered exactly once.
+ *
+ * Format: "0:0" (initial), "1713500000000:42" (timestamp ms : last row id)
+ */
 export interface ChangesResponse {
-  nextCursor: number;
+  nextCursor: string;
   hasMore: boolean;
   changes: SyncChange[];
 }

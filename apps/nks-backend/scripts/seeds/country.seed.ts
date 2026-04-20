@@ -1,5 +1,5 @@
-import type { Db } from './types';
-import { country } from '../../src/core/database/schema';
+import type { Db } from './types.js';
+import { country } from '../../src/core/database/schema/index.js';
 
 /**
  * Single-Country Configuration: India Only

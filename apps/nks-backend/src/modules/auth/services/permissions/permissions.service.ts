@@ -4,6 +4,7 @@ import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { RolesRepository } from '../../../roles/repositories/roles.repository';
 import { PermissionsChangelogRepository } from '../../repositories/permissions-changelog.repository';
 import { AuthMapper, type UserRoleEntry, type PermissionContext } from '../../mappers/auth-mapper';
+import { SystemRoleCodes } from '../../../../common/constants/system-role-codes.constant';
 
 export interface PermissionsSnapshot {
   [entityCode: string]: {
@@ -51,7 +52,7 @@ export class PermissionsService {
 
     return {
       roles,
-      isSuperAdmin: roleCodes.includes('SUPER_ADMIN'),
+      isSuperAdmin: roleCodes.includes(SystemRoleCodes.SUPER_ADMIN),
       activeStoreId,
       permissionCodes: this.extractPermissionCodes(userRoles),
     };

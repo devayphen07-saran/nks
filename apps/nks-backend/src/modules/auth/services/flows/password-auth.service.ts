@@ -19,7 +19,8 @@ import { RolesRepository } from '../../../roles/repositories/roles.repository';
 import { AuditService, AuditEventType } from '../../../audit/audit.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
 import { fireAndForgetWithRetry } from '../../../../common/utils/retry';
-import { ErrorCodes, ErrorMessages } from '../../../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../../../../common/constants/error-codes.constants';
+import { SystemRoleCodes } from '../../../../common/constants/system-role-codes.constant';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
@@ -59,8 +60,9 @@ export class PasswordAuthService {
   async login(dto: LoginDto, deviceInfo?: DeviceInfo): Promise<AuthResponseEnvelope> {
     const auditMeta = { deviceId: deviceInfo?.deviceId, deviceType: deviceInfo?.deviceType };
 
+    dto.email = SanitizerValidator.sanitizeEmail(dto.email);
     const user = await this.authUsersRepository.findByEmail(dto.email);
-    if (!user) throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_INVALID_CREDENTIALS, message: ErrorMessages[ErrorCodes.AUTH_INVALID_CREDENTIALS] });
+    if (!user) throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_INVALID_CREDENTIALS, message: ErrorMessages[ErrorCode.AUTH_INVALID_CREDENTIALS] });
 
     if (user.isBlocked) {
       fireAndForgetWithRetry(() => this.auditService.log({
@@ -74,7 +76,7 @@ export class PasswordAuthService {
         resourceType: 'user',
         resourceId: user.id,
       }));
-      throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_ACCOUNT_BLOCKED, message: ErrorMessages[ErrorCodes.AUTH_ACCOUNT_BLOCKED] });
+      throw new UnauthorizedException({ errorCode: ErrorCode.USER_BLOCKED, message: ErrorMessages[ErrorCode.USER_BLOCKED] });
     }
 
     if (user.accountLockedUntil) {
@@ -91,7 +93,7 @@ export class PasswordAuthService {
           resourceType: 'user',
           resourceId: user.id,
         }));
-        throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_ACCOUNT_LOCKED, message: ErrorMessages[ErrorCodes.AUTH_ACCOUNT_LOCKED] });
+        throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_ACCOUNT_LOCKED, message: ErrorMessages[ErrorCode.AUTH_ACCOUNT_LOCKED] });
       } else {
         // Lock expired — auto-unlock
         const unlocked = await this.authUsersRepository.update(user.id, {
@@ -99,7 +101,7 @@ export class PasswordAuthService {
           failedLoginAttempts: 0,
         });
         if (!unlocked)
-          throw new InternalServerErrorException({ errorCode: ErrorCodes.GEN_INTERNAL_ERROR, message: ErrorMessages[ErrorCodes.GEN_INTERNAL_ERROR] });
+          throw new InternalServerErrorException({ errorCode: ErrorCode.INTERNAL_SERVER_ERROR, message: ErrorMessages[ErrorCode.INTERNAL_SERVER_ERROR] });
         this.logger.log(`Auto-unlocked account for user ${user.id}`);
       }
     }
@@ -108,7 +110,7 @@ export class PasswordAuthService {
       user.id,
       'email',
     );
-    if (!provider?.password) throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_INVALID_CREDENTIALS, message: ErrorMessages[ErrorCodes.AUTH_INVALID_CREDENTIALS] });
+    if (!provider?.password) throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_INVALID_CREDENTIALS, message: ErrorMessages[ErrorCode.AUTH_INVALID_CREDENTIALS] });
 
     const isValid = await this.passwordService.compare(dto.password, provider.password);
     if (!isValid) {
@@ -121,7 +123,7 @@ export class PasswordAuthService {
           : {}),
       });
       if (!updated)
-        throw new InternalServerErrorException({ errorCode: ErrorCodes.GEN_INTERNAL_ERROR, message: ErrorMessages[ErrorCodes.GEN_INTERNAL_ERROR] });
+        throw new InternalServerErrorException({ errorCode: ErrorCode.INTERNAL_SERVER_ERROR, message: ErrorMessages[ErrorCode.INTERNAL_SERVER_ERROR] });
       fireAndForgetWithRetry(() => this.auditService.log({
         eventType: AuditEventType.LOGIN,
         userId: user.id,
@@ -133,7 +135,7 @@ export class PasswordAuthService {
         resourceType: 'user',
         resourceId: user.id,
       }));
-      throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_INVALID_CREDENTIALS, message: ErrorMessages[ErrorCodes.AUTH_INVALID_CREDENTIALS] });
+      throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_INVALID_CREDENTIALS, message: ErrorMessages[ErrorCode.AUTH_INVALID_CREDENTIALS] });
     }
 
     const loginReset = await this.authUsersRepository.update(user.id, {
@@ -141,7 +143,7 @@ export class PasswordAuthService {
       accountLockedUntil: null,
       lastActiveAt: new Date(),
     });
-    if (!loginReset) throw new InternalServerErrorException({ errorCode: ErrorCodes.GEN_INTERNAL_ERROR, message: ErrorMessages[ErrorCodes.GEN_INTERNAL_ERROR] });
+    if (!loginReset) throw new InternalServerErrorException({ errorCode: ErrorCode.INTERNAL_SERVER_ERROR, message: ErrorMessages[ErrorCode.INTERNAL_SERVER_ERROR] });
     await this.authUsersRepository.recordLogin(user.id);
 
     fireAndForgetWithRetry(() => this.auditService.log({
@@ -164,7 +166,7 @@ export class PasswordAuthService {
     dto.name = SanitizerValidator.sanitizeName(dto.name);
 
     const existingUser = await this.authUsersRepository.findByEmail(dto.email);
-    if (existingUser) throw new ConflictException({ errorCode: ErrorCodes.AUTH_EMAIL_ALREADY_IN_USE, message: ErrorMessages[ErrorCodes.AUTH_EMAIL_ALREADY_IN_USE] });
+    if (existingUser) throw new ConflictException({ errorCode: ErrorCode.USER_EMAIL_ALREADY_EXISTS, message: ErrorMessages[ErrorCode.USER_EMAIL_ALREADY_EXISTS] });
 
     const passwordHash = await this.passwordService.hash(dto.password);
     const iamUserId = crypto.randomUUID();
@@ -177,13 +179,13 @@ export class PasswordAuthService {
       },
     );
 
-    if (!user) throw new ConflictException({ errorCode: ErrorCodes.AUTH_EMAIL_ALREADY_IN_USE, message: ErrorMessages[ErrorCodes.AUTH_EMAIL_ALREADY_IN_USE] });
+    if (!user) throw new ConflictException({ errorCode: ErrorCode.USER_EMAIL_ALREADY_EXISTS, message: ErrorMessages[ErrorCode.USER_EMAIL_ALREADY_EXISTS] });
 
     return this.authFlowOrchestrator.executeAuthFlow(user, deviceInfo);
   }
 
   async isSuperAdminSeeded(): Promise<boolean> {
-    const superAdminRoleId = await this.authUtils.getCachedSystemRoleId('SUPER_ADMIN');
+    const superAdminRoleId = await this.authUtils.getCachedSystemRoleId(SystemRoleCodes.SUPER_ADMIN);
     if (!superAdminRoleId) return false;
     return this.rolesRepository.hasUserWithRole(superAdminRoleId);
   }
@@ -195,7 +197,7 @@ export class PasswordAuthService {
     tx: NodePgDatabase<typeof schema>,
   ): Promise<void> {
     try {
-      const superAdminRoleId = await this.authUtils.getCachedSystemRoleId('SUPER_ADMIN');
+      const superAdminRoleId = await this.authUtils.getCachedSystemRoleId(SystemRoleCodes.SUPER_ADMIN);
       if (!superAdminRoleId) {
         this.logger.warn('SUPER_ADMIN system role not found in DB');
         return;

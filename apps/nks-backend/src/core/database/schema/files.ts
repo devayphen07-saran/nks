@@ -1,11 +1,13 @@
 import {
   bigint,
   boolean,
+  check,
   index,
   pgTable,
   timestamp,
   varchar,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { users } from './auth/users';
 
 export const files = pgTable(

@@ -10,13 +10,26 @@ import { AuthSessionModule } from './services/session/session.module';
 import { AuthTokenModule } from './services/token/token.module';
 import { AuthFlowsModule } from './services/flows/flows.module';
 import { RolesModule } from '../roles/roles.module';
-import { RoutesModule } from '../routes/routes.module';
 
+/**
+ * AuthModule — global authentication module.
+ *
+ * Dependency direction (MUST stay acyclic):
+ *   AuthModule → RolesModule → StoresModule
+ *
+ * CONSTRAINT: RolesModule and StoresModule must NEVER import AuthModule.
+ * AuthPermissionsModule and AuthTokenModule import RolesModule directly for
+ * their own providers; this top-level import makes RolesRepository available
+ * to any auth submodule that does not redeclare it.
+ *
+ * RoutesModule is intentionally NOT imported here — no auth service depends
+ * on RoutesService or RoutesRepository. Routes access is handled by the
+ * routes module independently in AppModule.
+ */
 @Global()
 @Module({
   imports: [
     RolesModule,
-    RoutesModule,
     AuthCoreModule,
     SecurityModule,
     ProvidersModule,

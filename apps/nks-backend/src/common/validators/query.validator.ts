@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../core/constants/error-codes';
+import { ErrorCode } from '../constants/error-codes.constants';
 import { PaginationValidator } from '../../modules/users/validators/pagination.validator';
 
 /**
@@ -32,7 +32,7 @@ export class QueryValidator {
 
     if (!allowedFields.includes(field)) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.GEN_INVALID_INPUT,
+        errorCode: ErrorCode.VALIDATION_ERROR,
         message: `Sort field must be one of: ${allowedFields.join(', ')}`,
       });
     }
@@ -47,7 +47,7 @@ export class QueryValidator {
     const normalized = direction.toUpperCase();
     if (!this.ALLOWED_SORT_DIRECTIONS.includes(normalized)) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.GEN_INVALID_INPUT,
+        errorCode: ErrorCode.VALIDATION_ERROR,
         message: `Sort direction must be ASC or DESC, got: ${direction}`,
       });
     }
@@ -68,13 +68,13 @@ export class QueryValidator {
 
       if (start > end) {
         throw new BadRequestException({
-          errorCode: ErrorCodes.GEN_INVALID_REQUEST,
+          errorCode: ErrorCode.BAD_REQUEST,
           message: 'Start date must be before end date',
         });
       }
     } catch (err) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.GEN_INVALID_REQUEST,
+        errorCode: ErrorCode.BAD_REQUEST,
         message: 'Invalid date format',
       });
     }
@@ -92,7 +92,7 @@ export class QueryValidator {
 
     if (query.length < minLength || query.length > maxLength) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.GEN_INVALID_INPUT,
+        errorCode: ErrorCode.VALIDATION_ERROR,
         message: `Search query must be between ${minLength} and ${maxLength} characters`,
       });
     }
@@ -110,7 +110,7 @@ export class QueryValidator {
 
     if (!allowedValues.includes(value)) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.GEN_INVALID_INPUT,
+        errorCode: ErrorCode.VALIDATION_ERROR,
         message: `${field} must be one of: ${allowedValues.join(', ')}`,
       });
     }
@@ -129,21 +129,21 @@ export class QueryValidator {
 
     if (typeof value !== 'number') {
       throw new BadRequestException({
-        errorCode: ErrorCodes.GEN_INVALID_INPUT,
+        errorCode: ErrorCode.VALIDATION_ERROR,
         message: `${field} must be a number`,
       });
     }
 
     if (min !== undefined && value < min) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.GEN_INVALID_INPUT,
+        errorCode: ErrorCode.VALIDATION_ERROR,
         message: `${field} must be at least ${min}`,
       });
     }
 
     if (max !== undefined && value > max) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.GEN_INVALID_INPUT,
+        errorCode: ErrorCode.VALIDATION_ERROR,
         message: `${field} must be at most ${max}`,
       });
     }

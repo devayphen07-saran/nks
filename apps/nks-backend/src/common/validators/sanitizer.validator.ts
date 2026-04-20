@@ -1,6 +1,3 @@
-import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../core/constants/error-codes';
-
 /**
  * Sanitizer Validator
  * Cleans and sanitizes user input to prevent injection attacks

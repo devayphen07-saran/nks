@@ -2,10 +2,9 @@ import {
   Injectable,
   UnauthorizedException,
   ForbiddenException,
-  NotFoundException,
   Logger,
 } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../../../../common/constants/error-codes.constants';
 import { SessionsRepository } from '../../repositories/sessions.repository';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { SessionService } from './session.service';
@@ -40,19 +39,41 @@ export class AuthService {
     await this.sessionService.invalidateSessionByToken(token);
   }
 
+  /**
+   * Check session revocation status for mobile reconnection.
+   *
+   * Distinguishes three states:
+   * - **active**: session exists and is not revoked (may be expired — refresh handles that)
+   * - **revoked**: session was actively terminated (logout, theft detection, admin action)
+   * - **wipe**: user account is blocked — device data must be wiped
+   *
+   * An expired-but-not-revoked session returns `{active: true, revoked: false}` so the
+   * mobile reconnection handler proceeds to the token refresh step instead of wiping.
+   */
   async checkSessionStatus(
     token: string,
   ): Promise<{ active: boolean; revoked: boolean; wipe: boolean }> {
     const session = await this.sessionsRepository.findByToken(token);
 
+    // Unknown token — treat as revoked (could be already cleaned up)
     if (!session) return { active: false, revoked: true, wipe: false };
-    if (session.expiresAt < new Date())
-      return { active: false, revoked: true, wipe: false };
 
+    // Actively revoked (logout, theft detection, admin termination)
+    if (session.refreshTokenRevokedAt) {
+      return { active: false, revoked: true, wipe: false };
+    }
+
+    // Check if user is blocked → wipe device
     const user = await this.authUsersRepository.findById(
       Number(session.userId),
     );
-    return { active: true, revoked: false, wipe: user?.isBlocked ?? false };
+    if (user?.isBlocked) {
+      return { active: false, revoked: true, wipe: true };
+    }
+
+    // Session exists and is not revoked. Even if session.expiresAt has passed,
+    // that's handled by the refresh-token step — not a revocation event.
+    return { active: true, revoked: false, wipe: false };
   }
 
   async invalidateUserSessions(
@@ -83,7 +104,7 @@ export class AuthService {
   ): Promise<{ token: string; expiresAt: Date }> {
     const session = await this.sessionsRepository.findByToken(oldToken);
     if (!session || session.userId !== userId) {
-      throw new UnauthorizedException({ errorCode: ErrorCodes.AUTH_INVALID_SESSION_TOKEN, message: ErrorMessages[ErrorCodes.AUTH_INVALID_SESSION_TOKEN] });
+      throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_INVALID_SESSION_TOKEN, message: ErrorMessages[ErrorCode.AUTH_INVALID_SESSION_TOKEN] });
     }
     await this.sessionsRepository.delete(session.id);
     return this.sessionService.createSessionForUser(userId, deviceInfo);
@@ -113,14 +134,21 @@ export class AuthService {
     isSuperAdmin: boolean = false,
   ): Promise<void> {
     if (requestingUserId && userId !== requestingUserId && !isSuperAdmin) {
-      throw new ForbiddenException({ errorCode: ErrorCodes.AUTH_FORBIDDEN_SESSION, message: ErrorMessages[ErrorCodes.AUTH_FORBIDDEN_SESSION] });
+      throw new ForbiddenException({ errorCode: ErrorCode.AUTH_FORBIDDEN_SESSION, message: ErrorMessages[ErrorCode.AUTH_FORBIDDEN_SESSION] });
     }
     const session = await this.sessionsRepository.findByIdAndUserId(
       sessionId,
       userId,
     );
-    if (!session)
-      throw new NotFoundException({ errorCode: ErrorCodes.AUTH_SESSION_NOT_FOUND, message: ErrorMessages[ErrorCodes.AUTH_SESSION_NOT_FOUND] });
+    if (!session) {
+      // Session not found — either already terminated by a concurrent request
+      // from another device, or it never existed for this user. Treat as a
+      // no-op so the client gets the same 204 either way (idempotent delete).
+      this.logger.debug(
+        `Session ${sessionId} not found for user ${userId} — already terminated`,
+      );
+      return;
+    }
     await this.sessionsRepository.delete(sessionId);
     this.logger.log(`Session ${sessionId} terminated for user ${userId}`);
   }

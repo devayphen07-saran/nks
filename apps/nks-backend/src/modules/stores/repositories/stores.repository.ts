@@ -27,6 +27,19 @@ export class StoresRepository {
    * - Staff stores (storeUserMapping.userFk = userId, active membership)
    * Includes isOwner flag to distinguish the two.
    */
+  /**
+   * Returns the store's id and deletedAt for existence + soft-delete checks.
+   * Used by RBACGuard to reject requests targeting deleted stores.
+   */
+  async findActiveById(id: number): Promise<{ id: number; deletedAt: Date | null } | null> {
+    const [row] = await this.db
+      .select({ id: schema.store.id, deletedAt: schema.store.deletedAt })
+      .from(schema.store)
+      .where(eq(schema.store.id, id))
+      .limit(1);
+    return row ?? null;
+  }
+
   async getStoresForUser(userId: number): Promise<UserStoreRow[]> {
     // 1. Owned stores
     const ownedStores = await this.db

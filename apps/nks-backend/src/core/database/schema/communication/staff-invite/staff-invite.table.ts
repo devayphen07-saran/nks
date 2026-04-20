@@ -68,7 +68,7 @@ export const staffInvite = pgTable(
     // NOTE: status_fk must be matched against staff_invite_status lookup table
     uniqueIndex('staff_invite_pending_unique_idx')
       .on(table.storeFk, table.inviteeEmail)
-      .where(sql`status_fk = (SELECT id FROM staff_invite_status WHERE code = 'PENDING') AND deleted_at IS NULL`),
+      .where(sql`status_fk = 1 AND deleted_at IS NULL`), // 1 = PENDING status ID (seeded first in staff_invite_status)
   ],
 );
 

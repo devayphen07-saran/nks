@@ -428,6 +428,55 @@ export class SessionsRepository {
   }
 
   /**
+   * Atomically update the new session's refresh-token data and mark the old
+   * session's refresh token as rotated — both writes in a single transaction.
+   * This replaces the direct this.db.transaction() call in TokenLifecycleService.
+   */
+  /**
+   * Atomically rotate the refresh token using Compare-And-Swap.
+   *
+   * The old session is only marked as rotated if `refresh_token_revoked_at IS NULL`
+   * (CAS guard). This prevents the race where two concurrent refreshes both see the
+   * old token as valid and both rotate — the second rotation would otherwise cause a
+   * false theft-detection on the next attempt.
+   *
+   * Returns true if rotation succeeded, false if the old session was already rotated
+   * (another refresh won the race — caller should re-read the token, not treat as theft).
+   */
+  async rotateRefreshToken(
+    newSessionId: number,
+    updates: UpdateUserSession,
+    oldSessionId: number,
+  ): Promise<boolean> {
+    return await this.db.transaction(async (tx) => {
+      // CAS: only revoke the old session if it hasn't been revoked yet
+      const result = await tx
+        .update(schema.userSession)
+        .set({ refreshTokenRevokedAt: new Date(), revokedReason: 'ROTATION' })
+        .where(
+          and(
+            eq(schema.userSession.id, oldSessionId),
+            sql`${schema.userSession.refreshTokenRevokedAt} IS NULL`,
+          ),
+        )
+        .returning({ id: schema.userSession.id });
+
+      if (result.length === 0) {
+        // Another refresh already rotated this token — not theft, just a race
+        return false;
+      }
+
+      // CAS succeeded — update the new session with fresh token data
+      await tx
+        .update(schema.userSession)
+        .set(updates)
+        .where(eq(schema.userSession.id, newSessionId));
+
+      return true;
+    });
+  }
+
+  /**
    * Delete old revoked sessions (older than 30 days).
    * Prevents database bloat from session rotation while preserving recent audit trail.
    * Returns count of deleted sessions.

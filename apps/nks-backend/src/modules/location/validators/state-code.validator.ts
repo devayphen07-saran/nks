@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../../../common/constants/error-codes.constants';
 
 /**
  * State Code Validator
@@ -14,8 +14,8 @@ export class StateCodeValidator {
   static validate(stateCode: string): void {
     if (!stateCode || typeof stateCode !== 'string' || !this.STATE_CODE_REGEX.test(stateCode.trim())) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.LOC_INVALID_STATE_CODE,
-        message: ErrorMessages[ErrorCodes.LOC_INVALID_STATE_CODE],
+        errorCode: ErrorCode.LOC_INVALID_STATE_CODE,
+        message: ErrorMessages[ErrorCode.LOC_INVALID_STATE_CODE],
       });
     }
   }

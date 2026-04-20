@@ -105,7 +105,7 @@ async function bootstrap() {
   app.useGlobalPipes(new ZodValidationPipe());
 
   // ─── Global Filters ───────────────────────────────────────────────────────
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  app.useGlobalFilters(new GlobalExceptionFilter(configService));
 
   // ─── Global Interceptors ──────────────────────────────────────────────────
   app.useGlobalInterceptors(

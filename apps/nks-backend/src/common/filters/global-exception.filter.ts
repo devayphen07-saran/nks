@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import { ZodValidationException } from 'nestjs-zod';
 import { ZodError } from 'zod';
@@ -38,6 +39,11 @@ import { PG_UNIQUE_VIOLATION, PG_FOREIGN_KEY_VIOLATION } from '../constants/pg-e
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
+  private readonly isProduction: boolean;
+
+  constructor(configService: ConfigService) {
+    this.isProduction = configService.get<string>('NODE_ENV') === 'production';
+  }
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
@@ -126,9 +132,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         status,
         body: {
           status: 'error',
-          statusCode: status,
           code,
-          errorCode: errorCode ?? null,
           message,
           errors: (res as Record<string, unknown>)?.errors ?? null,
           details: (res as Record<string, unknown>)?.details ?? null,
@@ -149,11 +153,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     // 5. Fallback — unknown / unexpected error
-    const message =
-      process.env.NODE_ENV === 'production'
-        ? 'An unexpected error occurred'
-        : (((exception as Record<string, unknown>)?.message as string) ??
-          'An unexpected error occurred');
+    const message = this.isProduction
+      ? 'An unexpected error occurred'
+      : (((exception as Record<string, unknown>)?.message as string) ??
+        'An unexpected error occurred');
 
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,
@@ -229,14 +232,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         code,
         message,
         errors: null,
-        meta:
-          process.env.NODE_ENV !== 'production'
-            ? {
-                dbCode: exception.code,
-                detail: exception.detail,
-                table: exception.table,
-              }
-            : null,
+        meta: !this.isProduction
+          ? {
+              dbCode: exception.code,
+              detail: exception.detail,
+              table: exception.table,
+            }
+          : null,
         timestamp,
         path,
       },

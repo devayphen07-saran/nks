@@ -1,4 +1,4 @@
-import { roles, routes, roleRouteMapping } from '../../src/core/database/schema';
+import { roles, routes, roleRouteMapping } from '../../src/core/database/schema/index.js';
 import { eq, and, isNull, inArray } from 'drizzle-orm';
 import type { Db } from './types.js';
 
@@ -6,7 +6,6 @@ import type { Db } from './types.js';
  * Seeds role_route_mapping:
  *  - SUPER_ADMIN → all admin routes (routeScope = 'admin') — full CRUD access
  *  - STORE_OWNER → all store routes (routeScope = 'store') — full CRUD access
- *  - STAFF → all store routes (routeScope = 'store') — canView only
  *
  * System roles are stored in the roles table with storeFk = NULL and is_editable = false.
  * They are created by the migration (014_system_roles_as_records.sql) before seeding.
@@ -20,7 +19,7 @@ export async function seedRoleRouteMappings(db: Db) {
     .from(roles)
     .where(
       and(
-        inArray(roles.code, ['SUPER_ADMIN', 'STORE_OWNER', 'STAFF']),
+        inArray(roles.code, ['SUPER_ADMIN', 'STORE_OWNER']),
         isNull(roles.storeFk),
       ),
     );
@@ -34,7 +33,6 @@ export async function seedRoleRouteMappings(db: Db) {
   const roleMap = new Map(systemRoles.map((r) => [r.code, r.id]));
   const superAdminId = roleMap.get('SUPER_ADMIN');
   const storeOwnerId = roleMap.get('STORE_OWNER');
-  const staffId = roleMap.get('STAFF');
 
   const mappings: typeof roleRouteMapping.$inferInsert[] = [];
 
@@ -96,22 +94,6 @@ export async function seedRoleRouteMappings(db: Db) {
         canEdit: true,
         canDelete: true,
         canExport: true,
-      })),
-    );
-  }
-
-  // 6. STAFF → all store routes (canView only)
-  if (staffId) {
-    mappings.push(
-      ...storeRoutes.map((r) => ({
-        roleFk: staffId,
-        routeFk: r.id,
-        allow: true,
-        canView: true,
-        canCreate: false,
-        canEdit: false,
-        canDelete: false,
-        canExport: false,
       })),
     );
   }

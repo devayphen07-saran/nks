@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../../../common/constants/error-codes.constants';
 
 /**
  * User Preferences Validator
@@ -44,8 +44,8 @@ export class UserPreferencesValidator {
   static validateTheme(theme: string): void {
     if (!theme || !this.VALID_THEMES.includes(theme.toLowerCase())) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.USR_INVALID_THEME,
-        message: ErrorMessages[ErrorCodes.USR_INVALID_THEME],
+        errorCode: ErrorCode.USR_INVALID_THEME,
+        message: ErrorMessages[ErrorCode.USR_INVALID_THEME],
       });
     }
   }
@@ -56,8 +56,8 @@ export class UserPreferencesValidator {
   static validateTimezone(timezone: string): void {
     if (!timezone || !this.VALID_TIMEZONES.has(timezone)) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.USR_INVALID_TIMEZONE,
-        message: ErrorMessages[ErrorCodes.USR_INVALID_TIMEZONE],
+        errorCode: ErrorCode.USR_INVALID_TIMEZONE,
+        message: ErrorMessages[ErrorCode.USR_INVALID_TIMEZONE],
       });
     }
   }

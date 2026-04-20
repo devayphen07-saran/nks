@@ -64,8 +64,7 @@ export class CsrfMiddleware implements NestMiddleware {
       if (!this.isExemptRoute(req.path)) {
         const providedToken =
           req.headers['x-csrf-token'] ||
-          req.body?.csrfToken ||
-          req.query.csrfToken;
+          req.body?.csrfToken;
 
         const tokenMatch =
           typeof providedToken === 'string' &&

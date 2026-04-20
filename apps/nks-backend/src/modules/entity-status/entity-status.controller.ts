@@ -16,7 +16,8 @@ import type { EntityStatusListResponse } from './dto/entity-status.dto';
 import { ApiResponse } from '../../common/utils/api-response';
 import { AuthGuard } from '../../common/guards/auth.guard';
 import { RBACGuard } from '../../common/guards/rbac.guard';
-import { Roles } from '../../common/decorators/roles.decorator';
+import { RequireEntityPermission } from '../../common/decorators/require-entity-permission.decorator';
+import { PermissionActions } from '../../common/constants/entity-codes.constants';
 import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Entity Status')
@@ -45,13 +46,17 @@ export class EntityStatusController {
 
   /**
    * POST /entity-status/:entityCode
-   * SUPER_ADMIN — assign a status to an entity.
+   * Assign a status to an entity.
    */
   @Post(':entityCode')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({
+    routeParam: 'entityCode',
+    action: PermissionActions.EDIT,
+  })
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Assign a status to an entity (SUPER_ADMIN)' })
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Assign a status to an entity' })
   async assignStatus(
     @Param('entityCode') entityCode: string,
     @Body() dto: AssignStatusDto,
@@ -62,14 +67,17 @@ export class EntityStatusController {
 
   /**
    * DELETE /entity-status/:entityCode/:statusGuuid
-   * SUPER_ADMIN — remove a status from an entity.
+   * Remove a status from an entity.
    */
   @Delete(':entityCode/:statusGuuid')
   @UseGuards(AuthGuard, RBACGuard)
-  @Roles('SUPER_ADMIN')
+  @RequireEntityPermission({
+    routeParam: 'entityCode',
+    action: PermissionActions.EDIT,
+  })
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Remove a status from an entity (SUPER_ADMIN)' })
+  @ApiOperation({ summary: 'Remove a status from an entity' })
   async removeStatus(
     @Param('entityCode') entityCode: string,
     @Param('statusGuuid') statusGuuid: string,

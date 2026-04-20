@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { eq, inArray, and, ilike, or, sql, isNull } from 'drizzle-orm';
+import { SystemRoleCodes } from '../../common/constants/system-role-codes.constant';
 import { InjectDb } from '../../core/database/inject-db.decorator';
 import * as schema from '../../core/database/schema';
 import { userRoleMapping } from '../../core/database/schema/auth/user-role-mapping';
@@ -179,7 +180,7 @@ export class RolesRepository {
     userId: number,
     sessionToken: string,
   ): Promise<AuthContextRow> {
-    const superAdminRoleId = await this.findSystemRoleId('SUPER_ADMIN');
+    const superAdminRoleId = await this.findSystemRoleId(SystemRoleCodes.SUPER_ADMIN);
 
     if (superAdminRoleId) {
       const [saRow] = await this.db
@@ -316,7 +317,7 @@ export class RolesRepository {
 
   /** Check if user has SUPER_ADMIN role. */
   async isSuperAdmin(userId: number): Promise<boolean> {
-    const superAdminRoleId = await this.findSystemRoleId('SUPER_ADMIN');
+    const superAdminRoleId = await this.findSystemRoleId(SystemRoleCodes.SUPER_ADMIN);
     if (!superAdminRoleId) return false;
 
     const [row] = await this.db

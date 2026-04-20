@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { ErrorCodes, ErrorMessages } from '../../../core/constants/error-codes';
+import { ErrorCode, ErrorMessages } from '../../../common/constants/error-codes.constants';
 
 /**
  * Entity Code Validator
@@ -14,8 +14,8 @@ export class EntityCodeValidator {
   static validate(entityCode: string): void {
     if (!entityCode || typeof entityCode !== 'string' || !this.ENTITY_CODE_REGEX.test(entityCode.trim())) {
       throw new BadRequestException({
-        errorCode: ErrorCodes.ENT_INVALID_CODE_FORMAT,
-        message: ErrorMessages[ErrorCodes.ENT_INVALID_CODE_FORMAT],
+        errorCode: ErrorCode.ENT_INVALID_CODE_FORMAT,
+        message: ErrorMessages[ErrorCode.ENT_INVALID_CODE_FORMAT],
       });
     }
   }

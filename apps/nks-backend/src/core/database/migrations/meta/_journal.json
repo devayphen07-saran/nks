@@ -15,6 +15,13 @@
       "when": 1775739045957,
       "tag": "0001_clear_daimon_hellstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776710179934,
+      "tag": "0002_schema_audit_fixes_v2",
+      "breakpoints": true
     }
   ]
 }

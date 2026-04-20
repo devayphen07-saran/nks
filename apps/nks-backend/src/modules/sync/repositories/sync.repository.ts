@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, sql, gt, and, isNull, or } from 'drizzle-orm';
+import { eq, sql, and, isNull, or } from 'drizzle-orm';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
 import * as schema from '../../../core/database/schema';
 
@@ -90,13 +90,14 @@ export class SyncRepository {
   }
 
   /**
-   * Fetch routes changed since a given timestamp.
-   * Queries routes WHERE updated_at > cursorMs (millisecond epoch).
+   * Fetch routes changed since a given compound cursor (timestamp + id).
+   * Uses (updated_at, id) > (cursorTs, cursorId) to break ties when two rows
+   * share the same updated_at, preventing silent data loss at page boundaries.
    * Fetches limit+1 rows to determine hasMore flag.
-   * Returns full rows including deleted_at field (null = active, non-null = soft-deleted).
    */
   async getRouteChanges(
     cursorMs: number,
+    cursorId: number,
     limit: number,
   ): Promise<RouteChangeRow[]> {
     const cursorDate = new Date(cursorMs);
@@ -120,18 +121,20 @@ export class SyncRepository {
         deletedAt: schema.routes.deletedAt,
       })
       .from(schema.routes)
-      .where(gt(schema.routes.updatedAt, cursorDate))
-      .orderBy(schema.routes.updatedAt)
+      .where(
+        sql`(${schema.routes.updatedAt}, ${schema.routes.id}) > (${cursorDate}, ${cursorId})`,
+      )
+      .orderBy(schema.routes.updatedAt, schema.routes.id)
       .limit(limit + 1);
 
     return rows as RouteChangeRow[];
   }
 
   /**
-   * Fetch states changed since a given timestamp.
-   * Returns full rows including deleted_at for soft-delete propagation.
+   * Fetch states changed since a given compound cursor (timestamp + id).
+   * Uses (updated_at, id) > (cursorTs, cursorId) to break ties.
    */
-  async getStateChanges(cursorMs: number, limit: number): Promise<StateChangeRow[]> {
+  async getStateChanges(cursorMs: number, cursorId: number, limit: number): Promise<StateChangeRow[]> {
     const cursorDate = new Date(cursorMs);
     const rows = await this.db
       .select({
@@ -146,17 +149,19 @@ export class SyncRepository {
         deletedAt: schema.state.deletedAt,
       })
       .from(schema.state)
-      .where(gt(schema.state.updatedAt, cursorDate))
-      .orderBy(schema.state.updatedAt)
+      .where(
+        sql`(${schema.state.updatedAt}, ${schema.state.id}) > (${cursorDate}, ${cursorId})`,
+      )
+      .orderBy(schema.state.updatedAt, schema.state.id)
       .limit(limit + 1);
     return rows as StateChangeRow[];
   }
 
   /**
-   * Fetch districts changed since a given timestamp.
-   * Returns full rows including deleted_at for soft-delete propagation.
+   * Fetch districts changed since a given compound cursor (timestamp + id).
+   * Uses (updated_at, id) > (cursorTs, cursorId) to break ties.
    */
-  async getDistrictChanges(cursorMs: number, limit: number): Promise<DistrictChangeRow[]> {
+  async getDistrictChanges(cursorMs: number, cursorId: number, limit: number): Promise<DistrictChangeRow[]> {
     const cursorDate = new Date(cursorMs);
     const rows = await this.db
       .select({
@@ -171,34 +176,39 @@ export class SyncRepository {
         deletedAt: schema.district.deletedAt,
       })
       .from(schema.district)
-      .where(gt(schema.district.updatedAt, cursorDate))
-      .orderBy(schema.district.updatedAt)
+      .where(
+        sql`(${schema.district.updatedAt}, ${schema.district.id}) > (${cursorDate}, ${cursorId})`,
+      )
+      .orderBy(schema.district.updatedAt, schema.district.id)
       .limit(limit + 1);
     return rows as DistrictChangeRow[];
   }
 
   /**
-   * Check if an idempotency key has already been processed.
+   * Look up a previously processed idempotency key.
+   * Returns the stored request hash if found, null if not seen before.
+   * Used to detect both duplicates and payload-mismatch replays.
    */
-  async isAlreadyProcessed(key: string, tx?: Db): Promise<boolean> {
+  async findProcessedEntry(key: string, tx?: Db): Promise<string | null> {
     const conn = tx ?? this.db;
     const rows = await conn
-      .select({ key: schema.idempotencyLog.key })
+      .select({ requestHash: schema.idempotencyLog.requestHash })
       .from(schema.idempotencyLog)
       .where(eq(schema.idempotencyLog.key, key))
       .limit(1);
 
-    return rows.length > 0;
+    return rows.length > 0 ? rows[0].requestHash : null;
   }
 
   /**
-   * Record an idempotency key as processed.
+   * Record an idempotency key as processed with its request hash.
    * Must be called inside the same transaction as the mutation.
    */
-  async logIdempotencyKey(key: string, tx?: Db): Promise<void> {
+  async logIdempotencyKey(key: string, requestHash: string, tx?: Db): Promise<void> {
     const conn = tx ?? this.db;
     await conn.insert(schema.idempotencyLog).values({
       key,
+      requestHash,
       processedAt: new Date(),
     });
   }
@@ -211,15 +221,13 @@ export class SyncRepository {
   }
 
   /**
-   * Delete idempotency entries older than the specified number of days.
+   * Delete expired idempotency entries.
+   * Uses the indexed `expires_at` column for efficient cleanup.
    * Called by a scheduled cleanup job.
    */
-  async deleteOldIdempotencyEntries(olderThanDays: number = 7): Promise<void> {
-    const cutoff = new Date(
-      Date.now() - olderThanDays * 24 * 60 * 60 * 1000,
-    );
+  async deleteExpiredIdempotencyEntries(): Promise<void> {
     await this.db.execute(
-      sql`DELETE FROM idempotency_log WHERE processed_at < ${cutoff}`,
+      sql`DELETE FROM idempotency_log WHERE expires_at < NOW()`,
     );
   }
 }

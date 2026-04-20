@@ -1,4 +1,4 @@
-import { routes } from '../../src/core/database/schema';
+import { routes } from '../../src/core/database/schema/index.js';
 import type { Db } from './types.js';
 
 // ─── Store-level routes (STORE_OWNER, MANAGER, CASHIER, STAFF) ──────────────
