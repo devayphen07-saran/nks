@@ -37,13 +37,14 @@ export interface AuthSessionResponse {
   expiresAt: string;
   refreshToken: string;
   refreshExpiresAt: string;
-  defaultStore: { guuid: string } | null;
+  defaultStore: { id: number; guuid: string } | null;
   jwtToken?: string;
 }
 
 export interface UserRoleEntry {
   roleCode:
     | "SUPER_ADMIN"
+    | "USER"
     | "STORE_OWNER"
     | "STAFF"
     | "MANAGER"
@@ -106,7 +107,6 @@ export interface ApiMetadataResponse {
 export interface AuthResponse {
   user: AuthUserResponse;
   session: AuthSessionResponse;
-  access: AuthAccessResponse;
   offlineToken?: string;
   /** HMAC-SHA256 of the offline session payload, signed server-side. */
   offlineSessionSignature?: string;

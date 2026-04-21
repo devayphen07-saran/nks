@@ -76,11 +76,6 @@ export function validateAuthResponse(
     }
   }
 
-  // Validate roles array
-  if (!Array.isArray(authResponse.access?.roles)) {
-    errors.push("access.roles is not an array");
-  }
-
   // Validate size (warn if too large for storage)
   const json = JSON.stringify(authResponse);
   if (json.length > 2500) {
@@ -180,6 +175,15 @@ export function validateFieldMatch(
 }
 
 /**
+ * Decode a Base64URL-encoded string without Node.js Buffer.
+ * Compatible with React Native's global atob().
+ */
+function base64UrlDecode(str: string): string {
+  const padded = str.replace(/-/g, '+').replace(/_/g, '/');
+  return atob(padded);
+}
+
+/**
  * Decode JWT header without verification (just parse structure).
  */
 export function decodeJwtHeader(token: string): { kid?: string; alg?: string } | null {
@@ -187,9 +191,7 @@ export function decodeJwtHeader(token: string): { kid?: string; alg?: string } |
     const parts = token.split(".");
     if (parts.length !== 3) return null;
 
-    const header = JSON.parse(
-      Buffer.from(parts[0], "base64url").toString("utf-8")
-    );
+    const header = JSON.parse(base64UrlDecode(parts[0]));
     return header;
   } catch {
     return null;
@@ -204,9 +206,7 @@ export function decodeJwtClaims(token: string): any | null {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
 
-    const claims = JSON.parse(
-      Buffer.from(parts[1], "base64url").toString("utf-8")
-    );
+    const claims = JSON.parse(base64UrlDecode(parts[1]));
     return claims;
   } catch {
     return null;

@@ -5,6 +5,10 @@ import { tokenManager } from "@nks/mobile-utils";
 import { authReducer } from "./auth-slice";
 import { setUnauthenticated } from "./auth-slice";
 import { refreshSession } from "./refresh-session";
+import { JWTManager } from '../lib/auth/jwt-manager';
+import { offlineSession } from '../lib/auth/offline-session';
+import { resetRefreshState } from '../lib/auth/jwt-refresh';
+import { resetInterceptorState } from '../lib/auth/axios-interceptors';
 import { createLogger } from '../lib/utils/logger';
 
 const log = createLogger("Auth");
@@ -39,9 +43,14 @@ tokenManager.onExpired(async () => {
   _logoutInProgress = true;
 
   try {
-    // Clear SecureStore synchronously to token manager perspective
-    // Actual async I/O happens but we await it here
+    // Clear all auth state — we skip the backend signOut call because the
+    // session is already expired/invalid (that's why onExpired fired).
+    tokenManager.clear();
     await tokenManager.clearSession();
+    await offlineSession.clear();
+    await JWTManager.clear();
+    resetRefreshState();
+    resetInterceptorState();
   } catch (error) {
     log.error("Failed to clear session on expiry:", error);
     // Continue anyway — dispatch logout to clear Redux state
