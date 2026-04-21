@@ -1,7 +1,7 @@
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../core/database/schema';
 import type { DbTransaction } from '../../core/database/transaction.service';
-import type { SessionUser } from '../../modules/auth/interfaces/session-user.interface';
+import type { SessionUser } from '../../contexts/iam/auth/interfaces/session-user.interface';
 import type { Request } from 'express';
 
 // ── Database ────────────────────────────────────────────────────────────────

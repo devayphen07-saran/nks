@@ -66,7 +66,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     // Add Retry-After header for rate limiting (429 responses)
     if (status === HttpStatus.TOO_MANY_REQUESTS) {
-      response.setHeader('Retry-After', '60'); // Retry after 60 seconds
+      const retryAfter = (body.meta as { retryAfter?: number })?.retryAfter ?? 60;
+      response.setHeader('Retry-After', String(retryAfter));
     }
 
     response.status(status).json(body);
@@ -136,7 +137,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           message,
           errors: (res as Record<string, unknown>)?.errors ?? null,
           details: (res as Record<string, unknown>)?.details ?? null,
-          meta: null,
+          meta: (res as Record<string, unknown>)?.meta ?? null,
           timestamp,
           path,
         },
@@ -196,12 +197,14 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
   // ─────────────────────────────────────────────────────────────────────────
   private isDbError(exception: unknown): boolean {
+    if (typeof exception !== 'object' || exception === null) return false;
+    const err = exception as Record<string, unknown>;
+    // PostgreSQL errors have a 5-char SQLSTATE code and a severity field
+    // (ERROR, FATAL, PANIC, WARNING, etc.) which is unique to pg errors.
     return (
-      typeof exception === 'object' &&
-      exception !== null &&
-      'code' in exception &&
-      typeof (exception as Record<string, unknown>).code === 'string' &&
-      ((exception as Record<string, unknown>).code as string).startsWith('2') // PostgreSQL error codes start with '2x'
+      typeof err.code === 'string' &&
+      err.code.length === 5 &&
+      typeof err.severity === 'string'
     );
   }
 

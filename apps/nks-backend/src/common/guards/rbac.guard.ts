@@ -6,8 +6,8 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { PermissionEvaluatorService } from '../../modules/roles/permission-evaluator.service';
-import { StoresRepository } from '../../modules/stores/repositories/stores.repository';
+import { PermissionEvaluatorService } from '../../contexts/iam/roles/permission-evaluator.service';
+import { StoresRepository } from '../../contexts/organization/stores/repositories/stores.repository';
 import { assertHasRoleInStore } from '../utils/permission-checker';
 import { ErrorCode } from '../constants/error-codes.constants';
 import {

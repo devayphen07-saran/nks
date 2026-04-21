@@ -113,8 +113,15 @@ export class RateLimitingGuard implements CanActivate {
       this.logger.warn(
         `Rate limit exceeded: ${clientIp} → ${request.method} ${request.path} (${hits}/${maxRequests} hits)`,
       );
+      // Pass retryAfter (in seconds) so the global exception filter can set
+      // the Retry-After header dynamically instead of hardcoding 60s.
+      const retryAfterSec = Math.ceil(this.WINDOW_MS / 1000);
       throw new HttpException(
-        'Too Many Requests',
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          message: 'Too Many Requests',
+          meta: { retryAfter: retryAfterSec },
+        },
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }

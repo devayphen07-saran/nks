@@ -3,7 +3,7 @@
  *
  * Structure:
  * {
- *   status:     'success' | 'error' | 'warning',
+ *   status:     'success' | 'error',
  *   statusCode: number,              // HTTP status code (200, 400, 404, 500, etc.)
  *   message:    string,              // Human-readable message
  *   errorCode:  string | null,       // Machine-readable error code (e.g., AUTH-VAL-001)
@@ -21,8 +21,8 @@ export interface PaginationMeta {
   totalPages: number;
 }
 
-export class ApiResponse<T = any> {
-  status: 'success' | 'error' | 'warning';
+export class ApiResponse<T = unknown> {
+  status: 'success' | 'error';
   statusCode: number;
   message: string;
   errorCode: string | null;
@@ -32,7 +32,7 @@ export class ApiResponse<T = any> {
   timestamp: string;
 
   constructor(
-    status: 'success' | 'error' | 'warning',
+    status: 'success' | 'error',
     statusCode: number,
     message: string,
     data: T | null = null,
@@ -58,17 +58,29 @@ export class ApiResponse<T = any> {
   }
 
   /**
+   * Created response (201 Created)
+   */
+  static created<T>(data: T, message = 'Created'): ApiResponse<T> {
+    return new ApiResponse('success', 201, message, data);
+  }
+
+  /**
    * Paginated success response (200 OK)
    */
-  static paginated<T>(
-    items: T[],
-    page: number,
-    limit: number,
-    total: number,
-    message = 'Success',
-  ): ApiResponse<{ items: T[] }> {
-    const totalPages = Math.ceil(total / limit);
-    const meta = { page, limit, total, totalPages };
+  static paginated<T>(opts: {
+    items: T[];
+    page: number;
+    pageSize: number;
+    total: number;
+    message?: string;
+  }): ApiResponse<{ items: T[] }> {
+    const { items, page, pageSize, total, message = 'Success' } = opts;
+    const meta = {
+      page,
+      limit: pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    };
     return new ApiResponse(
       'success',
       200,

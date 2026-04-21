@@ -1,7 +1,9 @@
-import { Global, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { MailService } from './mail.service';
 
-@Global()
+/**
+ * MailModule — email delivery (NOT global — consumers must import explicitly).
+ */
 @Module({
   providers: [MailService],
   exports: [MailService],

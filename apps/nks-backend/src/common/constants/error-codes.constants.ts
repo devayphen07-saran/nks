@@ -104,6 +104,11 @@ export const ErrorCode = {
   ROUTE_ALREADY_EXISTS: 'ROUTE_ALREADY_EXISTS',
   USER_ROLE_MAPPING_NOT_FOUND: 'USER_ROLE_MAPPING_NOT_FOUND',
   USER_ROLE_ALREADY_ASSIGNED: 'USER_ROLE_ALREADY_ASSIGNED',
+  ROLE_STORE_MISMATCH: 'ROLE_STORE_MISMATCH',
+  ROLE_CODE_RESERVED: 'ROLE_CODE_RESERVED',
+  ROLE_PERMISSION_NON_DELEGATABLE: 'ROLE_PERMISSION_NON_DELEGATABLE',
+  ROLE_PERMISSION_NO_ACCESS: 'ROLE_PERMISSION_NO_ACCESS',
+  ROLE_PERMISSION_CEILING_EXCEEDED: 'ROLE_PERMISSION_CEILING_EXCEEDED',
   ROLE_PERMISSION_NOT_FOUND: 'ROLE_PERMISSION_NOT_FOUND',
   ROLE_PERMISSION_ALREADY_EXISTS: 'ROLE_PERMISSION_ALREADY_EXISTS',
 
@@ -166,6 +171,10 @@ export const ErrorCode = {
   COD_INVALID_VALUE: 'COD_INVALID_VALUE',
   COD_CODE_NOT_FOUND: 'COD_CODE_NOT_FOUND',
   COD_VALUE_NOT_FOUND: 'COD_VALUE_NOT_FOUND',
+  COD_CATEGORY_NOT_FOUND: 'COD_CATEGORY_NOT_FOUND',
+  COD_SYSTEM_IMMUTABLE: 'COD_SYSTEM_IMMUTABLE',
+  COD_STORE_OWNERSHIP_REQUIRED: 'COD_STORE_OWNERSHIP_REQUIRED',
+  COD_UPDATE_FAILED: 'COD_UPDATE_FAILED',
 
   // ─── File / Upload ──────────────────────────────────────────────────────────
   FILE_UPLOAD_FAILED: 'FILE_UPLOAD_FAILED',
@@ -180,6 +189,41 @@ export const ErrorCode = {
   COMMODITY_CODE_NOT_FOUND: 'COMMODITY_CODE_NOT_FOUND',
   TAX_REGISTRATION_NOT_FOUND: 'TAX_REGISTRATION_NOT_FOUND',
   TAX_REGISTRATION_EXISTS: 'TAX_REGISTRATION_EXISTS',
+
+  // ─── Audit ─────────────────────────────────────────────────────────────
+  AUDIT_INVALID_EVENT_TYPE: 'AUDIT_INVALID_EVENT_TYPE',
+  AUDIT_LOG_NOT_FOUND: 'AUDIT_LOG_NOT_FOUND',
+
+  // ─── Routes ────────────────────────────────────────────────────────────
+  ROUTE_STORE_ACCESS_DENIED: 'ROUTE_STORE_ACCESS_DENIED',
+
+  // ─── OTP (extended) ───────────────────────────────────────────────────
+
+  // ─── Sync ──────────────────────────────────────────────────────────────
+  SYNC_STORE_ACCESS_DENIED: 'SYNC_STORE_ACCESS_DENIED',
+  SYNC_SESSION_EXPIRED: 'SYNC_SESSION_EXPIRED',
+  SYNC_SESSION_INVALID_SIGNATURE: 'SYNC_SESSION_INVALID_SIGNATURE',
+  SYNC_DEVICE_REVOKED: 'SYNC_DEVICE_REVOKED',
+  SYNC_TOKEN_INVALID: 'SYNC_TOKEN_INVALID',
+  SYNC_TOKEN_ROLE_MISMATCH: 'SYNC_TOKEN_ROLE_MISMATCH',
+  SYNC_TOKEN_STORE_MISMATCH: 'SYNC_TOKEN_STORE_MISMATCH',
+
+  // ─── Status (admin) ───────────────────────────────────────────────────
+  STA_CODE_ALREADY_EXISTS: 'STA_CODE_ALREADY_EXISTS',
+  STA_SYSTEM_IMMUTABLE: 'STA_SYSTEM_IMMUTABLE',
+
+  // ─── Lookups ───────────────────────────────────────────────────────────
+  LOOKUP_NOT_FOUND: 'LOOKUP_NOT_FOUND',
+  LOOKUP_CATEGORY_NOT_FOUND: 'LOOKUP_CATEGORY_NOT_FOUND',
+  LOOKUP_VALUE_NOT_FOUND: 'LOOKUP_VALUE_NOT_FOUND',
+  LOOKUP_UPDATE_FAILED: 'LOOKUP_UPDATE_FAILED',
+
+  // ─── Entity Status ─────────────────────────────────────────────────────
+  ENT_STATUS_ALREADY_ASSIGNED: 'ENT_STATUS_ALREADY_ASSIGNED',
+  ENT_STATUS_NOT_ASSIGNED: 'ENT_STATUS_NOT_ASSIGNED',
+
+  // ─── User Creation ─────────────────────────────────────────────────────
+  USER_CREATION_FAILED: 'USER_CREATION_FAILED',
 
   // ─── Database ───────────────────────────────────────────────────────────────
   DB_QUERY_FAILED: 'DB_QUERY_FAILED',
@@ -275,6 +319,50 @@ export const ErrorMessages: Record<string, string> = {
   [ErrorCode.COD_INVALID_VALUE]: 'Invalid code value.',
   [ErrorCode.COD_CODE_NOT_FOUND]: 'Code not found.',
   [ErrorCode.COD_VALUE_NOT_FOUND]: 'Code value not found.',
+  [ErrorCode.COD_CATEGORY_NOT_FOUND]: 'Code category not found.',
+  [ErrorCode.COD_SYSTEM_IMMUTABLE]: 'System values cannot be modified.',
+  [ErrorCode.COD_STORE_OWNERSHIP_REQUIRED]: 'You do not own this store.',
+  [ErrorCode.COD_UPDATE_FAILED]: 'Failed to update code value.',
+
+  // Audit
+  [ErrorCode.AUDIT_INVALID_EVENT_TYPE]: 'Invalid audit event type.',
+  [ErrorCode.AUDIT_LOG_NOT_FOUND]: 'Audit log not found.',
+
+  // Routes
+  [ErrorCode.ROUTE_STORE_ACCESS_DENIED]: 'You do not have access to this store.',
+
+  // Roles (extended)
+  [ErrorCode.ROLE_STORE_MISMATCH]: 'You can only manage roles for your active store.',
+  [ErrorCode.ROLE_CODE_RESERVED]: 'This role code is reserved for system roles.',
+  [ErrorCode.ROLE_PERMISSION_NON_DELEGATABLE]: 'This permission cannot be assigned to custom roles.',
+  [ErrorCode.ROLE_PERMISSION_NO_ACCESS]: 'You do not have access to this entity and cannot assign its permissions.',
+  [ErrorCode.ROLE_PERMISSION_CEILING_EXCEEDED]: 'You cannot grant a permission you do not hold.',
+
+  // Sync
+  [ErrorCode.SYNC_STORE_ACCESS_DENIED]: 'You do not have access to this store.',
+  [ErrorCode.SYNC_SESSION_EXPIRED]: 'Offline session has expired.',
+  [ErrorCode.SYNC_SESSION_INVALID_SIGNATURE]: 'Offline session signature is invalid.',
+  [ErrorCode.SYNC_DEVICE_REVOKED]: 'Device access has been revoked.',
+  [ErrorCode.SYNC_TOKEN_INVALID]: 'Offline token is invalid or expired.',
+  [ErrorCode.SYNC_TOKEN_ROLE_MISMATCH]: 'Offline token roles do not match session.',
+  [ErrorCode.SYNC_TOKEN_STORE_MISMATCH]: 'Offline token store does not match session.',
+
+  // Status (admin extended)
+  [ErrorCode.STA_CODE_ALREADY_EXISTS]: 'Status code already exists.',
+  [ErrorCode.STA_SYSTEM_IMMUTABLE]: 'System statuses cannot be modified.',
+
+  // Lookups
+  [ErrorCode.LOOKUP_NOT_FOUND]: 'Lookup not found.',
+  [ErrorCode.LOOKUP_CATEGORY_NOT_FOUND]: 'Lookup category not found.',
+  [ErrorCode.LOOKUP_VALUE_NOT_FOUND]: 'Lookup value not found.',
+  [ErrorCode.LOOKUP_UPDATE_FAILED]: 'Failed to update lookup value.',
+
+  // Entity Status (extended)
+  [ErrorCode.ENT_STATUS_ALREADY_ASSIGNED]: 'Status is already assigned to this entity.',
+  [ErrorCode.ENT_STATUS_NOT_ASSIGNED]: 'Status is not assigned to this entity.',
+
+  // User Creation
+  [ErrorCode.USER_CREATION_FAILED]: 'Failed to create user.',
 };
 
 /**

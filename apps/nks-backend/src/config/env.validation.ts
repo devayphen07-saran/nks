@@ -43,6 +43,12 @@ const envSchema = z.object({
     .string()
     .min(32, 'OFFLINE_SESSION_HMAC_SECRET must be at least 32 characters'),
 
+  // ── Security ──────────────────────────────────────────────────────────────
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
+  COOKIE_SIGNING_SECRET: z
+    .string()
+    .min(32, 'COOKIE_SIGNING_SECRET must be at least 32 characters'),
+
   // ── CORS ──────────────────────────────────────────────────────────────────
   ALLOWED_ORIGINS: z.string().optional(),
 

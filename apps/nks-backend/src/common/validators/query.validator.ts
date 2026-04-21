@@ -1,25 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
 import { ErrorCode } from '../constants/error-codes.constants';
-import { PaginationValidator } from '../../modules/users/validators/pagination.validator';
 
 /**
  * Query Validator
- * Validates pagination, sorting, filtering, and search parameters
+ * Validates sorting, filtering, search, and date-range parameters.
+ * Pagination (page/pageSize) is enforced by Zod DTOs — no runtime check needed here.
  */
 export class QueryValidator {
   private static readonly ALLOWED_SORT_DIRECTIONS = ['ASC', 'DESC'];
-
-  /**
-   * Validate pagination parameters (page and limit)
-   */
-  static validatePagination(page?: number, limit?: number): void {
-    if (page !== undefined && page !== null) {
-      PaginationValidator.validatePage(page);
-    }
-    if (limit !== undefined && limit !== null) {
-      PaginationValidator.validatePageSize(limit);
-    }
-  }
 
   /**
    * Validate sort field is in allowed list
@@ -153,15 +141,12 @@ export class QueryValidator {
    * Validate complete query object with all parameters
    */
   static validateFullQuery(query: {
-    page?: number;
-    limit?: number;
     sort?: string;
     direction?: string;
     search?: string;
     startDate?: string | Date;
     endDate?: string | Date;
   }, sortFields: string[]): void {
-    this.validatePagination(query.page, query.limit);
     this.validateSortField(query.sort, sortFields);
     this.validateSortDirection(query.direction);
     this.validateSearchQuery(query.search);

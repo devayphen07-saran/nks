@@ -3,7 +3,7 @@ import type { AuthenticatedRequest } from '../guards/auth.guard';
 import type {
   SessionUser,
   SessionUserKey,
-} from '../../modules/auth/interfaces/session-user.interface';
+} from '../../contexts/iam/auth/interfaces/session-user.interface';
 
 /**
  * Parameter decorator that extracts the authenticated user (or a specific

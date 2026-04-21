@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { AuthResponseEnvelope } from '../../modules/auth/dto';
+import type { AuthResponseEnvelope } from '../../contexts/iam/auth/dto';
 import { DeviceValidator } from '../validators';
 import { AUTH_CONSTANTS } from '../constants/app-constants';
 

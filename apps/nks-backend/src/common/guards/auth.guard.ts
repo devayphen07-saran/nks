@@ -16,12 +16,12 @@ import { UnauthorizedException } from '../exceptions';
 import { ErrorCode } from '../constants/error-codes.constants';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import type { Request } from 'express';
-import { SessionUser, SessionUserRole } from 'src/modules/auth/interfaces/session-user.interface';
+import { SessionUser, SessionUserRole } from 'src/contexts/iam/auth/interfaces/session-user.interface';
 import { fireAndForgetWithRetry } from '../utils/retry';
 import { extractCookieValue } from '../utils/cookie.utils';
 import { SystemRoleCodes } from '../constants/system-role-codes.constant';
-import { LAST_ACTIVE_THROTTLE_MS } from '../../modules/auth/auth.constants';
-import { SessionsRepository } from '../../modules/auth/repositories/sessions.repository';
+import { LAST_ACTIVE_THROTTLE_MS } from '../../contexts/iam/auth/auth.constants';
+import { SessionsRepository } from '../../contexts/iam/auth/repositories/sessions.repository';
 
 /** Extend Express Request with strongly-typed user fields. */
 export interface AuthenticatedRequest extends Request {

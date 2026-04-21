@@ -225,15 +225,15 @@ describe('Architecture', () => {
       // If OtpService and AuthService both exist, verify OtpAuthOrchestrator exists
       const otpServicePath = path.join(
         srcDir,
-        'modules/auth/services/otp.service.ts',
+        'contexts/iam/auth/services/otp.service.ts',
       );
       const authServicePath = path.join(
         srcDir,
-        'modules/auth/services/auth.service.ts',
+        'contexts/iam/auth/services/auth.service.ts',
       );
       const orchestratorPath = path.join(
         srcDir,
-        'modules/auth/services/otp-auth-orchestrator.service.ts',
+        'contexts/iam/auth/services/otp-auth-orchestrator.service.ts',
       );
 
       if (fs.existsSync(otpServicePath) && fs.existsSync(authServicePath)) {
@@ -246,7 +246,7 @@ describe('Architecture', () => {
         // Verify orchestrator is properly injected in controller
         const controllerPath = path.join(
           srcDir,
-          'modules/auth/controllers/otp.controller.ts',
+          'contexts/iam/auth/controllers/otp.controller.ts',
         );
         const controllerContent = fs.readFileSync(controllerPath, 'utf-8');
 

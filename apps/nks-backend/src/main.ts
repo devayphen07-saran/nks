@@ -14,7 +14,7 @@ import {
   LoggingInterceptor,
 } from './common/interceptors';
 import { validateEnv } from './config/env.validation';
-import { CsrfMiddleware } from './common/middleware';
+import { CsrfMiddleware, PermissionsPolicyMiddleware } from './common/middleware';
 
 // ─── Env Validation ──────────────────────────────────────────────────────────
 // Validate all required environment variables before anything else in the app.
@@ -68,30 +68,32 @@ async function bootstrap() {
 
   // Permissions-Policy — deny browser APIs not needed by a POS application.
   // Helmet does not set this header natively; applied separately.
-  app.use((_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
-    res.setHeader(
-      'Permissions-Policy',
-      'camera=(), microphone=(), geolocation=(), usb=(), payment=(), fullscreen=()',
-    );
-    next();
-  });
+  const permissionsPolicy = new PermissionsPolicyMiddleware();
+  app.use(permissionsPolicy.use.bind(permissionsPolicy));
 
   // ─── Trust Proxy ──────────────────────────────────────────────────────────
   // Required behind reverse proxies (nginx, AWS ALB) for accurate IP extraction
   // via req.ip. Without this, req.ip is the proxy's IP, breaking rate limiting
-  // and audit logs. Value '1' trusts one hop (the immediate load balancer).
-  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  // and audit logs. Configurable per environment (e.g., Cloudflare → ALB → App = 2).
+  const trustProxyHops = configService.get<number>('app.trustProxyHops') ?? 1;
+  app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
 
   // ─── Global Prefix ────────────────────────────────────────────────────────
+  // TODO: When v2 endpoints are needed, migrate from URL prefix to NestJS versioning:
+  // 1. app.setGlobalPrefix('api');
+  // 2. app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+  // 3. Use @Version('2') on new endpoint versions
   app.setGlobalPrefix('api/v1');
 
   // ─── CORS ─────────────────────────────────────────────────────────────────
   app.enableCors(buildCorsConfig(configService));
 
   // ✅ CRITICAL: Cookie Parser Middleware (must be FIRST before other middleware)
-  // This parses Cookie headers into request.cookies object
-  // Without this, request.headers.cookie is unparseable
-  app.use(cookieParser());
+  // This parses Cookie headers into request.cookies object.
+  // Signing secret enables signed cookies (res.cookie('name', 'val', { signed: true }))
+  // and mitigates cookie tampering.
+  const cookieSecret = configService.getOrThrow<string>('COOKIE_SIGNING_SECRET');
+  app.use(cookieParser(cookieSecret));
 
   // ─── CSRF Protection ──────────────────────────────────────────────────────
   // ✅ Prevents cross-site request forgery attacks
