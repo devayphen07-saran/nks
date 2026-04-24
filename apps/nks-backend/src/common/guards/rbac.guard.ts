@@ -3,118 +3,113 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
-  UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PermissionEvaluatorService } from '../../contexts/iam/roles/permission-evaluator.service';
-import { StoresRepository } from '../../contexts/organization/stores/repositories/stores.repository';
+import { StoreQueryService } from '../../contexts/organization/stores/store-query.service';
 import { assertHasRoleInStore } from '../utils/permission-checker';
 import { ErrorCode } from '../constants/error-codes.constants';
 import {
   REQUIRE_ENTITY_PERMISSION_KEY,
   EntityPermissionRequirement,
 } from '../decorators/require-entity-permission.decorator';
-import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { ENTITY_RESOURCE_KEY } from '../decorators/entity-resource.decorator';
 import type { AuthenticatedRequest } from './auth.guard';
 
 /**
- * RBACGuard — Entity permission access control.
+ * RBACGuard — entity permission access control.
  *
- * Checks @RequireEntityPermission() on each endpoint.
- * SUPER_ADMIN bypasses all checks.
- * Delegates permission evaluation to PermissionEvaluatorService.
+ * Reads `@RequireEntityPermission()` metadata and delegates the decision to
+ * `PermissionEvaluatorService`. The evaluator owns the SUPER_ADMIN bypass,
+ * role selection, and grant merging.
+ *
+ * This guard only adds HTTP-layer concerns that don't belong in the evaluator:
+ *   - STORE scope: require and validate `user.activeStoreId` before calling
+ *     the evaluator. Confirms the store is still active (indexed PK lookup,
+ *     no in-process cache — see H-1 audit) and that the user holds a role
+ *     in it (defends against a stale session).
+ *   - PLATFORM scope: no store context is required; the evaluator reads
+ *     against the user's platform roles directly.
  *
  * Usage:
- *   @UseGuards(AuthGuard, RBACGuard)
+ *   @UseGuards(RBACGuard)
  *   @RequireEntityPermission({ entityCode: EntityCodes.INVOICE, action: 'create' })
- *   async createInvoice() {}
  *
- * Or with the composite decorator:
- *   @RequirePermission(EntityCodes.INVOICE, 'create')
- *   async createInvoice() {}
+ *   @UseGuards(RBACGuard)
+ *   @RequireEntityPermission({
+ *     entityCode: EntityCodes.AUDIT_LOG,
+ *     action: 'view',
+ *     scope: 'PLATFORM',
+ *   })
  */
 @Injectable()
 export class RBACGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly permissionEvaluator: PermissionEvaluatorService,
-    private readonly storesRepository: StoresRepository,
+    private readonly storeQuery: StoreQueryService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (isPublic) return true;
-
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user;
 
-    if (!user?.userId) {
-      throw new UnauthorizedException({
-        errorCode: ErrorCode.UNAUTHORIZED,
-        message: 'User not found or authenticated',
-      });
-    }
-
-    // SUPER_ADMIN bypasses all entity permission checks
-    if (user.isSuperAdmin) return true;
-
-    const entityPermissionReq = this.reflector.getAllAndOverride<
+    const requirement = this.reflector.getAllAndOverride<
       EntityPermissionRequirement | undefined
     >(REQUIRE_ENTITY_PERMISSION_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    if (!entityPermissionReq) return true;
+    // No decorator on this handler — nothing to enforce.
+    if (!requirement) return true;
 
-    const resolvedEntityCode = entityPermissionReq.entityCode;
-    if (!resolvedEntityCode) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
-        message: 'Invalid permission configuration: entityCode is required',
+    // ── Resolve entity code ──────────────────────────────────────────────────
+    // Three-tier resolution (first match wins):
+    //   1. method entityCode  — static string on @RequireEntityPermission
+    //   2. method routeParam  — URL path param resolved at runtime
+    //   3. class @EntityResource — controller-level fallback
+    const classEntityCode = this.reflector.get<string | undefined>(
+      ENTITY_RESOURCE_KEY,
+      context.getClass(),
+    );
+    const entityCode = this.resolveEntityCode(
+      requirement,
+      request,
+      classEntityCode,
+    );
+
+    // Validate the resolved code against the DB-loaded registry.
+    // This catches both developer errors (typo in decorator) and cases where
+    // an entity type was deleted from the DB but the code is still referenced.
+    // Super-admins bypass permission evaluation but NOT entity code validation —
+    // an unknown entity code is a configuration error, not a permission issue.
+    if (!this.permissionEvaluator.isKnownEntityCode(entityCode)) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.ENTITY_CODE_UNKNOWN,
+        message: `Unknown entity code: '${entityCode}'. Ensure it exists in the entity_type table.`,
       });
     }
 
-    // Get storeId from authenticated user's active store (not from request parameters).
-    // This prevents users from accessing data from stores they don't have access to.
-    const storeId = user.activeStoreId;
+    const scope = requirement.scope ?? 'STORE';
 
-    if (!storeId) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
-        message: 'No active store selected',
-      });
+    if (scope === 'STORE' && !user.isSuperAdmin) {
+      this.assertStoreContext(user);
+      await this.assertStoreActive(user.activeStoreId as number);
+      assertHasRoleInStore(user.roles ?? [], user.activeStoreId as number);
     }
-
-    // Verify the store still exists and has not been soft-deleted.
-    // A user may hold a valid session with activeStoreId pointing to a store
-    // that was deleted after the session was created.
-    const store = await this.storesRepository.findActiveById(storeId);
-    if (!store) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
-        message: 'Store not found',
-      });
-    }
-    if (store.deletedAt) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
-        message: 'Store has been deleted',
-      });
-    }
-
-    // Verify the user actually holds a role in activeStoreId — guards against
-    // a session where activeStoreId was set to a store the user no longer belongs to.
-    assertHasRoleInStore(user.roles ?? [], storeId);
 
     const permitted = await this.permissionEvaluator.evaluate(
-      storeId,
-      resolvedEntityCode,
-      entityPermissionReq.action,
-      user.roles ?? [],
+      {
+        activeStoreId: user.activeStoreId ?? null,
+        roles: user.roles ?? [],
+      },
+      {
+        entityCode,
+        action: requirement.action,
+        scope,
+      },
     );
 
     if (!permitted) {
@@ -125,5 +120,69 @@ export class RBACGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  // ─── Internals ─────────────────────────────────────────────────────────────
+
+  /**
+   * Resolves the entity code using a three-tier priority chain:
+   *   1. method `entityCode`  — static string on @RequireEntityPermission
+   *   2. method `routeParam`  — URL path param resolved at runtime
+   *   3. `classEntityCode`    — value from @EntityResource on the controller class
+   * Throws BadRequestException when none of the three yields a value.
+   */
+  private resolveEntityCode(
+    requirement: EntityPermissionRequirement,
+    request: AuthenticatedRequest,
+    classEntityCode: string | undefined,
+  ): string {
+    if (requirement.entityCode) {
+      return requirement.entityCode;
+    }
+
+    if (requirement.routeParam) {
+      const value = (request.params as Record<string, string>)[
+        requirement.routeParam
+      ];
+      if (!value) {
+        throw new BadRequestException({
+          errorCode: ErrorCode.ENTITY_CODE_UNKNOWN,
+          message: `Route parameter '${requirement.routeParam}' is missing or empty.`,
+        });
+      }
+      return value.toUpperCase();
+    }
+
+    if (classEntityCode) {
+      return classEntityCode;
+    }
+
+    throw new BadRequestException({
+      errorCode: ErrorCode.ENTITY_CODE_UNKNOWN,
+      message:
+        'Invalid permission configuration: entityCode, routeParam, or @EntityResource is required.',
+    });
+  }
+
+  private assertStoreContext(user: AuthenticatedRequest['user']): void {
+    if (!user.activeStoreId) {
+      // Distinct from INSUFFICIENT_PERMISSIONS: the user is authenticated but
+      // has no store context — they must select a store before accessing
+      // STORE-scoped endpoints. Mobile client should prompt store selection.
+      throw new ForbiddenException({
+        errorCode: ErrorCode.AUTH_NO_STORE_CONTEXT,
+        message: 'No active store selected',
+      });
+    }
+  }
+
+  private async assertStoreActive(storeId: number): Promise<void> {
+    const active = await this.storeQuery.isActive(storeId);
+    if (!active) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+        message: 'Store not found',
+      });
+    }
   }
 }

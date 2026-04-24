@@ -1,6 +1,6 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
-import { ErrorCode, errPayload } from '../../../../../common/constants/error-codes.constants';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { OtpValidator } from '../../validators';
 import * as crypto from 'crypto';
 import { Msg91Service } from '../providers/msg91.service';
 import { SendOtpDto, VerifyOtpDto } from '../../dto/otp.dto';
@@ -12,6 +12,7 @@ import { OtpRepository } from '../../repositories/otp.repository';
 import { AuthProviderRepository } from '../../repositories/auth-provider.repository';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { MailService } from '../../../../../shared/mail/mail.service';
+import { OTP_EXPIRY_MS } from '../../auth.constants';
 
 /**
  * OTP Hashing Strategy: HMAC-SHA256 (not bcrypt)
@@ -56,7 +57,7 @@ export class OtpService {
    * @throws HttpException(429 TOO_MANY_REQUESTS) if rate limit exceeded
    * @returns OTP send response from MSG91
    */
-  async sendOtp(dto: SendOtpDto) {
+  async sendOtp(dto: SendOtpDto): Promise<{ reqId: string; mobile: string }> {
     const { phone } = dto;
 
     // Phone already validated by ZodValidationPipe at controller level
@@ -70,10 +71,10 @@ export class OtpService {
       this.logger.warn(
         `MSG91 sendOtp rejected for ${phone}: ${response.message}`,
       );
-      throw new BadRequestException(response.message || 'Failed to send OTP');
     }
+    OtpValidator.assertMsg91SendSuccess(response);
 
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
     const reqId = response.reqId ?? response.message;
 
     // Store reqId in OTP record — required for verification to prevent replay
@@ -112,25 +113,17 @@ export class OtpService {
       reqId,
     );
 
-    if (!otpRecord) {
-      throw new BadRequestException(errPayload(ErrorCode.OTP_NOT_FOUND));
-    }
-
-    if (otpRecord.isUsed) {
-      throw new BadRequestException(errPayload(ErrorCode.OTP_ALREADY_USED));
-    }
-
-    if (otpRecord.expiresAt < new Date()) {
-      throw new BadRequestException(errPayload(ErrorCode.OTP_EXPIRED));
-    }
+    OtpValidator.assertOtpFound(otpRecord);
+    OtpValidator.assertOtpNotUsed(otpRecord.isUsed);
+    OtpValidator.assertOtpNotExpired(otpRecord.expiresAt);
 
     // 2. Verify with MSG91
     const response = await this.msg91.verifyOtp(reqId, otp);
     if (response?.type !== 'success') {
       // Track failed verification attempt for exponential backoff
       await this.rateLimitService.trackVerificationFailure(phone);
-      throw new BadRequestException(response?.message || 'Invalid OTP');
     }
+    OtpValidator.assertMsg91VerifySuccess(response);
 
     // 3. Mark OTP log as used by reqId
     await this.otpRepository.markAsUsedByReqId(reqId);
@@ -145,9 +138,8 @@ export class OtpService {
   /**
    * Send OTP to email for verification (onboarding).
    */
-  async sendEmailOtp(email: string): Promise<void> {
-    // Email already validated by ZodValidationPipe at controller level
-    // Check rate limit
+  async sendEmailOtp(email: string | null | undefined): Promise<void> {
+    OtpValidator.assertEmailPresent(email);
     await this.rateLimitService.checkAndRecordRequest(email);
 
     // Generate 6-digit OTP
@@ -157,7 +149,7 @@ export class OtpService {
     const otpHash = this.hashOtp(otp);
 
     // Store hashed OTP record with EMAIL_VERIFY purpose
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
     await this.otpRepository.insertOtpRecord(
       email,
       'EMAIL_VERIFY',
@@ -182,24 +174,15 @@ export class OtpService {
       'EMAIL_VERIFY',
     );
 
-    if (!otpRecord) {
-      throw new BadRequestException(errPayload(ErrorCode.OTP_NOT_FOUND));
-    }
-
-    if (otpRecord.expiresAt < new Date()) {
-      throw new BadRequestException(errPayload(ErrorCode.OTP_EXPIRED));
-    }
-
-    if (otpRecord.attempts >= OTP_MAX_ATTEMPTS) {
-      throw new BadRequestException(errPayload(ErrorCode.OTP_MAX_ATTEMPTS_EXCEEDED));
-    }
+    OtpValidator.assertOtpFound(otpRecord);
+    OtpValidator.assertOtpNotExpired(otpRecord.expiresAt);
+    OtpValidator.assertAttemptsNotExceeded(otpRecord.attempts, OTP_MAX_ATTEMPTS);
 
     // Compare provided OTP against the stored HMAC hash (timing-safe comparison)
     const isValid = this.verifyOtpHash(otp, otpRecord.value);
     if (!isValid) {
       await this.otpRepository.incrementAttempts(otpRecord.id);
-
-      throw new BadRequestException(errPayload(ErrorCode.OTP_INVALID));
+      OtpValidator.assertOtpValid(isValid);
     }
 
     // Mark OTP as used
@@ -207,10 +190,8 @@ export class OtpService {
 
     // Find user by email (must exist from registration)
     const user = await this.authUsersRepository.findByEmail(email);
-
-    if (!user) {
-      throw new BadRequestException(errPayload(ErrorCode.USER_NOT_FOUND));
-    }
+    OtpValidator.assertUserFound(user);
+    OtpValidator.assertNotBlocked(user);
 
     // Create or update email auth provider
     const existingProviderId =
@@ -244,19 +225,27 @@ export class OtpService {
 
   /**
    * Resend OTP using the original request ID from MSG91.
+   * Echoes `mobile` in the response (matches the shape of `sendOtp`) so
+   * clients don't need to stash it separately between send and resend.
    */
-  async resendOtp(reqId: string) {
+  async resendOtp(reqId: string): Promise<{ reqId: string; mobile: string }> {
+    const record = await this.otpRepository.findByReqId(reqId);
+    OtpValidator.assertOtpFound(record);
+
     const response = await this.msg91.resendOtp(reqId);
 
     if (response?.type === 'error') {
       this.logger.warn(
         `MSG91 resendOtp rejected for reqId ${reqId}: ${response.message}`,
       );
-      throw new BadRequestException(response.message || 'Failed to resend OTP');
     }
+    OtpValidator.assertMsg91SendSuccess(response);
 
     // Normalize: MSG91 may return reqId in "message" field
-    return { reqId: response.reqId ?? response.message };
+    return {
+      reqId: response.reqId ?? response.message,
+      mobile: record.identifier,
+    };
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────

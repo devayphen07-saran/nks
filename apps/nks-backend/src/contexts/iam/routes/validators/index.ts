@@ -8,5 +8,4 @@
  * - Permission structure validation
  */
 
-// Validators will be added here as needed
-// Currently, Zod schemas in DTOs handle primary validation
+export { RoutesValidator } from './routes.validator';

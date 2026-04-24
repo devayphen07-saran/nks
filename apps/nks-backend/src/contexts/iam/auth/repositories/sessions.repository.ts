@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { eq, and, gt, lt, asc, desc, count, sql, notInArray, inArray } from 'drizzle-orm';
+import { eq, and, gt, lt, asc, desc, count, sql, notInArray, inArray, isNotNull } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
@@ -57,6 +57,35 @@ export class SessionsRepository extends BaseRepository {
       .limit(1);
 
     return session ?? null;
+  }
+
+  /**
+   * Find session by token, atomically checking the JTI blocklist in a single JOIN.
+   * Eliminates the TOCTOU race where a concurrent logout could insert the JTI between
+   * a separate session fetch and a subsequent blocklist query.
+   */
+  async findByTokenWithJtiCheck(token: string): Promise<{
+    session: UserSession | null;
+    revokedJti: string | null;
+  }> {
+    const [row] = await this.db
+      .select({
+        session: schema.userSession,
+        revokedJti: schema.jtiBlocklist.jti,
+      })
+      .from(schema.userSession)
+      .leftJoin(
+        schema.jtiBlocklist,
+        and(
+          isNotNull(schema.userSession.jti),
+          eq(schema.jtiBlocklist.jti, schema.userSession.jti),
+          gt(schema.jtiBlocklist.expiresAt, new Date()),
+        ),
+      )
+      .where(eq(schema.userSession.token, token))
+      .limit(1);
+
+    return { session: row?.session ?? null, revokedJti: row?.revokedJti ?? null };
   }
 
   /**
@@ -177,12 +206,23 @@ export class SessionsRepository extends BaseRepository {
   }
 
   /**
-   * Set active store for a session (user selected a store after login)
+   * Set active store for a session (user selected a store after login).
    */
   async setActiveStore(sessionId: number, storeId: number): Promise<void> {
     await this.db
       .update(schema.userSession)
       .set({ activeStoreFk: storeId })
+      .where(eq(schema.userSession.id, sessionId));
+  }
+
+  /**
+   * Clear the active store from a session — called when AuthGuard detects
+   * the stored activeStoreId no longer maps to a live role assignment.
+   */
+  async clearActiveStore(sessionId: number): Promise<void> {
+    await this.db
+      .update(schema.userSession)
+      .set({ activeStoreFk: null })
       .where(eq(schema.userSession.id, sessionId));
   }
 
@@ -207,6 +247,19 @@ export class SessionsRepository extends BaseRepository {
       .from(schema.userSession)
       .where(this.activeSessionWhere(userId))
       .orderBy(schema.userSession.createdAt)
+      .limit(1);
+
+    return session ?? null;
+  }
+
+  /**
+   * Find session by guuid (no lock).
+   */
+  async findByGuuid(guuid: string): Promise<UserSession | null> {
+    const [session] = await this.db
+      .select()
+      .from(schema.userSession)
+      .where(eq(schema.userSession.guuid, guuid))
       .limit(1);
 
     return session ?? null;
@@ -362,10 +415,7 @@ export class SessionsRepository extends BaseRepository {
     }, { name: 'SessionsRepo.createWithinLimit' });
   }
 
-  /**
-   * @deprecated Use createWithinLimit — kept for callers that do not need limit enforcement.
-   */
-  async deleteExcessSessions(
+  async deleteOldestSessionsToLimit(
     userId: number,
     maxAllowed: number,
   ): Promise<void> {

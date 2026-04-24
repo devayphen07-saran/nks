@@ -1,24 +1,26 @@
 import type { UserResponseDto, UserRow } from '../dto';
 
 export class UserMapper {
-  static toDto(row: UserRow): UserResponseDto {
+  static buildUserDto(userRow: UserRow): UserResponseDto {
     return {
-      guuid: row.guuid,
-      name: row.name,
-      email: row.email,
-      emailVerified: row.emailVerified,
-      phoneNumber: row.phoneNumber,
-      phoneNumberVerified: row.phoneNumberVerified,
-      image: row.image,
-      isBlocked: row.isBlocked,
-      blockedReason: row.blockedReason,
-      primaryLoginMethod: row.primaryLoginMethod,
-      loginCount: row.loginCount,
-      lastLoginAt: row.lastLoginAt?.toISOString() ?? null,
-      profileCompleted: row.profileCompleted,
-      isActive: row.isActive,
-      createdAt: row.createdAt.toISOString(),
-      primaryRole: row.primaryRole,
+      guuid: userRow.guuid,
+      iamUserId: userRow.iamUserId,
+      firstName: userRow.firstName,
+      lastName: userRow.lastName,
+      email: userRow.email,
+      emailVerified: userRow.emailVerified,
+      phoneNumber: userRow.phoneNumber,
+      phoneNumberVerified: userRow.phoneNumberVerified,
+      image: userRow.image,
+      isBlocked: userRow.isBlocked,
+      blockedReason: userRow.blockedReason,
+      primaryLoginMethod: userRow.primaryLoginMethod,
+      loginCount: userRow.loginCount,
+      lastLoginAt: userRow.lastLoginAt?.toISOString() ?? null,
+      profileCompleted: userRow.profileCompleted,
+      isActive: userRow.isActive,
+      createdAt: userRow.createdAt.toISOString(),
+      primaryRole: userRow.primaryRole,
     };
   }
 }

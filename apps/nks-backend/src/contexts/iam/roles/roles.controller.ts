@@ -5,98 +5,84 @@ import {
   Put,
   Param,
   Body,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { ApiResponse } from '../../../common/utils/api-response';
 import { RolesService } from './roles.service';
 import { RBACGuard } from '../../../common/guards/rbac.guard';
 import { RequireEntityPermission } from '../../../common/decorators/require-entity-permission.decorator';
-import {
-  EntityCodes,
-  PermissionActions,
-} from '../../../common/constants/entity-codes.constants';
+import { EntityResource } from '../../../common/decorators/entity-resource.decorator';
+import { EntityCodes, PermissionActions } from '../../../common/constants/entity-codes.constants';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
-import { CreateRoleDto, UpdateRoleDto } from './dto';
-import type {
-  RoleDetailResponse,
-  RoleResponseDto,
-} from './dto/role-response.dto';
-import type { SessionUser } from 'src/contexts/iam/auth/interfaces/session-user.interface';
+import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
+import { CreateRoleDto, UpdateRoleDto, ListRolesQueryDto } from './dto';
+import type { RoleDetailResponse, RoleResponseDto } from './dto/role-response.dto';
+import type { SessionUser } from '../auth/interfaces/session-user.interface';
+import type { PaginatedResult } from '../../../common/utils/paginated-result';
 
 @ApiTags('Roles')
 @Controller('roles')
 @UseGuards(RBACGuard)
+@EntityResource(EntityCodes.ROLE)
 @ApiBearerAuth()
 export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
-  /**
-   * POST /roles
-   * Create a new custom role.
-   * Store ownership is verified in the service.
-   */
+  @Get()
+  @RequireEntityPermission({ action: PermissionActions.VIEW })
+  @ResponseMessage('Roles retrieved successfully')
+  @ApiOperation({ summary: 'List all roles' })
+  async listRoles(
+    @Query() query: ListRolesQueryDto,
+    @CurrentUser() user: SessionUser,
+  ): Promise<PaginatedResult<RoleResponseDto>> {
+    return this.rolesService.listRoles({
+      page: query.page,
+      pageSize: query.pageSize,
+      storeId: user.activeStoreId,
+      search: query.search,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
+      isActive: query.isActive,
+    });
+  }
+
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @RequireEntityPermission({
-    entityCode: EntityCodes.ROLE,
-    action: PermissionActions.CREATE,
-  })
+  @RequireEntityPermission({ action: PermissionActions.CREATE })
+  @ResponseMessage('Role created successfully')
   @ApiOperation({ summary: 'Create a new role' })
   async createRole(
     @Body() dto: CreateRoleDto,
     @CurrentUser() user: SessionUser,
-  ): Promise<ApiResponse<RoleResponseDto>> {
-    const role = await this.rolesService.createRole(user.userId, dto, user.activeStoreId);
-    return ApiResponse.ok(role, 'Role created successfully');
+  ): Promise<RoleResponseDto> {
+    return this.rolesService.createRole(user.userId, dto, user.activeStoreId);
   }
 
-  /**
-   * GET /roles/:guuid
-   * Get role details with all permissions (entity + route).
-   * Store ownership is verified in the service.
-   */
   @Get(':guuid')
-  @RequireEntityPermission({
-    entityCode: EntityCodes.ROLE,
-    action: PermissionActions.VIEW,
-  })
+  @RequireEntityPermission({ action: PermissionActions.VIEW })
+  @ResponseMessage('Role retrieved successfully')
   @ApiOperation({ summary: 'Get role details with permissions' })
   async getRoleWithPermissions(
-    @Param('guuid') guuid: string,
+    @Param('guuid', ParseUUIDPipe) guuid: string,
     @CurrentUser() user: SessionUser,
-  ): Promise<ApiResponse<RoleDetailResponse>> {
-    const roleDetail = await this.rolesService.getRoleWithPermissions(
-      guuid,
-      user.activeStoreId,
-    );
-    return ApiResponse.ok(roleDetail, 'Role retrieved successfully');
+  ): Promise<RoleDetailResponse> {
+    return this.rolesService.getRoleWithPermissions(guuid, user.activeStoreId);
   }
 
-  /**
-   * PUT /roles/:guuid
-   * Update role and its permissions.
-   * Store ownership is verified in the service.
-   */
   @Put(':guuid')
-  @RequireEntityPermission({
-    entityCode: EntityCodes.ROLE,
-    action: PermissionActions.EDIT,
-  })
+  @RequireEntityPermission({ action: PermissionActions.EDIT })
+  @ResponseMessage('Role updated successfully')
   @ApiOperation({ summary: 'Update role and permissions' })
   async updateRole(
-    @Param('guuid') guuid: string,
+    @Param('guuid', ParseUUIDPipe) guuid: string,
     @Body() dto: UpdateRoleDto,
     @CurrentUser() user: SessionUser,
-  ): Promise<ApiResponse<RoleResponseDto>> {
-    const role = await this.rolesService.updateRoleByGuuid(
-      user.userId,
-      guuid,
-      dto,
-      user.activeStoreId,
-    );
-    return ApiResponse.ok(role, 'Role updated successfully');
+  ): Promise<RoleResponseDto> {
+    return this.rolesService.updateRoleByGuuid(user.userId, guuid, dto, user.activeStoreId);
   }
 }

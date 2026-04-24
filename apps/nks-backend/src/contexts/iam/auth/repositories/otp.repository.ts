@@ -136,6 +136,16 @@ export class OtpRepository extends BaseRepository {
     return otp ?? null;
   }
 
+  async findByReqId(reqId: string): Promise<OtpVerification | null> {
+    const [otp] = await this.db
+      .select()
+      .from(schema.otpVerification)
+      .where(eq(schema.otpVerification.reqId, reqId))
+      .orderBy(desc(schema.otpVerification.createdAt))
+      .limit(1);
+    return otp ?? null;
+  }
+
   async markAsUsedByReqId(reqId: string): Promise<void> {
     await this.db
       .update(schema.otpVerification)

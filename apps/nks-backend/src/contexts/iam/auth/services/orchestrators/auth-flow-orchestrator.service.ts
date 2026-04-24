@@ -2,6 +2,25 @@ import { Injectable } from '@nestjs/common';
 import { SessionService } from '../session/session.service';
 import { TokenService } from '../token/token.service';
 import type { AuthResponseEnvelope } from '../../dto';
+import type { DeviceInfo } from '../../interfaces/device-info.interface';
+
+export interface AuthUserContext {
+  id: number;
+  guuid: string;
+  /**
+   * Required cross-service user identifier. Must be populated when loading
+   * the user row (users.iam_user_id is NOT NULL in the schema).
+   */
+  iamUserId: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  emailVerified: boolean;
+  image: string | null | undefined;
+  phoneNumber: string | null | undefined;
+  phoneNumberVerified: boolean;
+  defaultStoreFk?: number | null;
+}
 
 /**
  * AuthFlowOrchestrator
@@ -27,24 +46,8 @@ export class AuthFlowOrchestrator {
    * Entry point for PasswordAuthService (login/register) and OtpAuthOrchestrator.
    */
   async executeAuthFlow(
-    user: {
-      id: number;
-      guuid: string;
-      email: string | null;
-      name: string;
-      emailVerified: boolean;
-      image: string | null | undefined;
-      phoneNumber: string | null | undefined;
-      phoneNumberVerified: boolean;
-    },
-    deviceInfo?: {
-      deviceId?: string;
-      deviceName?: string;
-      deviceType?: string;
-      appVersion?: string;
-      ipAddress?: string;
-      userAgent?: string;
-    },
+    user: AuthUserContext,
+    deviceInfo?: DeviceInfo,
   ): Promise<AuthResponseEnvelope> {
     const session = await this.sessionService.createSessionForUser(user.id, deviceInfo);
 
@@ -54,14 +57,20 @@ export class AuthFlowOrchestrator {
       session.userRoles,
       session.userEmail,
       session.sessionGuuid,
+      session.jti,
+      user.iamUserId,
+      user.firstName,
+      user.lastName,
     );
 
     return this.tokenService.buildAuthResponse(
       user,
       session.token,
       session.expiresAt,
+      session.sessionGuuid,
       tokenPair,
       session.permissions,
+      deviceInfo?.deviceId,
     );
   }
 }

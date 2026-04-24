@@ -1,7 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { StatusRepository } from './repositories/status.repository';
 import { StatusMapper } from './mapper/status.mapper';
-import { StatusValidator } from './validators';
+import { AuditService } from '../../compliance/audit/audit.service';
+import { ErrorCode, errPayload } from '../../../common/constants/error-codes.constants';
+import { paginated } from '../../../common/utils/paginated-result';
+import type { PaginatedResult } from '../../../common/utils/paginated-result';
 import type {
   CreateStatusDto,
   UpdateStatusDto,
@@ -11,30 +14,27 @@ import type { Status } from '../../../core/database/schema/entity-system/status/
 
 @Injectable()
 export class StatusService {
-  constructor(private readonly repository: StatusRepository) {}
+  constructor(
+    private readonly repository: StatusRepository,
+    private readonly auditService: AuditService,
+  ) {}
 
-  // ─── Public: active statuses (used by consumers to render badges) ───────────
-
-  async getActiveStatuses() {
+  async getActiveStatuses(): Promise<StatusResponse[]> {
     const rows = await this.repository.findActive();
-    return rows.map(StatusMapper.toResponse);
+    return rows.map(StatusMapper.buildStatusDto);
   }
 
-  // ─── Admin: all statuses including inactive ──────────────────────────────────
-
-  async listStatuses(opts: { page: number; pageSize: number; search?: string }) {
+  async listStatuses(opts: { page: number; pageSize: number; search?: string }): Promise<PaginatedResult<StatusResponse>> {
     const { rows, total } = await this.repository.findPage(opts);
-    return { rows: rows.map(StatusMapper.toResponse), total };
+    return paginated({ items: rows.map(StatusMapper.buildStatusDto), page: opts.page, pageSize: opts.pageSize, total });
   }
-
-  // ─── Admin: create ───────────────────────────────────────────────────────────
 
   async createStatus(
     dto: CreateStatusDto,
     createdBy: number,
   ): Promise<StatusResponse> {
     const existing = await this.repository.findByCode(dto.code.toUpperCase());
-    StatusValidator.assertCodeUnique(existing);
+    if (existing) throw new ConflictException(errPayload(ErrorCode.STA_CODE_ALREADY_EXISTS));
 
     const row = await this.repository.create({
       code: dto.code.toUpperCase(),
@@ -48,10 +48,10 @@ export class StatusService {
       createdBy,
     });
 
-    return StatusMapper.toResponse(row);
+    const response = StatusMapper.buildStatusDto(row);
+    this.auditService.logStatusCreated(createdBy, response.guuid, response.code);
+    return response;
   }
-
-  // ─── Admin: update ───────────────────────────────────────────────────────────
 
   async updateStatus(
     guuid: string,
@@ -59,8 +59,8 @@ export class StatusService {
     modifiedBy: number,
   ): Promise<StatusResponse> {
     const existing = await this.repository.findByGuuid(guuid);
-    StatusValidator.assertFound(existing);
-    StatusValidator.assertNotSystem(existing.isSystem);
+    if (!existing) throw new NotFoundException(errPayload(ErrorCode.STA_STATUS_NOT_FOUND));
+    if (existing.isSystem) throw new ForbiddenException(errPayload(ErrorCode.STA_SYSTEM_IMMUTABLE));
 
     const row = await this.repository.update(existing.id, {
       name: dto.name,
@@ -74,23 +74,21 @@ export class StatusService {
       modifiedBy,
     });
 
-    StatusValidator.assertFound(row);
-    return StatusMapper.toResponse(row);
+    if (!row) throw new NotFoundException(errPayload(ErrorCode.STA_STATUS_NOT_FOUND));
+    const response = StatusMapper.buildStatusDto(row);
+    this.auditService.logStatusUpdated(modifiedBy, response.guuid, response.code, { ...dto });
+    return response;
   }
-
-  // ─── Admin: delete ───────────────────────────────────────────────────────────
 
   async deleteStatus(guuid: string, deletedBy: number): Promise<void> {
     const existing = await this.repository.findByGuuid(guuid);
-    StatusValidator.assertFound(existing);
-    StatusValidator.assertNotSystem(existing.isSystem);
+    if (!existing) throw new NotFoundException(errPayload(ErrorCode.STA_STATUS_NOT_FOUND));
+    if (existing.isSystem) throw new ForbiddenException(errPayload(ErrorCode.STA_SYSTEM_IMMUTABLE));
 
     await this.repository.softDelete(existing.id, deletedBy);
+    this.auditService.logStatusDeleted(deletedBy, existing.guuid, existing.code);
   }
 
-  // ─── Internal lookup (used by other modules via StatusService) ───────────────
-
-  /** Resolves a status by GUUID. Returns null if not found. */
   async findByGuuid(guuid: string): Promise<Status | null> {
     return this.repository.findByGuuid(guuid);
   }

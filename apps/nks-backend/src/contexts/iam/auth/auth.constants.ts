@@ -16,3 +16,21 @@ export const OFFLINE_JWT_EXPIRATION = `${OFFLINE_JWT_TTL_DAYS}d` as const;
 
 /** Throttle window for updating lastActiveAt (ms) — avoids a DB write on every request. */
 export const LAST_ACTIVE_THROTTLE_MS = 5 * 60 * 1000;
+
+// ── Token / Session TTLs ──────────────────────────────────────────────────────
+// Centralised so issuance, verification, JTI blocklist, and revocation logic
+// all read the same source. Do not inline `15 * 60 * 1000` again — import the
+// constant. Changing a TTL requires a code review event anyway, so these are
+// intentionally static (not ConfigService-driven).
+
+/** Access-token TTL (ms) — used for JWT expiry, session row `access_token_expires_at`, and JTI blocklist pruning. */
+export const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
+
+/** Refresh-token TTL (ms) — used for opaque refresh token expiry and session row `refresh_token_expires_at`. */
+export const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** OTP code TTL (ms) — how long a sent OTP remains valid for verification. */
+export const OTP_EXPIRY_MS = 15 * 60 * 1000;
+
+/** Retention window for revoked session rows (days) — purged by the cleanup scheduler. */
+export const REVOKED_SESSION_RETENTION_DAYS = 30;

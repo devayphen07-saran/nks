@@ -1,8 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RolesRepository } from './repositories/roles.repository';
-import { RoleEntityPermissionRepository } from './repositories/role-entity-permission.repository';
+import { RolePermissionsRepository } from './repositories/role-permissions.repository';
+import { PermissionEvaluatorService } from './permission-evaluator.service';
+import { TransactionService } from '../../../core/database/transaction.service';
 import { RolesValidator } from './validators';
+import { RoleMapper } from './mapper/role.mapper';
 import { AuditService } from '../../compliance/audit/audit.service';
+import { PermissionsChangelogService } from '../../../shared/permissions-changelog/permissions-changelog.service';
+import { paginated } from '../../../common/utils/paginated-result';
+import type { PaginatedResult } from '../../../common/utils/paginated-result';
 import type { CreateRoleDto, UpdateRoleDto } from './dto';
 import type {
   RoleResponseDto,
@@ -19,18 +25,21 @@ export class RolesService {
 
   constructor(
     private readonly rolesRepository: RolesRepository,
-    private readonly roleEntityPermissionRepository: RoleEntityPermissionRepository,
+    private readonly rolePermissionsRepository: RolePermissionsRepository,
+    private readonly permissionEvaluator: PermissionEvaluatorService,
+    private readonly txService: TransactionService,
     private readonly auditService: AuditService,
+    private readonly permissionsChangelog: PermissionsChangelogService,
   ) {}
-
-  // ─── Role CRUD ─────────────────────────────────────────────────────────────
 
   async createRole(
     userId: number,
     dto: CreateRoleDto,
     activeStoreId: number | null,
   ): Promise<RoleResponseDto> {
-    RolesValidator.assertStoreMatch(activeStoreId, dto.storeId);
+    const storeFk = await this.rolesRepository.findStoreIdByGuuid(dto.storeGuuid);
+    RolesValidator.assertStoreFound(storeFk);
+    RolesValidator.assertStoreMatch(activeStoreId, storeFk);
     RolesValidator.assertCodeNotReserved(dto.code);
 
     const role = await this.rolesRepository.create({
@@ -39,17 +48,12 @@ export class RolesService {
       description: dto.description ?? null,
       sortOrder: dto.sortOrder ?? null,
       isSystem: false,
-      storeFk: dto.storeId,
+      storeFk,
     });
 
-    await this.auditService.logRoleCreated(
-      userId,
-      role.id,
-      role.code,
-      dto.storeId,
-    );
+    this.auditService.logRoleCreated(userId, role.id, role.code, storeFk);
     this.logger.log(`Role created: ${role.code} by user ${userId}`);
-    return role as RoleResponseDto;
+    return RoleMapper.buildRoleDto(role);
   }
 
   async getRoleWithPermissions(
@@ -60,36 +64,13 @@ export class RolesService {
     RolesValidator.assertFound(role);
     RolesValidator.assertRoleStoreAccess(role.storeFk, activeStoreId);
 
-    const [entityPermissions, routePermissions] = await Promise.all([
-      this.roleEntityPermissionRepository.findByRoleId(role.id),
+    const [entityPermissions, routePermissions, storeGuuid] = await Promise.all([
+      this.rolePermissionsRepository.getEntityPermissionMapForRole(role.id),
       this.rolesRepository.findRoutePermissionsByRoleId(role.id),
+      role.storeFk ? this.rolesRepository.getStoreGuuidByFk(role.storeFk) : Promise.resolve(null),
     ]);
 
-    const entityPermissionsMap = entityPermissions.reduce<
-      Record<
-        string,
-        {
-          canView: boolean;
-          canCreate: boolean;
-          canEdit: boolean;
-          canDelete: boolean;
-        }
-      >
-    >((acc, p) => {
-      acc[p.entityCode] = {
-        canView: p.canView,
-        canCreate: p.canCreate,
-        canEdit: p.canEdit,
-        canDelete: p.canDelete,
-      };
-      return acc;
-    }, {});
-
-    return {
-      ...role,
-      entityPermissions: entityPermissionsMap,
-      routePermissions,
-    };
+    return RoleMapper.buildRoleDetailDto(role, storeGuuid, entityPermissions, routePermissions);
   }
 
   async updateRoleByGuuid(
@@ -102,76 +83,85 @@ export class RolesService {
     RolesValidator.assertFound(role);
     RolesValidator.assertRoleStoreAccess(role.storeFk, activeStoreId);
 
-    // Validate ALL entity permission requests against the caller's ceiling
-    // before any DB write — fail fast, all-or-nothing.
     const entityEntries = dto.entityPermissions
       ? Object.entries(dto.entityPermissions)
       : [];
 
+    // Permission-ceiling check ONLY runs when entity permissions are being
+    // modified. Renaming a role, editing its description, or reordering does
+    // not escalate privilege, so skipping the caller-perms lookup here is
+    // intentional (and saves a DB round-trip on pure-metadata updates).
+    //
+    // IMPORTANT — adding a new field to UpdateRoleDto:
+    //   • If the new field CAN escalate privilege (role scope, inherited
+    //     permissions, parent role, "is_super_admin" flag, …): add its own
+    //     ceiling-style check alongside or outside this branch.
+    //   • If it's purely descriptive (sortOrder, tags, icons): leave this
+    //     branch alone.
+    // The check is not automatic — it guards entityPermissions specifically.
     if (entityEntries.length > 0) {
+      RolesValidator.assertActiveStoreId(activeStoreId);
       const callerPerms =
-        await this.roleEntityPermissionRepository.getUserEntityPermissions(
+        await this.rolePermissionsRepository.getUserEntityPermissions(
           userId,
-          activeStoreId!,
+          activeStoreId,
         );
       RolesValidator.assertPermissionCeiling(entityEntries, callerPerms);
     }
 
-    // All validation passed — persist metadata changes.
-    const updated = await this.rolesRepository.update(role.id, {
-      ...(dto.name ? { roleName: dto.name } : {}),
-      ...(dto.description !== undefined
-        ? { description: dto.description }
-        : {}),
-      ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
-    });
-    RolesValidator.assertFound(updated);
+    const permEntries = entityEntries.map(([entityCode, requested]) => ({
+      entityCode,
+      canView:   Boolean(requested['canView']),
+      canCreate: Boolean(requested['canCreate']),
+      canEdit:   Boolean(requested['canEdit']),
+      canDelete: Boolean(requested['canDelete']),
+      deny:      Boolean(requested['deny']),
+    }));
 
-    // Persist entity permissions — audit each changed entity individually.
-    for (const [entityCode, requested] of entityEntries) {
-      const perms = {
-        canView: Boolean(requested['canView']),
-        canCreate: Boolean(requested['canCreate']),
-        canEdit: Boolean(requested['canEdit']),
-        canDelete: Boolean(requested['canDelete']),
-      };
-      await this.roleEntityPermissionRepository.upsertPermission(
-        role.id,
-        entityCode,
-        perms,
-      );
-      await this.auditService.logEntityPermissionChanged(
-        userId,
-        role.id,
-        entityCode,
-        perms,
-      );
+    // Atomic: role metadata update + permission upsert in one transaction.
+    // If bulkUpsert fails, the role name/description change is rolled back too —
+    // no partial state where metadata is updated but permissions are stale.
+    const updated = await this.txService.run(
+      async (tx) => {
+        const r = await this.rolesRepository.update(
+          role.id,
+          {
+            ...(dto.name        ? { roleName: dto.name }               : {}),
+            ...(dto.description !== undefined ? { description: dto.description } : {}),
+            ...(dto.sortOrder   !== undefined ? { sortOrder: dto.sortOrder }    : {}),
+          },
+          tx,
+        );
+        if (permEntries.length > 0) {
+          await this.rolePermissionsRepository.bulkUpsert(role.id, permEntries, tx);
+        }
+        return r;
+      },
+      { name: 'UpdateRoleWithPermissions' },
+    );
+    RolesValidator.assertFound(updated);
+    this.permissionEvaluator.invalidateForRole(role.id);
+
+    // Audit and fan-out each permission change individually.
+    for (const { entityCode, ...perms } of permEntries) {
+      this.auditService.logEntityPermissionChanged(userId, role.id, entityCode, perms);
+      void this.permissionsChangelog.recordChange(role.id, entityCode, 'MODIFIED', perms);
     }
 
-    // Audit metadata changes only when something actually changed.
     const metaChanges: Record<string, unknown> = {
       ...(dto.name !== undefined ? { name: dto.name } : {}),
-      ...(dto.description !== undefined
-        ? { description: dto.description }
-        : {}),
+      ...(dto.description !== undefined ? { description: dto.description } : {}),
       ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
     };
     if (Object.keys(metaChanges).length > 0) {
-      await this.auditService.logRoleUpdated(
-        userId,
-        role.id,
-        updated.code,
-        metaChanges,
-      );
+      this.auditService.logRoleUpdated(userId, role.id, updated.code, metaChanges);
     }
 
     this.logger.log(`Role updated: ${updated.code} by user ${userId}`);
-    return updated as RoleResponseDto;
+    return RoleMapper.buildRoleDto(updated);
   }
 
-  // ─── Role queries (delegated to repository) ────────────────────────────────
-
-  async findUserRoles(userId: number): Promise<UserRoleWithStoreRow[]> {
+  async listUserRoles(userId: number): Promise<UserRoleWithStoreRow[]> {
     return this.rolesRepository.findUserRoles(userId);
   }
 
@@ -182,9 +172,28 @@ export class RolesService {
   async getActiveRolesForStore(
     userId: number,
     storeId: number,
-  ): Promise<
-    Pick<UserRoleRow, 'roleId' | 'roleCode' | 'isSystem' | 'isPrimary'>[]
-  > {
+  ): Promise<Pick<UserRoleRow, 'roleId' | 'roleCode' | 'isSystem' | 'isPrimary'>[]> {
     return this.rolesRepository.getActiveRolesForStore(userId, storeId);
+  }
+
+  async listRoles(opts: {
+    page: number;
+    pageSize: number;
+    storeId: number | null;
+    search?: string;
+    sortBy?: string;
+    sortOrder?: string;
+    isActive?: boolean;
+  }): Promise<PaginatedResult<RoleResponseDto>> {
+    const { rows, total } = await this.rolesRepository.findAll({
+      search: opts.search,
+      page: opts.page,
+      pageSize: opts.pageSize,
+      storeId: opts.storeId,
+      sortBy: opts.sortBy,
+      sortOrder: opts.sortOrder,
+      isActive: opts.isActive,
+    });
+    return paginated({ items: rows, page: opts.page, pageSize: opts.pageSize, total });
   }
 }

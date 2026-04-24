@@ -50,7 +50,12 @@ export class UserPreferencesRepository extends BaseRepository {
       .set({
         ...data,
       })
-      .where(eq(schema.userPreferences.userFk, userId))
+      .where(
+        and(
+          eq(schema.userPreferences.userFk, userId),
+          isNull(schema.userPreferences.deletedAt),
+        ),
+      )
       .returning();
 
     return prefs ?? null;

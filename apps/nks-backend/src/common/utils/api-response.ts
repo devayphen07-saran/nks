@@ -1,173 +1,205 @@
-/**
- * Standard API Response Wrapper for NestJS
- *
- * Structure:
- * {
- *   status:     'success' | 'error',
- *   statusCode: number,              // HTTP status code (200, 400, 404, 500, etc.)
- *   message:    string,              // Human-readable message
- *   errorCode:  string | null,       // Machine-readable error code (e.g., AUTH-VAL-001)
- *   data:       T | null,            // Response data or null for errors
- *   details:    string[] | null,     // Array of error details (validation errors)
- *   meta:       PaginationMeta | null,
- *   timestamp:  string,              // ISO timestamp
- * }
- */
-
 export interface PaginationMeta {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly total: number;
+  readonly totalPages: number;
+  readonly hasMore: boolean;
 }
 
-export class ApiResponse<T = unknown> {
+export interface ApiResponseInit<T> {
   status: 'success' | 'error';
   statusCode: number;
   message: string;
-  errorCode: string | null;
-  data: T | null;
-  details: string[] | null;
-  meta: PaginationMeta | null;
-  timestamp: string;
+  data?: T | null;
+  meta?: PaginationMeta | null;
+  errorCode?: string | null;
+  errors?: Record<string, string[]> | null;
+  details?: string[] | null;
+  path?: string | null;
+  requestId?: string;
+  /** Preserve an existing timestamp when rebuilding — defaults to now. */
+  timestamp?: string;
+}
 
-  constructor(
-    status: 'success' | 'error',
-    statusCode: number,
-    message: string,
-    data: T | null = null,
-    errorCode: string | null = null,
-    details: string[] | null = null,
-    meta: PaginationMeta | null = null,
-  ) {
-    this.status = status;
-    this.statusCode = statusCode;
-    this.message = message;
-    this.data = data;
-    this.errorCode = errorCode;
-    this.details = details;
-    this.meta = meta;
-    this.timestamp = new Date().toISOString();
+/**
+ * Unified API response envelope — identical shape for both success and error.
+ *
+ * Wire shape:
+ * {
+ *   status:     'success' | 'error',
+ *   statusCode: number,
+ *   message:    string,
+ *   errorCode:  string | null,
+ *   data:       T | null,
+ *   errors:     Record<string, string[]> | null,
+ *   details:    string[] | null,
+ *   path:       string | null,
+ *   timestamp:  string,
+ *   requestId:  string | undefined,
+ * }
+ *
+ * Rules:
+ *   - TransformInterceptor is the sole builder of success envelopes.
+ *   - GlobalExceptionFilter is the sole builder of error envelopes.
+ *   - Controllers return plain domain types + @ResponseMessage decorator;
+ *     the interceptor wraps them here.
+ */
+export class ApiResponse<T = unknown> {
+  readonly status: 'success' | 'error';
+  readonly statusCode: number;
+  readonly message: string;
+  readonly errorCode: string | null;
+  readonly data: T | null;
+  readonly meta: PaginationMeta | null;
+  readonly errors: Record<string, string[]> | null;
+  readonly details: string[] | null;
+  readonly path: string | null;
+  readonly timestamp: string;
+  readonly requestId: string | undefined;
+
+  constructor(init: ApiResponseInit<T>) {
+    if (init.statusCode < 100 || init.statusCode > 599) {
+      throw new RangeError(`Invalid HTTP status code: ${init.statusCode}`);
+    }
+    this.status = init.status;
+    this.statusCode = init.statusCode;
+    this.message = init.message;
+    this.data = init.data ?? null;
+    this.meta = init.meta ?? null;
+    this.errorCode = init.errorCode ?? null;
+    this.errors = init.errors ?? null;
+    this.details = init.details ?? null;
+    this.path = init.path ?? null;
+    this.timestamp = init.timestamp ?? new Date().toISOString();
+    this.requestId = init.requestId;
   }
 
   /**
-   * Success response (200 OK)
+   * Wire serialization — omits nullable fields when empty so the JSON payload
+   * stays lean. Mirrors Spring's `@JsonInclude(NON_NULL)` / Go's `omitempty`.
+   *
+   * Always present: status, statusCode, message, data, timestamp.
+   * Present only when non-null: errorCode, errors, details, path, requestId.
    */
-  static ok<T>(data: T, message = 'Success'): ApiResponse<T> {
-    return new ApiResponse('success', 200, message, data);
-  }
-
-  /**
-   * Created response (201 Created)
-   */
-  static created<T>(data: T, message = 'Created'): ApiResponse<T> {
-    return new ApiResponse('success', 201, message, data);
-  }
-
-  /**
-   * Paginated success response (200 OK)
-   */
-  static paginated<T>(opts: {
-    items: T[];
-    page: number;
-    pageSize: number;
-    total: number;
-    message?: string;
-  }): ApiResponse<{ items: T[] }> {
-    const { items, page, pageSize, total, message = 'Success' } = opts;
-    const meta = {
-      page,
-      limit: pageSize,
-      total,
-      totalPages: Math.ceil(total / pageSize),
+  toJSON(): Record<string, unknown> {
+    const out: Record<string, unknown> = {
+      status: this.status,
+      statusCode: this.statusCode,
+      message: this.message,
+      data: this.data,
+      timestamp: this.timestamp,
     };
-    return new ApiResponse(
-      'success',
-      200,
-      message,
-      { items },
-      null,
-      null,
-      meta,
-    );
+    if (this.meta !== null) out.meta = this.meta;
+    if (this.errorCode !== null) out.errorCode = this.errorCode;
+    if (this.errors !== null) out.errors = this.errors;
+    if (this.details !== null) out.details = this.details;
+    if (this.path !== null) out.path = this.path;
+    if (this.requestId !== undefined) out.requestId = this.requestId;
+    return out;
   }
 
-  /**
-   * Validation error response (400 Bad Request)
-   */
-  static validationError(
-    errorCode: string,
-    message: string,
-    details?: string[] | null,
-  ): ApiResponse {
-    return new ApiResponse('error', 400, message, null, errorCode, details);
-  }
+  // ─── Error factories ──────────────────────────────────────────────────────
 
-  /**
-   * Not found error response (404 Not Found)
-   */
-  static notFound(errorCode: string, message: string): ApiResponse {
-    return new ApiResponse('error', 404, message, null, errorCode);
-  }
-
-  /**
-   * Bad request error response (400 Bad Request)
-   */
   static badRequest(
     errorCode: string,
     message: string,
     details?: string[] | null,
-  ): ApiResponse {
-    return new ApiResponse('error', 400, message, null, errorCode, details);
+    requestId?: string,
+  ): ApiResponse<null> {
+    return new ApiResponse({
+      status: 'error',
+      statusCode: 400,
+      message,
+      errorCode,
+      details,
+      requestId,
+    });
   }
 
-  /**
-   * Conflict error response (409 Conflict)
-   */
-  static conflict(errorCode: string, message: string): ApiResponse {
-    return new ApiResponse('error', 409, message, null, errorCode);
+  static notFound(
+    errorCode: string,
+    message: string,
+    requestId?: string,
+  ): ApiResponse<null> {
+    return new ApiResponse({
+      status: 'error',
+      statusCode: 404,
+      message,
+      errorCode,
+      requestId,
+    });
   }
 
-  /**
-   * Unauthorized error response (401 Unauthorized)
-   */
-  static unauthorized(errorCode: string, message: string): ApiResponse {
-    return new ApiResponse('error', 401, message, null, errorCode);
+  static conflict(
+    errorCode: string,
+    message: string,
+    requestId?: string,
+  ): ApiResponse<null> {
+    return new ApiResponse({
+      status: 'error',
+      statusCode: 409,
+      message,
+      errorCode,
+      requestId,
+    });
   }
 
-  /**
-   * Forbidden error response (403 Forbidden)
-   */
-  static forbidden(errorCode: string, message: string): ApiResponse {
-    return new ApiResponse('error', 403, message, null, errorCode);
+  static unauthorized(
+    errorCode: string,
+    message: string,
+    requestId?: string,
+  ): ApiResponse<null> {
+    return new ApiResponse({
+      status: 'error',
+      statusCode: 401,
+      message,
+      errorCode,
+      requestId,
+    });
   }
 
-  /**
-   * Internal server error response (500 Internal Server Error)
-   */
+  static forbidden(
+    errorCode: string,
+    message: string,
+    requestId?: string,
+  ): ApiResponse<null> {
+    return new ApiResponse({
+      status: 'error',
+      statusCode: 403,
+      message,
+      errorCode,
+      requestId,
+    });
+  }
+
   static internalError(
     message = 'Internal server error',
     errorCode = 'GEN-ERR-005',
-  ): ApiResponse {
-    return new ApiResponse('error', 500, message, null, errorCode);
+    requestId?: string,
+  ): ApiResponse<null> {
+    return new ApiResponse({
+      status: 'error',
+      statusCode: 500,
+      message,
+      errorCode,
+      requestId,
+    });
   }
 
-  /**
-   * Generic error response with custom status code
-   */
   static error(
     statusCode: number,
     message: string,
     errorCode: string,
     details?: string[] | null,
-  ): ApiResponse {
-    return new ApiResponse(
-      'error',
+    requestId?: string,
+  ): ApiResponse<null> {
+    return new ApiResponse({
+      status: 'error',
       statusCode,
       message,
-      null,
       errorCode,
       details,
-    );
+      requestId,
+    });
   }
 }

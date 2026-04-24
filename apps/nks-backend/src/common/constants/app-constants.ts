@@ -17,23 +17,18 @@ export const DATABASE_CONNECTION = 'DATABASE_CONNECTION';
 // ============================================================================
 
 export const AUTH_CONSTANTS = {
-  // JWT Configuration
-  JWT: {
-    EXPIRY_DAYS: 30,
-    EXPIRY_MS: 30 * 24 * 60 * 60 * 1000,
-    ALGORITHM: 'HS256',
-  },
-
   // Session Configuration
+  // Note: JWT TTLs and algorithm live in auth.constants.ts (ACCESS_TOKEN_TTL_MS etc.)
+  // and are signed with RS256 via JWTConfigService — do not duplicate them here.
   SESSION: {
     EXPIRY_DAYS: 30,
     EXPIRY_SECONDS: 60 * 60 * 24 * 30,
     UPDATE_AGE_SECONDS: 60 * 60 * 24, // Refresh if older than 1 day
     COOKIE_NAME: 'nks_session',
-    COOKIE_SECURE: process.env.NODE_ENV === 'production',
+    COOKIE_SECURE: true, // always secure; HTTP-only dev override must be done at call site via ConfigService
     COOKIE_HTTP_ONLY: true,
-    COOKIE_SAME_SITE: 'lax' as const,
     COOKIE_PATH: '/',
+    MAX_PER_USER: 5,
   },
 
   // Login Attempts & Lockout
@@ -41,12 +36,6 @@ export const AUTH_CONSTANTS = {
     MAX_FAILED_LOGIN_ATTEMPTS: 5,
     ACCOUNT_LOCKOUT_MINUTES: 15,
     ACCOUNT_LOCKOUT_MS: 15 * 60 * 1000,
-  },
-
-  // Role & Permission Cache
-  CACHE: {
-    ROLE_TTL_SECONDS: 5 * 60, // 5 minutes
-    PERMISSION_TTL_SECONDS: 10 * 60, // 10 minutes
   },
 
   // Device Tracking
@@ -99,13 +88,11 @@ export const RATE_LIMIT_CONSTANTS = {
 // ============================================================================
 
 export const OTP_CONSTANTS = {
-  // SMS OTP
+  // SMS OTP — expiry is OTP_EXPIRY_MS from auth.constants.ts (15 min)
   SMS: {
     LENGTH: 6,
     MIN_VALUE: 100000,
     MAX_VALUE: 999999,
-    EXPIRY_MINUTES: 10,
-    EXPIRY_MS: 10 * 60 * 1000,
     MAX_ATTEMPTS: 5,
   },
 
@@ -170,7 +157,7 @@ export const PAGINATION_CONSTANTS = {
 
 export const CORS_CONSTANTS = {
   // Default origin for development (should be environment-based)
-  DEFAULT_ORIGIN: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  DEFAULT_ORIGIN: 'http://localhost:3000',
   ALLOWED_METHODS: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   ALLOWED_HEADERS: ['Content-Type', 'Authorization', 'X-Request-ID'],
   EXPOSE_HEADERS: ['Content-Range', 'X-Content-Range'],
@@ -182,8 +169,8 @@ export const CORS_CONSTANTS = {
 // ============================================================================
 
 export const SERVER_CONSTANTS = {
-  PORT: process.env.PORT ? parseInt(process.env.PORT, 10) : 4000,
-  HOST: process.env.HOST || 'localhost',
+  PORT: 4000,
+  HOST: 'localhost',
   API_BASE_PATH: '/api/v1',
   API_VERSION: '2026-03',
   REQUEST_TIMEOUT_MS: 30 * 1000,
@@ -218,41 +205,6 @@ export const VALIDATION_PATTERNS = {
   UUID: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
   POSTAL_CODE: /^[A-Z0-9]{3,20}$/i,
   STORE_CODE: /^[A-Z0-9_-]+$/,
-} as const;
-
-// ============================================================================
-// ERROR MESSAGE CONSTANTS
-// ============================================================================
-
-export const ERROR_MESSAGES = {
-  INVALID_CREDENTIALS: 'Invalid email or password',
-  ACCOUNT_LOCKED:
-    'Account locked due to too many failed attempts. Try again later.',
-  INVALID_OTP: 'Invalid or expired OTP',
-  OTP_EXPIRED: 'OTP has expired. Please request a new one.',
-  INVALID_TOKEN: 'Invalid or expired token',
-  UNAUTHORIZED: 'Unauthorized access',
-  FORBIDDEN: 'Forbidden',
-  NOT_FOUND: 'Resource not found',
-  CONFLICT: 'Resource already exists',
-  RATE_LIMIT: 'Too many requests. Please try again later.',
-  INVALID_PASSWORD: 'Password does not meet requirements',
-  WEAK_PASSWORD: 'Password is too weak',
-} as const;
-
-// ============================================================================
-// SUCCESS MESSAGE CONSTANTS
-// ============================================================================
-
-export const SUCCESS_MESSAGES = {
-  LOGIN_SUCCESS: 'Login successful',
-  LOGOUT_SUCCESS: 'Logged out successfully',
-  REGISTRATION_SUCCESS: 'Registration successful',
-  OTP_SENT: 'OTP sent successfully',
-  OTP_VERIFIED: 'OTP verified successfully',
-  PASSWORD_RESET: 'Password reset successfully',
-  STORE_CREATED: 'Store created successfully',
-  PROFILE_UPDATED: 'Profile updated successfully',
 } as const;
 
 export type DeviceType = (typeof AUTH_CONSTANTS.SUPPORTED_DEVICE_TYPES)[number];

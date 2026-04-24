@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException } from '../../../../common/exceptions';
 import { ErrorCode, errPayload } from '../../../../common/constants/error-codes.constants';
 
 /**

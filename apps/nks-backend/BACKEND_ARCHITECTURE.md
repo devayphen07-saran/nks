@@ -473,3 +473,58 @@ modules/<name>/
 - **Auth provider:** BetterAuth with Drizzle adapter
 - **Soft deletes:** `deletedAt` + `isActive` flags on all entities
 - **Audit fields:** `createdBy`, `modifiedBy`, `deletedBy` referencing `users.id`
+
+---
+
+## Service Decomposition Conventions
+
+The codebase uses an "anemic domain model" (DB rows → DTOs via mappers, business rules live in services). That pattern is fine while services stay small; it turns into a maintenance problem when a single service starts absorbing multiple concerns.
+
+**Trip-wires — when a service method starts violating either threshold, extract an orchestrator:**
+
+- **> ~80 lines in a single service method**, OR
+- **> 3 repositories or domain services injected by one class**, OR
+- **> 3 distinct concerns in a single method** (e.g. validation + DB writes + token issuance + audit + email dispatch)
+
+The extraction target is a narrowly-scoped **orchestrator service** — a class that composes the existing services but owns the sequencing of a single business flow. [OtpAuthOrchestrator](./src/contexts/iam/auth/services/orchestrators/otp-auth-orchestrator.service.ts) and [AuthFlowOrchestrator](./src/contexts/iam/auth/services/orchestrators/auth-flow-orchestrator.service.ts) are the reference shape.
+
+**Module-boundary rules (enforced by review, not tooling — break and the architecture rots):**
+
+1. **Guards and interceptors in `common/` must not import domain repositories.** They call services exposed by context modules. See [RBACGuard → StoresService.isActive](./src/common/guards/rbac.guard.ts) and [AuthGuard → AuthContextService / RoleQueryService](./src/common/guards/auth.guard.ts) for the pattern.
+2. **Services in one context must not import repositories from another context.** They depend on services exported by the other context's module. Prevents hidden coupling that shows up later as a circular import.
+3. **Controllers return plain domain types or `PaginatedResult<T>`.** Never `ApiResponse` or `ResponseEntity`. The response envelope is the interceptor's job.
+
+---
+
+## RBAC: two independent permission layers
+
+NKS has **two distinct permission systems** that solve different problems. They are not redundant; neither replaces the other.
+
+### Layer 1 — Entity permissions (API access enforcement)
+
+- **Tables:** `entity_type`, `role_entity_permission`
+- **Decorator:** `@RequireEntityPermission({ entityCode, action, scope })`
+- **Guard:** [RBACGuard](./src/common/guards/rbac.guard.ts) — invoked on every controller handler that carries the decorator.
+- **What it controls:** "Can this role perform this action on this resource type?" Scoped to `STORE` (checks the caller's active store's roles) or `PLATFORM` (checks the caller's system-level roles).
+- **Enforcement:** Server-side, request-time. A direct API call (Postman, curl, any non-UI client) with a valid session token goes through this guard.
+- **Source of truth for:** whether `POST /admin/statuses`, `GET /admin/audit`, `PUT /invoices/:id` etc. succeed.
+
+### Layer 2 — Route permissions (UI menu visibility)
+
+- **Tables:** `routes`, `role_route_mapping`
+- **Rows in `routes`:** **UI paths** — `/admin/dashboard`, `/pos`, `/orders`. These are frontend navigation entries (they carry `iconName`, `parentRouteFk`, `routeType: 'sidebar' | 'tab' | 'screen' | 'modal'`). They are **not** API endpoint signatures.
+- **API:** `GET /routes/store/:storeGuuid`, `GET /admin/routes` — return the filtered route tree for the caller's roles.
+- **What it controls:** which sidebar/menu items the frontend renders for a given role.
+- **Enforcement:** Client-side rendering. The backend returns a filtered tree; the SPA uses it to paint the navigation.
+- **Source of truth for:** whether a user sees a "Reports" menu item in the sidebar.
+
+### Why NKS does not (and should not) have a "RouteGuard" for API endpoints
+
+`role_route_mapping` is keyed by UI path, not API path. A request `POST /admin/statuses` has no clean mapping to a route row like `/admin/dashboard`. Implementing a server-side guard against this table would either be a nonsensical mapping or a duplicate of `@RequireEntityPermission`. The two layers are deliberately separate because they answer different questions:
+
+- *Can this user see the feature in the sidebar?* → route permission
+- *Can this user perform this specific action on this specific data?* → entity permission
+
+### Security invariant
+
+A user who bypasses the UI and types an API URL directly (Postman, `curl`, direct `fetch`) hits `RBACGuard`. The `role_route_mapping` row is irrelevant to that code path — it only ever drives sidebar rendering. Therefore *lack* of a server-side route guard is **not** a vulnerability in NKS (unlike ayphen's Java backend, which has no API-layer guard at all).

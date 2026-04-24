@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { passwordCreationSchema } from './password-validation.dto';
 
 export const RegisterSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Invalid email address'),
+  firstName: z.string().trim().min(2, 'First name must be at least 2 characters'),
+  lastName: z.string().trim().min(1, 'Last name is required'),
+  email: z.email('Invalid email address'),
   password: passwordCreationSchema,
 });
 

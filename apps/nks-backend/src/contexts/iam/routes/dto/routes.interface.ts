@@ -8,7 +8,8 @@
  * Used internally for building route trees before mapping to DTOs
  */
 export type PartialRoute = {
-  id: number;
+  id: number;           // internal — used only for tree construction
+  guuid: string;
   routePath: string;
   routeName: string;
   description: string | null;
@@ -17,7 +18,7 @@ export type PartialRoute = {
   routeScope: 'admin' | 'store';
   isPublic: boolean;
   isHidden: boolean;
-  parentRouteFk: number | null;
+  parentRouteFk: number | null;  // internal — used only for tree construction
   fullPath: string;
   sortOrder: number | null;
   canView?: boolean;

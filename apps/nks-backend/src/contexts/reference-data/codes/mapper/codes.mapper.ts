@@ -5,6 +5,7 @@ import type {
 
 interface CategoryRow {
   id: number;
+  guuid: string;
   code: string;
   name: string;
   description: string | null;
@@ -13,34 +14,35 @@ interface CategoryRow {
 
 interface ValueRow {
   id: number;
+  guuid: string;
   code: string;
   label: string;
   description: string | null;
   sortOrder: number | null;
   isSystem: boolean;
-  storeFk: number | null;
+  storeGuuid: string | null;
 }
 
 export class CodesMapper {
-  static toCategory(row: CategoryRow): CodeCategoryResponseDto {
+  static buildCategoryDto(categoryRow: CategoryRow): CodeCategoryResponseDto {
     return {
-      id: row.id,
-      code: row.code,
-      name: row.name,
-      description: row.description ?? null,
-      isSystem: row.isSystem,
+      guuid: categoryRow.guuid,
+      code: categoryRow.code,
+      name: categoryRow.name,
+      description: categoryRow.description ?? null,
+      isSystem: categoryRow.isSystem,
     };
   }
 
-  static toValue(row: ValueRow): CodeValueResponseDto {
+  static buildValueDto(valueRow: ValueRow): CodeValueResponseDto {
     return {
-      id: row.id,
-      code: row.code,
-      label: row.label,
-      description: row.description ?? null,
-      sortOrder: row.sortOrder ?? null,
-      isSystem: row.isSystem,
-      storeFk: row.storeFk ?? null,
+      guuid: valueRow.guuid,
+      code: valueRow.code,
+      label: valueRow.label,
+      description: valueRow.description ?? null,
+      sortOrder: valueRow.sortOrder ?? null,
+      isSystem: valueRow.isSystem,
+      storeGuuid: valueRow.storeGuuid ?? null,
     };
   }
 }

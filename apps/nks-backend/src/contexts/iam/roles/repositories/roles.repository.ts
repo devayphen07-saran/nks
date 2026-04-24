@@ -1,6 +1,18 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, inArray, and, or, isNull, gt, count } from 'drizzle-orm';
+import {
+  eq,
+  inArray,
+  and,
+  or,
+  isNull,
+  gt,
+  count,
+  asc,
+  desc,
+  sql,
+} from 'drizzle-orm';
+import type { AnyColumn } from 'drizzle-orm/column';
 import { ilikeAny } from '../../../../core/database/query-helpers';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
@@ -18,7 +30,9 @@ type Role = typeof schema.roles.$inferSelect;
 
 @Injectable()
 export class RolesRepository extends BaseRepository {
-  constructor(@InjectDb() db: NodePgDatabase<typeof schema>) { super(db); }
+  constructor(@InjectDb() db: NodePgDatabase<typeof schema>) {
+    super(db);
+  }
 
   // ─── System Role Helpers ──────────────────────────────────────────────────
 
@@ -34,7 +48,7 @@ export class RolesRepository extends BaseRepository {
       .from(schema.roles)
       .where(
         and(
-          eq(schema.roles.code, code),
+          eq(schema.roles.code, code.toUpperCase()),
           isNull(schema.roles.storeFk),
           eq(schema.roles.isActive, true),
         ),
@@ -59,20 +73,48 @@ export class RolesRepository extends BaseRepository {
         roleCode: schema.roles.code,
         isSystem: schema.roles.isSystem,
         storeFk: userRoleMapping.storeFk,
+        storeGuuid: schema.store.guuid,
         storeName: schema.store.storeName,
         isPrimary: userRoleMapping.isPrimary,
       })
       .from(userRoleMapping)
       .innerJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
       .leftJoin(schema.store, eq(userRoleMapping.storeFk, schema.store.id))
-      .where(
-        and(
-          eq(userRoleMapping.userFk, userId),
-          eq(userRoleMapping.isActive, true),
-          isNull(userRoleMapping.deletedAt),
-          or(isNull(userRoleMapping.expiresAt), gt(userRoleMapping.expiresAt, new Date())),
-        ),
-      );
+      .where(this.activeRoleMappingCondition(userId));
+  }
+
+  /**
+   * Fetch active roles for a user with the assignedAt/expiresAt fields needed by AuthGuard
+   * to build the SessionUser.roles array. Structurally identical to findUserRoles() but
+   * includes temporal grant metadata that the auth context requires.
+   */
+  async findUserRolesForAuth(userId: number): Promise<
+    Array<{
+      roleId: number;
+      roleCode: string;
+      storeFk: number | null;
+      storeGuuid: string | null;
+      storeName: string | null;
+      isPrimary: boolean;
+      assignedAt: Date;
+      expiresAt: Date | null;
+    }>
+  > {
+    return this.db
+      .select({
+        roleId: userRoleMapping.roleFk,
+        roleCode: schema.roles.code,
+        storeFk: userRoleMapping.storeFk,
+        storeGuuid: schema.store.guuid,
+        storeName: schema.store.storeName,
+        isPrimary: userRoleMapping.isPrimary,
+        assignedAt: userRoleMapping.assignedAt,
+        expiresAt: userRoleMapping.expiresAt,
+      })
+      .from(userRoleMapping)
+      .innerJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
+      .leftJoin(schema.store, eq(userRoleMapping.storeFk, schema.store.id))
+      .where(this.activeRoleMappingCondition(userId));
   }
 
   /** Get route permissions (path + CRUD flags) for a single role ID. */
@@ -81,7 +123,7 @@ export class RolesRepository extends BaseRepository {
   ): Promise<RoutePermission[]> {
     return this.db
       .select({
-        routeId: schema.routes.id,
+        routeGuuid: schema.routes.guuid,
         routePath: schema.routes.routePath,
         routeName: schema.routes.routeName,
         routeScope: schema.routes.routeScope,
@@ -112,8 +154,8 @@ export class RolesRepository extends BaseRepository {
   ): Promise<RouteWithPermissionsRow[]> {
     if (roleIds.length === 0) return [];
     return this.db
-      .selectDistinctOn([schema.routes.routePath], {
-        id: schema.routes.id,
+      .select({
+        guuid: schema.routes.guuid,
         routeName: schema.routes.routeName,
         routePath: schema.routes.routePath,
         fullPath: schema.routes.fullPath,
@@ -121,7 +163,6 @@ export class RolesRepository extends BaseRepository {
         routeType: schema.routes.routeType,
         routeScope: schema.routes.routeScope,
         isPublic: schema.routes.isPublic,
-        parentRouteFk: schema.routes.parentRouteFk,
         sortOrder: schema.routes.sortOrder,
         canView: schema.roleRouteMapping.canView,
         canCreate: schema.roleRouteMapping.canCreate,
@@ -138,6 +179,7 @@ export class RolesRepository extends BaseRepository {
         and(
           inArray(schema.roleRouteMapping.roleFk, roleIds),
           eq(schema.roleRouteMapping.allow, true),
+          isNull(schema.routes.deletedAt),
         ),
       )
       .orderBy(schema.routes.routePath, schema.routes.sortOrder);
@@ -148,7 +190,12 @@ export class RolesRepository extends BaseRepository {
     const [role] = await this.db
       .select()
       .from(schema.roles)
-      .where(and(eq(schema.roles.code, code), eq(schema.roles.isActive, true)))
+      .where(
+        and(
+          eq(schema.roles.code, code.toUpperCase()),
+          eq(schema.roles.isActive, true),
+        ),
+      )
       .limit(1);
     return role ?? null;
   }
@@ -158,6 +205,7 @@ export class RolesRepository extends BaseRepository {
   /**
    * Assign a role to a user. Pass storeFk=null for platform-level roles.
    * isPrimary=true marks the role whose code flows into JWT.primaryRole.
+   * Idempotent: returns null (no-op) if the assignment already exists.
    */
   async assignRole(
     userFk: number,
@@ -167,7 +215,7 @@ export class RolesRepository extends BaseRepository {
     isPrimary: boolean,
     tx?: Db,
     expiresAt?: Date | null,
-  ): Promise<typeof userRoleMapping.$inferSelect> {
+  ): Promise<typeof userRoleMapping.$inferSelect | null> {
     const client = tx ?? this.db;
     const [row] = await client
       .insert(userRoleMapping)
@@ -181,8 +229,9 @@ export class RolesRepository extends BaseRepository {
         assignedAt: new Date(),
         expiresAt: expiresAt ?? undefined,
       })
+      .onConflictDoNothing()
       .returning();
-    return row;
+    return row ?? null;
   }
 
   /**
@@ -257,10 +306,44 @@ export class RolesRepository extends BaseRepository {
           eq(userRoleMapping.storeFk, storeFk),
           isNull(userRoleMapping.deletedAt),
           eq(userRoleMapping.isActive, true),
-          // Exclude expired temporary grants
-          or(isNull(userRoleMapping.expiresAt), gt(userRoleMapping.expiresAt, new Date())),
+          or(
+            isNull(userRoleMapping.expiresAt),
+            gt(userRoleMapping.expiresAt, new Date()),
+          ),
         ),
       );
+  }
+
+  // ─── Store resolution ─────────────────────────────────────────────────────
+
+  async findStoreIdByGuuid(guuid: string): Promise<number | null> {
+    const [row] = await this.db
+      .select({ id: schema.store.id })
+      .from(schema.store)
+      .where(
+        and(
+          eq(schema.store.guuid, guuid),
+          eq(schema.store.isActive, true),
+          isNull(schema.store.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  async getStoreGuuidByFk(storeFk: number): Promise<string | null> {
+    const [row] = await this.db
+      .select({ guuid: schema.store.guuid })
+      .from(schema.store)
+      .where(
+        and(
+          eq(schema.store.id, storeFk),
+          eq(schema.store.isActive, true),
+          isNull(schema.store.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row?.guuid ?? null;
   }
 
   // ─── Role checks ──────────────────────────────────────────────────────────
@@ -284,21 +367,55 @@ export class RolesRepository extends BaseRepository {
 
   // ─── Role CRUD (admin endpoints) ─────────────────────────────────────────
 
-  /** List active roles with optional search and pagination. */
+  /** List roles with optional search, pagination, sorting, and active filter. */
   async findAll(
-    opts: { search?: string; page?: number; pageSize?: number } = {},
+    opts: {
+      search?: string;
+      page?: number;
+      pageSize?: number;
+      storeId?: number | null;
+      sortBy?: string;
+      sortOrder?: string;
+      isActive?: boolean;
+    } = {},
   ): Promise<{ rows: Role[]; total: number; page: number; pageSize: number }> {
-    const { search, page = 1, pageSize = 50 } = opts;
-    const offset = (page - 1) * pageSize;
+    const {
+      search,
+      page = 1,
+      pageSize = 50,
+      storeId,
+      sortBy = 'name',
+      sortOrder = 'asc',
+      isActive,
+    } = opts;
+    const offset = RolesRepository.toOffset(page, pageSize);
+    const activeFilter = isActive === undefined ? true : isActive;
 
     const where = and(
-      eq(schema.roles.isActive, true),
-      ilikeAny(search, schema.roles.code, schema.roles.roleName, schema.roles.description),
+      eq(schema.roles.isActive, activeFilter),
+      ilikeAny(
+        search,
+        schema.roles.code,
+        schema.roles.roleName,
+        schema.roles.description,
+      ),
+      storeId
+        ? or(isNull(schema.roles.storeFk), eq(schema.roles.storeFk, storeId))
+        : undefined,
     );
 
     const { rows, total } = await this.paginate(
-      this.db.select().from(schema.roles).where(where).orderBy(schema.roles.sortOrder).limit(pageSize).offset(offset),
-      this.db.select({ total: count() }).from(schema.roles).where(where),
+      this.db
+        .select()
+        .from(schema.roles)
+        .where(where)
+        .orderBy(
+          this.applySortDirection(this.getRoleOrderColumn(sortBy), sortOrder),
+        )
+        .limit(pageSize)
+        .offset(offset),
+      () => this.db.select({ total: count() }).from(schema.roles).where(where),
+      page, pageSize,
     );
 
     return { rows, total, page, pageSize };
@@ -357,7 +474,7 @@ export class RolesRepository extends BaseRepository {
     await client
       .update(schema.roles)
       .set({ isActive: false, deletedAt: new Date(), deletedBy })
-      .where(eq(schema.roles.id, id));
+      .where(and(eq(schema.roles.id, id), isNull(schema.roles.deletedAt)));
   }
 
   /**
@@ -427,31 +544,37 @@ export class RolesRepository extends BaseRepository {
 
   /**
    * Assign a role to a user inside an existing transaction.
-   * Used during registration to atomically assign the initial role.
+   * Idempotent: silently no-ops if the assignment already exists.
    */
   async assignRoleWithinTransaction(
     tx: Db,
     userId: number,
     roleCode: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const [roleRecord] = await tx
       .select({ id: schema.roles.id })
       .from(schema.roles)
-      .where(and(eq(schema.roles.code, roleCode), isNull(schema.roles.storeFk)))
+      .where(
+        and(
+          eq(schema.roles.code, roleCode.toUpperCase()),
+          isNull(schema.roles.storeFk),
+        ),
+      )
       .limit(1);
 
-    if (!roleRecord) {
-      throw new InternalServerErrorException(
-        `assignRoleWithinTransaction: system role '${roleCode}' not found in database`,
-      );
-    }
+    if (!roleRecord) return false;
 
-    await tx.insert(userRoleMapping).values({
-      userFk: userId,
-      roleFk: roleRecord.id,
-      isPrimary: true,
-      isActive: true,
-    });
+    await tx
+      .insert(userRoleMapping)
+      .values({
+        userFk: userId,
+        roleFk: roleRecord.id,
+        isPrimary: true,
+        isActive: true,
+      })
+      .onConflictDoNothing();
+
+    return true;
   }
 
   /**
@@ -475,13 +598,22 @@ export class RolesRepository extends BaseRepository {
   }
 
   /**
-   * Check if SUPER_ADMIN is already assigned within a transaction (FOR UPDATE lock).
-   * Returns the role code to assign: 'SUPER_ADMIN' if first user, else 'USER'.
+   * Resolve the initial role for a new user within a transaction.
+   * Returns 'SUPER_ADMIN' if no SUPER_ADMIN exists yet, else 'USER'.
+   *
+   * RACE PROTECTION: acquires a PostgreSQL transaction-level advisory lock
+   * (auto-released at transaction end) before reading. Two concurrent
+   * first-registrations will serialize here — only one sees 0 rows.
+   * hashtext('super_admin_bootstrap') produces a stable, namespaced lock ID.
    */
   async resolveInitialRoleWithinTransaction(
     tx: Db,
     superAdminRoleId: number,
   ): Promise<'SUPER_ADMIN' | 'USER'> {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('super_admin_bootstrap'))`,
+    );
+
     const existing = await tx
       .select({ id: userRoleMapping.id })
       .from(userRoleMapping)
@@ -496,5 +628,35 @@ export class RolesRepository extends BaseRepository {
       .limit(1);
 
     return existing.length > 0 ? 'USER' : 'SUPER_ADMIN';
+  }
+
+  // ─── Private helpers ──────────────────────────────────────────────────────
+
+  private getRoleOrderColumn(sortBy: string = 'name') {
+    switch (sortBy) {
+      case 'code':
+        return schema.roles.code;
+      case 'createdAt':
+        return schema.roles.createdAt;
+      case 'name':
+      default:
+        return schema.roles.roleName;
+    }
+  }
+
+  private applySortDirection(column: AnyColumn, sortOrder: string = 'asc') {
+    return sortOrder === 'desc' ? desc(column) : asc(column);
+  }
+
+  private activeRoleMappingCondition(userId: number) {
+    return and(
+      eq(userRoleMapping.userFk, userId),
+      eq(userRoleMapping.isActive, true),
+      isNull(userRoleMapping.deletedAt),
+      or(
+        isNull(userRoleMapping.expiresAt),
+        gt(userRoleMapping.expiresAt, new Date()),
+      ),
+    );
   }
 }

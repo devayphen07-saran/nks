@@ -32,9 +32,7 @@ export class UpdateStatusDto extends createZodDto(UpdateStatusSchema) {}
 
 // ─── Query DTOs ────────────────────────────────────────────────────────────
 
-export const GetAllStatusesQuerySchema = searchableSchema.extend({
-  search: z.string().trim().min(2).max(100).optional(),
-});
+export const GetAllStatusesQuerySchema = searchableSchema;
 
 export class GetAllStatusesQueryDto extends createZodDto(GetAllStatusesQuerySchema) {}
 
@@ -56,7 +54,3 @@ export interface StatusResponse {
   updatedAt:   string | null;
 }
 
-// ─── Response List/Single Types ────────────────────────────────────────────
-
-export type StatusListResponse = StatusResponse[];
-export type StatusSingleResponse = StatusResponse;

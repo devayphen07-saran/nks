@@ -2,7 +2,7 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
 export const SessionInfoSchema = z.object({
-  id: z.number(),
+  guuid: z.string(),
   deviceId: z.string().nullable(),
   deviceName: z.string().nullable(),
   deviceType: z.string().nullable(),
@@ -14,7 +14,7 @@ export const SessionInfoSchema = z.object({
 
 export const SessionListSchema = z.object({
   sessions: z.array(SessionInfoSchema),
-  currentSessionId: z.number().nullable(),
+  currentSessionId: z.string().nullable(),
   total: z.number(),
 });
 

@@ -14,18 +14,18 @@ interface EntityStatusRow {
 }
 
 export class EntityStatusMapper {
-  static toResponse(row: EntityStatusRow): EntityStatusResponse {
+  static buildEntityStatusDto(entityStatusRow: EntityStatusRow): EntityStatusResponse {
     return {
-      entityCode: row.entityCode,
-      statusGuuid: row.statusGuuid,
-      statusCode: row.statusCode,
-      name: row.name,
-      fontColor: row.fontColor,
-      bgColor: row.bgColor,
-      borderColor: row.borderColor,
-      isBold: row.isBold,
-      isActive: row.isActive,
-      sortOrder: row.sortOrder,
+      entityCode: entityStatusRow.entityCode,
+      statusGuuid: entityStatusRow.statusGuuid,
+      statusCode: entityStatusRow.statusCode,
+      name: entityStatusRow.name,
+      fontColor: entityStatusRow.fontColor,
+      bgColor: entityStatusRow.bgColor,
+      borderColor: entityStatusRow.borderColor,
+      isBold: entityStatusRow.isBold,
+      isActive: entityStatusRow.isActive,
+      sortOrder: entityStatusRow.sortOrder,
     };
   }
 }

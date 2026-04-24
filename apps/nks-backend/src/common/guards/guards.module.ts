@@ -1,22 +1,22 @@
 import { Module } from '@nestjs/common';
 import { AuthGuard } from './auth.guard';
-import { SessionsRepository } from '../../contexts/iam/auth/repositories/sessions.repository';
+import { OwnershipGuard } from './ownership.guard';
+import { AuthModule } from '../../contexts/iam/auth/auth.module';
+import { RolesModule } from '../../contexts/iam/roles/roles.module';
 
 /**
- * GuardsModule — provides AuthGuard and its non-global dependencies.
+ * GuardsModule — cross-cutting guards (AuthGuard, OwnershipGuard).
  *
- * AuthGuard requires SessionsRepository (the only dependency not covered
- * by the already-global DatabaseModule and ConfigModule).
+ * AuthGuard depends on narrow query services exported by their context
+ * modules — never repositories directly:
+ *   AuthGuard ← AuthContextService (AuthModule), RoleQueryService (RolesModule)
  *
- * Import this module in any feature module whose controllers use
- * @UseGuards(AuthGuard) or the @RequirePermission() composite decorator.
- *
- * RBACGuard dependencies (PermissionEvaluatorService, StoresRepository)
- * are provided by RolesModule — import RolesModule alongside this one
- * when using @UseGuards(AuthGuard, RBACGuard).
+ * RateLimitingGuard lives in `rate-limiting.module.ts`; feature modules
+ * that only need rate limiting should import that instead of this module.
  */
 @Module({
-  providers: [AuthGuard, SessionsRepository],
-  exports: [AuthGuard, SessionsRepository],
+  imports: [AuthModule, RolesModule],
+  providers: [AuthGuard, OwnershipGuard],
+  exports: [AuthGuard, OwnershipGuard],
 })
 export class GuardsModule {}

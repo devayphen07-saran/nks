@@ -77,7 +77,7 @@ export class AuthProviderRepository extends BaseRepository {
       .update(schema.userAuthProvider)
       .set({
         isVerified,
-        verifiedAt: verifiedAt || new Date(),
+        verifiedAt: verifiedAt ?? new Date(),
       })
       .where(eq(schema.userAuthProvider.id, providerId));
   }

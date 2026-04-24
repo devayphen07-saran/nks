@@ -1,17 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { SessionCleanupRepository } from '../../repositories/session-cleanup.repository';
+import { SessionsRepository } from '../../repositories/sessions.repository';
+import { REVOKED_SESSION_RETENTION_DAYS } from '../../auth.constants';
 
 /**
- * Session Cleanup Service
+ * SessionCleanupService — sole owner of scheduled session maintenance.
  *
- * Utility service for cleaning up expired sessions.
- * Clean up expired sessions to prevent accumulation
- * Device tracking records are cleaned up along with sessions
+ * Two separate cleanup concerns, both scheduled here:
+ *   1. Expired sessions   — sessions whose expiresAt has passed (1-day grace for clock skew)
+ *   2. Old revoked sessions — sessions explicitly revoked (logout, theft detection) and past
+ *      the retention window. Kept temporarily for theft-detection audit trail.
  *
- * Usage:
- *   - Call cleanupExpiredSessions() manually
- *   - Or trigger via external cron job (e.g., GitHub Actions, AWS Lambda)
- *   - Recommended: Run daily or during off-peak hours
+ * Single cron entry point prevents duplicate cleanup runs and keeps the
+ * schedule in one place to reason about.
  */
 @Injectable()
 export class SessionCleanupService {
@@ -19,31 +21,52 @@ export class SessionCleanupService {
 
   constructor(
     private readonly sessionCleanupRepository: SessionCleanupRepository,
+    private readonly sessionsRepository: SessionsRepository,
   ) {}
 
+  /** Daily at 00:30 UTC — stagger from midnight to spread DB load */
+  @Cron('30 0 * * *')
+  async runDailyCleanup(): Promise<void> {
+    await Promise.allSettled([
+      this.cleanupExpiredSessions(),
+      this.cleanupOldRevokedSessions(),
+    ]);
+  }
+
   /**
-   * Delete all sessions that expired more than 1 day ago.
-   * This gives a grace period for clients with clock skew.
-   *
-   * @returns Number of sessions deleted
+   * Delete sessions whose expiresAt has passed (1-day grace for clock skew).
+   * Can also be called manually (admin endpoint, health check).
    */
   async cleanupExpiredSessions(): Promise<number> {
     try {
-      // Calculate cutoff time: now - 1 day
       const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
       const deletedCount =
         await this.sessionCleanupRepository.deleteExpiredSessions(cutoffTime);
-
       if (deletedCount > 0) {
-        this.logger.log(
-          `Session cleanup completed. Deleted ${deletedCount} expired session(s).`,
-        );
+        this.logger.log(`Expired session cleanup: deleted ${deletedCount} session(s)`);
       }
       return deletedCount;
     } catch (error) {
       this.logger.error(
-        `Session cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Expired session cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return 0;
+    }
+  }
+
+  /** Delete revoked sessions past the retention window. */
+  async cleanupOldRevokedSessions(): Promise<number> {
+    try {
+      const deleted = await this.sessionsRepository.deleteOldRevokedSessions(
+        REVOKED_SESSION_RETENTION_DAYS,
+      );
+      if (deleted > 0) {
+        this.logger.log(`Revoked session cleanup: deleted ${deleted} old revoked session(s)`);
+      }
+      return deleted;
+    } catch (error) {
+      this.logger.error(
+        `Revoked session cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
       );
       return 0;
     }

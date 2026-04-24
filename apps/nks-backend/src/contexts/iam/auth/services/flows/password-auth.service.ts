@@ -1,38 +1,38 @@
+import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import {
-  Injectable,
-  UnauthorizedException,
-  ConflictException,
-  InternalServerErrorException,
-  Logger,
-} from '@nestjs/common';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../../../../../core/database/schema';
+import { Injectable, Logger } from '@nestjs/common';
+import type { DbTransaction } from '../../../../../core/database/transaction.service';
 import { SanitizerValidator } from '../../../../../common/validators/sanitizer.validator';
+import { PasswordAuthValidator } from '../../validators';
 import { LoginDto, RegisterDto } from '../../dto';
 import type { AuthResponseEnvelope } from '../../dto';
 import { AuthFlowOrchestrator } from '../orchestrators/auth-flow-orchestrator.service';
 import { PasswordService } from '../security/password.service';
+import { SessionService } from '../session/session.service';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
-import { AuthProviderRepository } from '../../repositories/auth-provider.repository';
-import { RolesRepository } from '../../../roles/repositories/roles.repository';
-import { AuditService, AuditEventType } from '../../../../compliance/audit/audit.service';
+import { RoleQueryService } from '../../../roles/role-query.service';
+import { RoleMutationService } from '../../../roles/role-mutation.service';
+import { AuditService } from '../../../../compliance/audit/audit.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
-import { fireAndForgetWithRetry } from '../../../../../common/utils/retry';
-import { ErrorCode, errPayload } from '../../../../../common/constants/error-codes.constants';
+import {
+  ErrorCode,
+  errPayload,
+} from '../../../../../common/constants/error-codes.constants';
+import {
+  InternalServerException,
+} from '../../../../../common/exceptions';
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
+import { AUTH_CONSTANTS } from '../../../../../common/constants/app-constants';
+import type { DeviceInfo } from '../../interfaces/device-info.interface';
 
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCKOUT_MINUTES = 15;
+// Pre-computed once at module load — same cost as PasswordService.BCRYPT_ROUNDS.
+// Used to normalize response time when the email is not found — prevents timing-based enumeration.
+const DUMMY_BCRYPT_HASH = bcrypt.hashSync('__nks_timing_guard__', PasswordService.BCRYPT_ROUNDS);
 
-type DeviceInfo = {
-  deviceId?: string;
-  deviceName?: string;
-  deviceType?: string;
-  appVersion?: string;
-  ipAddress?: string;
-  userAgent?: string;
-};
+type AuthUser = NonNullable<
+  Awaited<ReturnType<AuthUsersRepository['findByEmail']>>
+>;
+type AuditMeta = { deviceId?: string; deviceType?: string };
 
 /**
  * PasswordAuthService
@@ -49,164 +49,258 @@ export class PasswordAuthService {
 
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
-    private readonly authProviderRepository: AuthProviderRepository,
     private readonly passwordService: PasswordService,
     private readonly authFlowOrchestrator: AuthFlowOrchestrator,
-    private readonly rolesRepository: RolesRepository,
+    private readonly sessionService: SessionService,
+    private readonly roleQuery: RoleQueryService,
+    private readonly roleMutation: RoleMutationService,
     private readonly auditService: AuditService,
     private readonly authUtils: AuthUtilsService,
   ) {}
 
-  async login(dto: LoginDto, deviceInfo?: DeviceInfo): Promise<AuthResponseEnvelope> {
-    const auditMeta = { deviceId: deviceInfo?.deviceId, deviceType: deviceInfo?.deviceType };
+  async login(
+    dto: LoginDto,
+    deviceInfo?: DeviceInfo,
+  ): Promise<AuthResponseEnvelope> {
+    const auditMeta: AuditMeta = {
+      deviceId: deviceInfo?.deviceId,
+      deviceType: deviceInfo?.deviceType,
+    };
 
     dto.email = SanitizerValidator.sanitizeEmail(dto.email);
-    const user = await this.authUsersRepository.findByEmail(dto.email);
-    if (!user) throw new UnauthorizedException(errPayload(ErrorCode.AUTH_INVALID_CREDENTIALS));
-
-    if (user.isBlocked) {
-      fireAndForgetWithRetry(() => this.auditService.log({
-        eventType: AuditEventType.LOGIN,
-        userId: user.id,
-        description: 'Login attempt - account is blocked',
-        ipAddress: deviceInfo?.ipAddress,
-        userAgent: deviceInfo?.userAgent,
-        metadata: auditMeta,
-        severity: 'warning',
-        resourceType: 'user',
-        resourceId: user.id,
-      }));
-      throw new UnauthorizedException(errPayload(ErrorCode.USER_BLOCKED));
-    }
-
-    if (user.accountLockedUntil) {
-      const now = new Date();
-      if (user.accountLockedUntil > now) {
-        fireAndForgetWithRetry(() => this.auditService.log({
-          eventType: AuditEventType.LOGIN,
-          userId: user.id,
-          description: 'Login attempt - account locked (brute-force)',
-          ipAddress: deviceInfo?.ipAddress,
-          userAgent: deviceInfo?.userAgent,
-          metadata: auditMeta,
-          severity: 'warning',
-          resourceType: 'user',
-          resourceId: user.id,
-        }));
-        throw new UnauthorizedException(errPayload(ErrorCode.AUTH_ACCOUNT_LOCKED));
-      } else {
-        // Lock expired — auto-unlock
-        const unlocked = await this.authUsersRepository.update(user.id, {
-          accountLockedUntil: null,
-          failedLoginAttempts: 0,
-        });
-        if (!unlocked)
-          throw new InternalServerErrorException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
-        this.logger.log(`Auto-unlocked account for user ${user.id}`);
-      }
-    }
-
-    const provider = await this.authProviderRepository.findByUserIdAndProvider(
-      user.id,
-      'email',
+    const record = await this.authUsersRepository.findByEmailWithPassword(
+      dto.email,
     );
-    if (!provider?.password) throw new UnauthorizedException(errPayload(ErrorCode.AUTH_INVALID_CREDENTIALS));
 
-    const isValid = await this.passwordService.compare(dto.password, provider.password);
+    if (!record) await this.runTimingGuard(dto.password);
+    PasswordAuthValidator.assertUserFound(record);
+
+    const { user, passwordHash } = record;
+
+    this.checkBlockStatus(user, deviceInfo, auditMeta);
+    await this.handleLockoutState(user, deviceInfo, auditMeta);
+
+    // Email verification is NOT gated at login for mobile-first systems.
+    // register() returns tokens immediately so users never had a prompt to verify;
+    // blocking re-entry at login would permanently lock them out.
+    // Sensitive endpoints (settings, payments) should check req.user.emailVerified
+    // at the service level. The emailVerified flag is surfaced in AuthResponseEnvelope
+    // and SessionUser so the client can show a "verify your email" prompt.
+
+    const isValid = await this.passwordService.compare(
+      dto.password,
+      passwordHash,
+    );
     if (!isValid) {
-      const newFailedCount = user.failedLoginAttempts + 1;
-      const shouldLock = newFailedCount >= MAX_FAILED_ATTEMPTS;
-      const updated = await this.authUsersRepository.update(user.id, {
-        failedLoginAttempts: newFailedCount,
-        ...(shouldLock
-          ? { accountLockedUntil: new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000) }
-          : {}),
-      });
-      if (!updated)
-        throw new InternalServerErrorException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
-      fireAndForgetWithRetry(() => this.auditService.log({
-        eventType: AuditEventType.LOGIN,
-        userId: user.id,
-        description: 'Login attempt - invalid password',
-        ipAddress: deviceInfo?.ipAddress,
-        userAgent: deviceInfo?.userAgent,
-        metadata: { ...auditMeta, failedAttempts: newFailedCount, accountLocked: shouldLock },
-        severity: 'warning',
-        resourceType: 'user',
-        resourceId: user.id,
-      }));
-      throw new UnauthorizedException(errPayload(ErrorCode.AUTH_INVALID_CREDENTIALS));
+      await this.handleFailedPassword(user, deviceInfo, auditMeta);
     }
 
-    const loginReset = await this.authUsersRepository.update(user.id, {
-      failedLoginAttempts: 0,
-      accountLockedUntil: null,
-      lastActiveAt: new Date(),
-    });
-    if (!loginReset) throw new InternalServerErrorException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
-    await this.authUsersRepository.recordLogin(user.id);
+    await this.authUsersRepository.resetAndRecordLogin(user.id);
 
-    fireAndForgetWithRetry(() => this.auditService.log({
-      eventType: AuditEventType.LOGIN,
-      userId: user.id,
+    this.auditService.log({
+      ...this.loginAuditBase(user.id, deviceInfo, auditMeta),
       description: 'User logged in via email',
-      ipAddress: deviceInfo?.ipAddress,
-      userAgent: deviceInfo?.userAgent,
-      metadata: auditMeta,
       severity: 'info',
-      resourceType: 'user',
-      resourceId: user.id,
-    }));
+    });
 
     return this.authFlowOrchestrator.executeAuthFlow(user, deviceInfo);
   }
 
-  async register(dto: RegisterDto, deviceInfo?: DeviceInfo): Promise<AuthResponseEnvelope> {
+  async register(
+    dto: RegisterDto,
+    deviceInfo?: DeviceInfo,
+  ): Promise<AuthResponseEnvelope> {
     dto.email = SanitizerValidator.sanitizeEmail(dto.email);
-    dto.name = SanitizerValidator.sanitizeName(dto.name);
+    dto.firstName = SanitizerValidator.sanitizeName(dto.firstName);
+    dto.lastName = SanitizerValidator.sanitizeName(dto.lastName);
 
     const existingUser = await this.authUsersRepository.findByEmail(dto.email);
-    if (existingUser) throw new ConflictException(errPayload(ErrorCode.USER_EMAIL_ALREADY_EXISTS));
+    PasswordAuthValidator.assertEmailNotTaken(existingUser);
 
     const passwordHash = await this.passwordService.hash(dto.password);
     const iamUserId = crypto.randomUUID();
 
     const user = await this.authUsersRepository.createUserWithInitialRole(
-      { iamUserId, name: dto.name, email: dto.email, emailVerified: false },
-      { providerId: 'email', accountId: dto.email, password: passwordHash, isVerified: false },
+      { iamUserId, firstName: dto.firstName, lastName: dto.lastName, email: dto.email, emailVerified: false },
+      {
+        providerId: 'email',
+        accountId: dto.email,
+        password: passwordHash,
+        isVerified: false,
+      },
       async (tx, userId) => {
         await this.assignInitialRoleInTransaction(userId, tx);
       },
     );
 
-    if (!user) throw new ConflictException(errPayload(ErrorCode.USER_EMAIL_ALREADY_EXISTS));
+    PasswordAuthValidator.assertUserCreated(user);
+
+    this.auditService.log({
+      action: 'CREATE',
+      userId: user.id,
+      description: 'New user registered via email',
+      ipAddress: deviceInfo?.ipAddress,
+      userAgent: deviceInfo?.userAgent,
+      metadata: {
+        deviceId: deviceInfo?.deviceId,
+        deviceType: deviceInfo?.deviceType,
+      },
+      severity: 'info',
+      resourceType: 'user',
+      resourceId: user.id,
+    });
 
     return this.authFlowOrchestrator.executeAuthFlow(user, deviceInfo);
   }
 
   async isSuperAdminSeeded(): Promise<boolean> {
-    const superAdminRoleId = await this.authUtils.getCachedSystemRoleId(SystemRoleCodes.SUPER_ADMIN);
+    const superAdminRoleId = await this.authUtils.getCachedSystemRoleId(
+      SystemRoleCodes.SUPER_ADMIN,
+    );
     if (!superAdminRoleId) return false;
-    return this.rolesRepository.hasUserWithRole(superAdminRoleId);
+    return this.roleQuery.hasUserWithRole(superAdminRoleId);
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────
 
+  // Prevents email enumeration via response-time difference when user is not found.
+  private async runTimingGuard(password: string): Promise<void> {
+    await this.passwordService.compare(password, DUMMY_BCRYPT_HASH);
+  }
+
+  private loginAuditBase(
+    userId: number,
+    deviceInfo: DeviceInfo | undefined,
+    auditMeta: AuditMeta,
+  ) {
+    return {
+      action: 'LOGIN' as const,
+      userId,
+      ipAddress: deviceInfo?.ipAddress,
+      userAgent: deviceInfo?.userAgent,
+      metadata: auditMeta,
+      resourceType: 'user' as const,
+      resourceId: userId,
+    };
+  }
+
+  private checkBlockStatus(
+    user: AuthUser,
+    deviceInfo: DeviceInfo | undefined,
+    auditMeta: AuditMeta,
+  ): void {
+    if (!user.isBlocked) return;
+    this.auditService.log({
+      ...this.loginAuditBase(user.id, deviceInfo, auditMeta),
+      description: 'Login attempt - account is blocked',
+      severity: 'warning',
+    });
+    PasswordAuthValidator.assertNotBlocked(user);
+  }
+
+  private async handleLockoutState(
+    user: AuthUser,
+    deviceInfo: DeviceInfo | undefined,
+    auditMeta: AuditMeta,
+  ): Promise<void> {
+    if (!user.accountLockedUntil) return;
+    const now = new Date();
+    if (user.accountLockedUntil > now) {
+      this.auditService.log({
+        ...this.loginAuditBase(user.id, deviceInfo, auditMeta),
+        description: 'Login attempt - account locked (brute-force)',
+        severity: 'warning',
+      });
+      PasswordAuthValidator.assertNotLocked(user);
+    } else {
+      // Lock expired — CAS-safe auto-unlock: WHERE accountLockedUntil IS NOT NULL AND <= NOW()
+      // prevents two concurrent requests from both resetting the lock.
+      await this.authUsersRepository.autoUnlockIfExpired(user.id);
+      // false = concurrent request already cleared the lock; both outcomes allow login to proceed.
+      this.auditService.log({
+        ...this.loginAuditBase(user.id, deviceInfo, auditMeta),
+        action: 'ACCOUNT_UNBLOCKED',
+        description: 'Account lockout expired — auto-unlocked on login attempt',
+        severity: 'info',
+      });
+      this.logger.debug(`Auto-unlocked account for user ${user.id}`);
+    }
+  }
+
+  private async handleFailedPassword(
+    user: AuthUser,
+    deviceInfo: DeviceInfo | undefined,
+    auditMeta: AuditMeta,
+  ): Promise<void> {
+    // Atomic SQL increment — safe under concurrent requests (no read-modify-write race).
+    const newFailedCount =
+      await this.authUsersRepository.incrementFailedAttempts(user.id);
+    const shouldLock =
+      newFailedCount >=
+      AUTH_CONSTANTS.ACCOUNT_SECURITY.MAX_FAILED_LOGIN_ATTEMPTS;
+
+    if (shouldLock) {
+      // Conditional lock: WHERE account_locked_until IS NULL prevents concurrent requests
+      // from extending an existing lockout window.
+      await this.authUsersRepository.lockAccount(
+        user.id,
+        new Date(
+          Date.now() + AUTH_CONSTANTS.ACCOUNT_SECURITY.ACCOUNT_LOCKOUT_MS,
+        ),
+      );
+      // Revoke existing sessions so stolen tokens cannot bypass the lockout.
+      try {
+        await this.sessionService.terminateAllSessions(user.id);
+      } catch (err: unknown) {
+        this.logger.error(
+          `Failed to terminate sessions on lockout for user ${user.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    this.auditService.log({
+      ...this.loginAuditBase(user.id, deviceInfo, auditMeta),
+      description: 'Login attempt - invalid password',
+      severity: 'warning',
+      metadata: {
+        ...auditMeta,
+        failedAttempts: newFailedCount,
+        accountLocked: shouldLock,
+      },
+    });
+    PasswordAuthValidator.assertPasswordValid(false);
+  }
+
   private async assignInitialRoleInTransaction(
     userId: number,
-    tx: NodePgDatabase<typeof schema>,
+    tx: DbTransaction,
   ): Promise<void> {
     try {
-      const superAdminRoleId = await this.authUtils.getCachedSystemRoleId(SystemRoleCodes.SUPER_ADMIN);
-      if (!superAdminRoleId) {
-        this.logger.warn('SUPER_ADMIN system role not found in DB');
-        return;
-      }
-      const roleCode = await this.rolesRepository.resolveInitialRoleWithinTransaction(
-        tx,
-        superAdminRoleId,
+      const superAdminRoleId = await this.authUtils.getCachedSystemRoleId(
+        SystemRoleCodes.SUPER_ADMIN,
       );
-      await this.rolesRepository.assignRoleWithinTransaction(tx, userId, roleCode);
+      if (!superAdminRoleId) {
+        this.logger.error(
+          'SUPER_ADMIN system role not seeded — cannot assign initial role. Run DB seed before accepting registrations.',
+        );
+        throw new InternalServerException(
+          errPayload(ErrorCode.INTERNAL_SERVER_ERROR),
+        );
+      }
+      const roleCode =
+        await this.roleMutation.resolveInitialRoleWithinTransaction(
+          tx,
+          superAdminRoleId,
+        );
+      const assigned = await this.roleMutation.assignRoleWithinTransaction(
+        tx,
+        userId,
+        roleCode,
+      );
+      if (!assigned)
+        throw new InternalServerException(
+          errPayload(ErrorCode.INTERNAL_SERVER_ERROR),
+        );
     } catch (err) {
       this.logger.error(
         `assignInitialRoleInTransaction failed for userId=${userId}`,
@@ -215,5 +309,4 @@ export class PasswordAuthService {
       throw err;
     }
   }
-
 }

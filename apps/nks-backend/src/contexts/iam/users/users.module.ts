@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { UsersController } from './users.controller';
+import { SelfUsersController } from './self-users.controller';
 import { UsersService } from './users.service';
 import { UsersRepository } from './repositories/users.repository';
 import { UserPreferencesRepository } from './repositories/user-preferences.repository';
@@ -9,7 +10,7 @@ import { GuardsModule } from '../../../common/guards/guards.module';
 
 @Module({
   imports:     [GuardsModule, RolesModule],
-  controllers: [UsersController],
+  controllers: [UsersController, SelfUsersController],
   providers:   [UsersService, UsersRepository, UserPreferencesRepository, UserPreferencesService],
   exports:     [UsersService, UsersRepository, UserPreferencesRepository, UserPreferencesService],
 })

@@ -12,6 +12,10 @@ export interface Msg91Response {
   data?: Record<string, unknown>;
 }
 
+/** Hard cap on outbound MSG91 requests. Keeps the event loop responsive when
+ *  the provider is slow or unreachable. */
+const MSG91_REQUEST_TIMEOUT_MS = 5000;
+
 @Injectable()
 export class Msg91Service {
   private readonly logger = new Logger(Msg91Service.name);
@@ -20,9 +24,11 @@ export class Msg91Service {
   private readonly baseUrl: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.authKey = this.configService.get<string>('msg91.authKey') as string;
-    this.widgetId = this.configService.get<string>('msg91.widgetId') as string;
-    this.baseUrl = this.configService.get<string>('msg91.baseUrl') as string;
+    // getOrThrow fails fast at startup if MSG91 credentials are missing,
+    // instead of sending `authkey: undefined` on every request in prod.
+    this.authKey = this.configService.getOrThrow<string>('msg91.authKey');
+    this.widgetId = this.configService.getOrThrow<string>('msg91.widgetId');
+    this.baseUrl = this.configService.getOrThrow<string>('msg91.baseUrl');
   }
 
   /**
@@ -49,37 +55,44 @@ export class Msg91Service {
     return this.post('/retryOtp', { reqId, channel });
   }
 
-  private async post(path: string, body: Record<string, any>): Promise<Msg91Response> {
+  private async post(path: string, body: Record<string, unknown>): Promise<Msg91Response> {
+    const url = `${this.baseUrl}${path}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), MSG91_REQUEST_TIMEOUT_MS);
+
     try {
-      const url = `${this.baseUrl}${path}`;
-      const payload = { ...body, widgetId: this.widgetId };
-      this.logger.log(
-        `MSG91 ${path} request to ${url} with ${JSON.stringify(payload)}`,
-      );
+      // Never log the body: it can contain OTP codes and reqIds that are
+      // usable credentials until consumed. Log only the path.
+      this.logger.log(`MSG91 ${path} → request`);
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           authkey: this.authKey,
         },
-        body: JSON.stringify({
-          ...body,
-          widgetId: this.widgetId,
-        }),
+        body: JSON.stringify({ ...body, widgetId: this.widgetId }),
+        signal: controller.signal,
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as Msg91Response;
+
+      // Log status + type only — never the payload.
       if (!response.ok || data.type === 'error') {
-        this.logger.error(
-          `MSG91 ${path} failed (${response.status}): ${JSON.stringify(data)}`,
-        );
+        this.logger.error(`MSG91 ${path} failed (${response.status}) type=${data?.type ?? 'unknown'}`);
       } else {
-        this.logger.log(`MSG91 ${path} success: ${JSON.stringify(data)}`);
+        this.logger.log(`MSG91 ${path} → ${response.status}`);
       }
       return data;
     } catch (error) {
-      this.logger.error(`MSG91 ${path} error: ${(error as Error).message}`);
+      if ((error as Error).name === 'AbortError') {
+        this.logger.error(`MSG91 ${path} timed out after ${MSG91_REQUEST_TIMEOUT_MS}ms`);
+      } else {
+        this.logger.error(`MSG91 ${path} error: ${(error as Error).message}`);
+      }
       throw error;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }

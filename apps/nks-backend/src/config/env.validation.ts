@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Logger } from '@nestjs/common';
 
 /**
  * Zod schema for all environment variables.
@@ -13,17 +14,18 @@ const envSchema = z.object({
     .enum(['development', 'staging', 'production'])
     .default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
+  LOG_LEVEL: z
+    .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
+    .optional(), // defaults to 'info' in production, 'debug' otherwise
 
   // ── Database ──────────────────────────────────────────────────────────────
-  DATABASE_URL: z.string().url('DATABASE_URL must be a valid PostgreSQL URL'),
+  DATABASE_URL: z.url({ error: 'DATABASE_URL must be a valid PostgreSQL URL' }),
 
   // ── Better Auth ───────────────────────────────────────────────────────────
   BETTER_AUTH_SECRET: z
     .string()
     .min(32, 'BETTER_AUTH_SECRET must be at least 32 characters'),
-  BETTER_AUTH_BASE_URL: z
-    .string()
-    .url('BETTER_AUTH_BASE_URL must be a valid URL'),
+  BETTER_AUTH_BASE_URL: z.url({ error: 'BETTER_AUTH_BASE_URL must be a valid URL' }),
 
   // ── MSG91 OTP ─────────────────────────────────────────────────────────────
   MSG91_AUTH_KEY: z.string().min(1, 'MSG91_AUTH_KEY is required'),
@@ -52,7 +54,10 @@ const envSchema = z.object({
   // ── CORS ──────────────────────────────────────────────────────────────────
   ALLOWED_ORIGINS: z.string().optional(),
 
-  // ── AWS S3 (optional — only required when file upload is in use) ──────────
+  // ── JWT Keys ──────────────────────────────────────────────────────────────
+  JWT_KEYS_DIR: z.string().optional(), // defaults to <cwd>/secrets — override in containerised deployments
+
+  // ── AWS S3 (optional — only required when StorageService is in use) ────────
   AWS_S3_BUCKET: z.string().optional(),
   AWS_S3_REGION: z.string().default('ap-south-1'),
   AWS_ACCESS_KEY_ID: z.string().optional(),
@@ -61,6 +66,37 @@ const envSchema = z.object({
   // ── Google OAuth (optional — only when socialProviders is active) ─────────
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+
+  // ── RBAC ──────────────────────────────────────────────────────────────────
+  PERMISSION_CACHE_TTL_MS: z.coerce.number().int().positive().optional().default(300000),
+
+  // ── Rate limiting ─────────────────────────────────────────────────────────
+  THROTTLE_ENABLED: z
+    .string()
+    .optional()
+    .default('true')
+    .transform((v) => v !== 'false'),
+  THROTTLE_TTL: z.coerce.number().int().positive().optional().default(900),
+  THROTTLE_LIMIT: z.coerce.number().int().positive().optional().default(100),
+  RATE_LIMIT_EXEMPT_IPS: z.string().optional().default(''),
+
+  // ── JWT key rotation ──────────────────────────────────────────────────────
+  JWT_KEY_ROTATION_ENABLED: z
+    .string()
+    .optional()
+    .default('true')
+    .transform((v) => v !== 'false'),
+  JWT_KEY_ROTATION_INTERVAL_DAYS: z.coerce.number().int().positive().optional().default(30),
+  JWT_ROTATION_WINDOW_START: z.string().optional().default('02:00'),
+  JWT_ROTATION_WINDOW_DURATION: z.coerce.number().int().positive().optional().default(60),
+
+  // ── Alerting ──────────────────────────────────────────────────────────────
+  KEY_ROTATION_ALERT_ENABLED: z
+    .string()
+    .optional()
+    .default('true')
+    .transform((v) => v !== 'false'),
+  SLACK_WEBHOOK_URL: z.string().url().optional().or(z.literal('')).default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -73,18 +109,15 @@ export function validateEnv(): Env {
   const result = envSchema.safeParse(process.env);
 
   if (!result.success) {
-    console.error('');
-    console.error('❌  Invalid or missing environment variables:');
-    console.error('');
+    const logger = new Logger('EnvValidation');
+    logger.error('Invalid or missing environment variables:');
 
-    const fieldErrors = result.error.flatten().fieldErrors;
+    const { fieldErrors } = z.flattenError(result.error);
     for (const [field, messages] of Object.entries(fieldErrors)) {
-      console.error(`  ${field}: ${(messages ?? []).join(', ')}`);
+      logger.error(`  ${field}: ${(messages ?? []).join(', ')}`);
     }
 
-    console.error('');
-    console.error('Fix the above issues in your .env or .env.local file.');
-    console.error('');
+    logger.error('Fix the above issues in your .env or .env.local file.');
     process.exit(1);
   }
 

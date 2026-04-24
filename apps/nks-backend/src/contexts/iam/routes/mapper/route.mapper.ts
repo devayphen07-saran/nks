@@ -3,9 +3,9 @@ import type { PartialRoute } from '../dto/routes.interface';
 import type { SessionUser } from '../../auth/interfaces/session-user.interface';
 
 export class RouteMapper {
-  static toRouteTreeNode(route: PartialRoute): RouteTreeDto {
+  static buildRouteTreeNode(route: PartialRoute, parentGuuid: string | null): RouteTreeDto {
     return {
-      id: route.id,
+      guuid: route.guuid,
       routePath: route.routePath,
       routeName: route.routeName,
       description: route.description ?? null,
@@ -14,7 +14,7 @@ export class RouteMapper {
       routeScope: route.routeScope,
       isPublic: route.isPublic,
       isHidden: route.isHidden,
-      parentRouteFk: route.parentRouteFk ?? null,
+      parentRouteGuuid: parentGuuid,
       fullPath: route.fullPath,
       sortOrder: route.sortOrder ?? 0,
       canView: route.canView ?? false,
@@ -27,17 +27,25 @@ export class RouteMapper {
   }
 
   static buildTree(routes: PartialRoute[]): RouteTreeDto[] {
+    // Build id→guuid map first so we can resolve parentRouteGuuid
+    const idToGuuid = new Map<number, string>();
+    for (const route of routes) {
+      idToGuuid.set(route.id, route.guuid);
+    }
+
     const nodeMap = new Map<number, RouteTreeDto>();
     const roots: RouteTreeDto[] = [];
 
     for (const route of routes) {
-      nodeMap.set(route.id, this.toRouteTreeNode(route));
+      const parentGuuid = route.parentRouteFk ? (idToGuuid.get(route.parentRouteFk) ?? null) : null;
+      nodeMap.set(route.id, this.buildRouteTreeNode(route, parentGuuid));
     }
 
     for (const route of routes) {
       const node = nodeMap.get(route.id)!;
-      if (route.parentRouteFk && nodeMap.has(route.parentRouteFk)) {
-        nodeMap.get(route.parentRouteFk)!.children.push(node);
+      const parent = route.parentRouteFk ? nodeMap.get(route.parentRouteFk) : undefined;
+      if (parent) {
+        parent.children.push(node);
       } else {
         roots.push(node);
       }
@@ -51,14 +59,15 @@ export class RouteMapper {
     return roots;
   }
 
-  static toUserRoutesResponse(
+  static buildUserRoutesDto(
     user: SessionUser,
     routes: RouteTreeDto[],
   ): UserRoutesResponseDto {
     return {
       user: {
         guuid: user.guuid,
-        name: user.name,
+        firstName: user.firstName,
+        lastName: user.lastName,
         email: user.email,
         primaryRole: user.primaryRole,
       },
@@ -66,14 +75,15 @@ export class RouteMapper {
     };
   }
 
-  static toStoreRoutesResponse(
+  static buildStoreRoutesDto(
     user: SessionUser,
     routes: RouteTreeDto[],
   ): StoreRoutesResponseDto {
     return {
       user: {
         guuid: user.guuid,
-        name: user.name,
+        firstName: user.firstName,
+        lastName: user.lastName,
         email: user.email,
         primaryRole: user.primaryRole,
       },

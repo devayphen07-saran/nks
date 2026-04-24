@@ -10,8 +10,8 @@ import * as crypto from 'crypto';
  */
 
 export interface OfflineSessionPayload {
-  userId: number;
-  storeId: number | null;
+  userGuuid: string;
+  storeGuuid: string | null;
   roles: string[];
   offlineValidUntil: number;
 }
@@ -22,8 +22,8 @@ export interface OfflineSessionPayload {
  */
 function serialize(payload: OfflineSessionPayload): string {
   return JSON.stringify({
-    userId: payload.userId,
-    storeId: payload.storeId,
+    userGuuid: payload.userGuuid,
+    storeGuuid: payload.storeGuuid,
     roles: [...payload.roles].sort(),
     offlineValidUntil: payload.offlineValidUntil,
   });

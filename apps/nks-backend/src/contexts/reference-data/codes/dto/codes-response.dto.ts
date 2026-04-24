@@ -2,7 +2,7 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
 export const CodeCategoryResponseSchema = z.object({
-  id: z.number(),
+  guuid: z.string(),
   code: z.string(),
   name: z.string(),
   description: z.string().nullable(),
@@ -10,13 +10,13 @@ export const CodeCategoryResponseSchema = z.object({
 });
 
 export const CodeValueResponseSchema = z.object({
-  id: z.number(),
+  guuid: z.string(),
   code: z.string(),
   label: z.string(),
   description: z.string().nullable(),
   sortOrder: z.number().nullable(),
   isSystem: z.boolean(),
-  storeFk: z.number().nullable(),
+  storeGuuid: z.string().nullable(),
 });
 
 export class CodeCategoryResponseDto extends createZodDto(CodeCategoryResponseSchema) {}

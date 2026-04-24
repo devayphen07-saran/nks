@@ -19,7 +19,7 @@ import { SERVER_CONSTANTS } from '../constants/app-constants';
  */
 @Injectable()
 export class TimeoutInterceptor implements NestInterceptor {
-  intercept(_context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept<T>(_context: ExecutionContext, next: CallHandler<T>): Observable<T> {
     return next.handle().pipe(
       timeout(SERVER_CONSTANTS.REQUEST_TIMEOUT_MS),
       catchError((err) => {

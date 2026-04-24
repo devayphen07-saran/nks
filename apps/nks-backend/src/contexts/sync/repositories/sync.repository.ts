@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { eq, sql, and, isNull, or } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../core/database/base.repository';
 import { TransactionService } from '../../../core/database/transaction.service';
@@ -8,10 +9,12 @@ import * as schema from '../../../core/database/schema';
 
 type Db = NodePgDatabase<typeof schema>;
 
+const parentRoutes = alias(schema.routes, 'parent_routes');
+
 export interface RouteChangeRow {
   id: number;
   guuid: string;
-  parentRouteFk: number | null;
+  parentRouteGuuid: string | null;
   routeName: string;
   routePath: string;
   fullPath: string;
@@ -44,7 +47,7 @@ export interface DistrictChangeRow {
   districtName: string;
   districtCode: string | null;
   lgdCode: string | null;
-  stateFk: number;
+  stateGuuid: string;
   isActive: boolean;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -111,7 +114,7 @@ export class SyncRepository extends BaseRepository {
       .select({
         id: schema.routes.id,
         guuid: schema.routes.guuid,
-        parentRouteFk: schema.routes.parentRouteFk,
+        parentRouteGuuid: parentRoutes.guuid,
         routeName: schema.routes.routeName,
         routePath: schema.routes.routePath,
         fullPath: schema.routes.fullPath,
@@ -126,6 +129,7 @@ export class SyncRepository extends BaseRepository {
         deletedAt: schema.routes.deletedAt,
       })
       .from(schema.routes)
+      .leftJoin(parentRoutes, eq(schema.routes.parentRouteFk, parentRoutes.id))
       .where(
         sql`(${schema.routes.updatedAt}, ${schema.routes.id}) > (${cursorDate}, ${cursorId})`,
       )
@@ -175,12 +179,13 @@ export class SyncRepository extends BaseRepository {
         districtName: schema.district.districtName,
         districtCode: schema.district.districtCode,
         lgdCode: schema.district.lgdCode,
-        stateFk: schema.district.stateFk,
+        stateGuuid: schema.state.guuid,
         isActive: schema.district.isActive,
         updatedAt: schema.district.updatedAt,
         deletedAt: schema.district.deletedAt,
       })
       .from(schema.district)
+      .leftJoin(schema.state, eq(schema.district.stateFk, schema.state.id))
       .where(
         sql`(${schema.district.updatedAt}, ${schema.district.id}) > (${cursorDate}, ${cursorId})`,
       )

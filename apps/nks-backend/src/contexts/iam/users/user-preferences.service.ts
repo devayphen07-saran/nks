@@ -1,9 +1,8 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
-import { ErrorCode, errPayload } from '../../../common/constants/error-codes.constants';
+import { Injectable } from '@nestjs/common';
+import type { UserPreferences } from '../../../core/database/schema/user-preferences';
 import { UserPreferencesValidator } from './validators';
 import { AuthorizationValidator } from '../../../common/validators/authorization.validator';
 import { UserPreferencesRepository } from './repositories/user-preferences.repository';
-import { UserPreferences } from '../../../core/database/schema';
 
 @Injectable()
 export class UserPreferencesService {
@@ -15,7 +14,7 @@ export class UserPreferencesService {
    * Get or create user preferences.
    * Creates with defaults if doesn't exist.
    */
-  async getOrCreate(userId: number, createdBy: number) {
+  async getOrCreate(userId: number, createdBy: number): Promise<UserPreferences | null> {
     const existing = await this.get(userId);
     if (existing) return existing;
 
@@ -30,7 +29,7 @@ export class UserPreferencesService {
   /**
    * Get user preferences.
    */
-  async get(userId: number) {
+  async get(userId: number): Promise<UserPreferences | null> {
     return this.userPreferencesRepository.findByUserId(userId);
   }
 
@@ -99,9 +98,7 @@ export class UserPreferencesService {
     isSuperAdmin: boolean = false,
   ) {
     // Authorization check: User can only delete their own preferences unless SUPER_ADMIN
-    if (userId !== deletedBy && !isSuperAdmin) {
-      throw new ForbiddenException(errPayload(ErrorCode.FORBIDDEN));
-    }
+    AuthorizationValidator.validateOwnResource(userId, deletedBy, isSuperAdmin);
 
     return this.userPreferencesRepository.softDelete(userId, deletedBy);
   }

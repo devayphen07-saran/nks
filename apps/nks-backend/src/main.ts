@@ -1,18 +1,12 @@
 import { NestFactory } from '@nestjs/core';
+import { Logger as StaticLogger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
-import { ZodValidationPipe } from 'nestjs-zod';
 import { setupSwagger } from './config/swagger.config';
 import { buildCorsConfig } from './config/cors.config';
-import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
-import {
-  TransformInterceptor,
-  TimeoutInterceptor,
-  LoggingInterceptor,
-} from './common/interceptors';
 import { validateEnv } from './config/env.validation';
 import { CsrfMiddleware, PermissionsPolicyMiddleware } from './common/middleware';
 
@@ -79,10 +73,6 @@ async function bootstrap() {
   app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
 
   // ─── Global Prefix ────────────────────────────────────────────────────────
-  // TODO: When v2 endpoints are needed, migrate from URL prefix to NestJS versioning:
-  // 1. app.setGlobalPrefix('api');
-  // 2. app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
-  // 3. Use @Version('2') on new endpoint versions
   app.setGlobalPrefix('api/v1');
 
   // ─── CORS ─────────────────────────────────────────────────────────────────
@@ -101,26 +91,20 @@ async function bootstrap() {
   app.use(csrfMiddleware.use.bind(csrfMiddleware));
 
   // ─── Swagger ──────────────────────────────────────────────────────────────
-  setupSwagger(app);
+  // Never expose the API schema in production — it leaks endpoint details,
+  // parameter names, and response shapes that aid enumeration attacks.
+  if (nodeEnv !== 'production') {
+    setupSwagger(app);
+    logger.log(`📚 Swagger docs at:    http://localhost:${port}/api/v1/docs`);
+  }
 
-  // ─── Global Pipes ─────────────────────────────────────────────────────────
-  app.useGlobalPipes(new ZodValidationPipe());
-
-  // ─── Global Filters ───────────────────────────────────────────────────────
-  app.useGlobalFilters(new GlobalExceptionFilter(configService));
-
-  // ─── Global Interceptors ──────────────────────────────────────────────────
-  app.useGlobalInterceptors(
-    new LoggingInterceptor(), // logs method, path, status, and duration
-    new TransformInterceptor(), // wraps all raw returns in ApiResponse<T>
-    new TimeoutInterceptor(), // enforces 30s limit (REQUEST_TIMEOUT_MS)
-  );
+  // ─── Graceful Shutdown ────────────────────────────────────────────────────
+  app.enableShutdownHooks();
 
   await app.listen(port);
   logger.log(`🚀 Backend running on: http://localhost:${port}/api/v1`);
-  logger.log(`📚 Swagger docs at:    http://localhost:${port}/api/v1/docs`);
 }
-bootstrap().catch((error) => {
-  console.error('Failed to start application:', error);
+bootstrap().catch((error: unknown) => {
+  new StaticLogger('bootstrap').error('Failed to start application', error instanceof Error ? error.stack : String(error));
   process.exit(1);
 });

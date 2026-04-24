@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 // Base route fields (shared between flat and tree shapes)
 const RouteBaseSchema = z.object({
-  id: z.number().describe('Route ID'),
+  guuid: z.string().describe('Route public identifier'),
   routePath: z.string().describe('Route path (e.g., /dashboard)'),
   routeName: z.string().describe('Route display name'),
   description: z.string().nullable().describe('Route description'),
@@ -14,7 +14,7 @@ const RouteBaseSchema = z.object({
   routeScope: z.enum(['admin', 'store']).describe('Route scope'),
   isPublic: z.boolean().describe('Is public route (no auth required)'),
   isHidden: z.boolean().describe('Hidden from navigation menus but still accessible'),
-  parentRouteFk: z.number().nullable().describe('Parent route ID for nesting'),
+  parentRouteGuuid: z.string().nullable().describe('Parent route guuid for nesting'),
   fullPath: z.string().describe('Full path including parent paths'),
   sortOrder: z.number().describe('Display order'),
   canView: z.boolean().describe('Can view this route'),
@@ -35,8 +35,9 @@ const RouteTreeSchema: z.ZodType<RouteTreeSchemaType> = RouteBaseSchema.extend({
 
 const UserSummarySchema = z.object({
   guuid: z.string().describe('Public-safe user identifier'),
-  name: z.string().describe('User display name'),
-  email: z.string().describe('User email'),
+  firstName: z.string().nullable().describe('User first name'),
+  lastName: z.string().nullable().describe('User last name'),
+  email: z.string().nullable().describe('User email'),
   primaryRole: z.string().nullable().describe('Primary role code (e.g. SUPER_ADMIN, USER)'),
 });
 

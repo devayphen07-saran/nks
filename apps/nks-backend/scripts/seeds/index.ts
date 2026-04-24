@@ -10,9 +10,6 @@ export { seedEntities } from './entity.seed';
 export { seedSystemRoles } from './system-roles.seed';
 export { seedRoutes } from './routes.seed';
 export { seedRoleRouteMappings } from './role-route-mapping.seed';
-export { seedRoleEntityPermissions } from './role-entity-permission.seed';
-export { seedRoleEntityPermissionsAdmin } from './role-entity-permission-admin.seed';
-
 // New Lookup Tables
 export { seedStoreLegalTypes } from './store-legal-type.seed';
 export { seedStoreCategories } from './store-category.seed';
@@ -27,6 +24,8 @@ export { seedTaxFilingFrequencies } from './tax-filing-frequency.seed';
 export { seedPlanTypes } from './plan-type.seed';
 export { seedTaxLineStatuses } from './tax-line-status.seed';
 export { seedEntityTypes } from './entity-type.seed';
+export { seedPermissionActions } from './permission-actions.seed';
+export { seedSuperAdminPermissions } from './super-admin-permissions.seed';
 
 // Tax Engine
 export {

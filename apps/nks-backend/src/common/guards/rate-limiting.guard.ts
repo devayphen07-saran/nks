@@ -2,10 +2,9 @@ import {
   Injectable,
   CanActivate,
   ExecutionContext,
-  HttpException,
-  HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { TooManyRequestsException } from '../exceptions';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
@@ -52,8 +51,8 @@ export class RateLimitingGuard implements CanActivate {
     private readonly configService: ConfigService,
   ) {
     // Comma-separated IPs in RATE_LIMIT_EXEMPT_IPS env var, e.g. "10.0.0.1,10.0.0.2"
-    const raw = this.configService.get<string>('RATE_LIMIT_EXEMPT_IPS') ?? '';
-    this.EXEMPT_IPS = raw.split(',').map((ip) => ip.trim()).filter(Boolean);
+    const exemptIpsConfig = this.configService.get<string>('RATE_LIMIT_EXEMPT_IPS') ?? '';
+    this.EXEMPT_IPS = exemptIpsConfig.split(',').map((ip) => ip.trim()).filter(Boolean);
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -71,18 +70,22 @@ export class RateLimitingGuard implements CanActivate {
         context.getClass(),
       ]) ?? this.DEFAULT_MAX_REQUESTS;
 
-    // Key includes the route path so each endpoint has its own counter per IP
-    const key = `${clientIp}:${request.path}`;
+    // Key includes method + path so POST /auth/login and GET /auth/login have separate counters
+    const key = `${clientIp}:${request.method}:${request.path}`;
 
     const now = new Date();
     const windowCutoff = new Date(now.getTime() - this.WINDOW_MS);
     const cleanupCutoff = new Date(now.getTime() - this.CLEANUP_TTL_MS);
 
     // Fire-and-forget: delete expired rows without blocking the request
-    this.db
+    void this.db
       .delete(rateLimitEntries)
       .where(lt(rateLimitEntries.windowStart, cleanupCutoff))
-      .catch(() => {});
+      .catch((err: unknown) => {
+        this.logger.error(
+          `Rate-limit cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
 
     // Upsert: insert first hit for this IP+path, or increment within window,
     // or reset the window if the stored windowStart has expired.
@@ -116,31 +119,16 @@ export class RateLimitingGuard implements CanActivate {
       // Pass retryAfter (in seconds) so the global exception filter can set
       // the Retry-After header dynamically instead of hardcoding 60s.
       const retryAfterSec = Math.ceil(this.WINDOW_MS / 1000);
-      throw new HttpException(
-        {
-          statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          message: 'Too Many Requests',
-          meta: { retryAfter: retryAfterSec },
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
+      throw new TooManyRequestsException({
+        message: 'Too Many Requests',
+        meta: { retryAfter: retryAfterSec },
+      });
     }
 
     return true;
   }
 
   private getClientIp(request: Request): string {
-    const forwarded = request.headers['x-forwarded-for'];
-    if (forwarded) {
-      const ips = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-      return ips.split(',')[0].trim();
-    }
-
-    const realIp = request.headers['x-real-ip'];
-    if (realIp) {
-      return Array.isArray(realIp) ? realIp[0] : realIp;
-    }
-
-    return request.socket.remoteAddress || 'unknown';
+    return request.ip ?? 'unknown';
   }
 }

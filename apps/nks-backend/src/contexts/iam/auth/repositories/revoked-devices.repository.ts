@@ -77,9 +77,9 @@ export class RevokedDevicesRepository extends BaseRepository {
   @Cron('0 4 * * *')
   async cleanupExpiredRevocations(): Promise<void> {
     const cutoff = new Date(Date.now() - OFFLINE_SESSION_TTL_MS);
-    const result = await this.db
+    await this.db
       .delete(schema.revokedDevices)
       .where(lt(schema.revokedDevices.revokedAt, cutoff));
-    this.logger.log(`Revoked devices cleanup: removed ${(result as unknown as { rowCount?: number }).rowCount ?? 0} expired entries`);
+    this.logger.log('Revoked devices cleanup: expired entries removed');
   }
 }

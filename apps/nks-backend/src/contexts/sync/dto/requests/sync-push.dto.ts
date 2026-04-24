@@ -16,8 +16,8 @@ export const SyncOperationSchema = z.object({
 // mutations while offline. When present the server re-validates the HMAC
 // to detect any tampering of userId / storeId / roles on-device.
 export const OfflineSessionContextSchema = z.object({
-  userId: z.number().int().positive(),
-  storeId: z.number().int().positive().nullable(),
+  userGuuid: z.string().uuid(),
+  storeGuuid: z.string().nullable(),
   roles: z.array(z.string().min(1)),
   offlineValidUntil: z.number().int().positive(),
   signature: z.string().regex(/^[0-9a-f]{64}$/i, 'Invalid HMAC signature format'),

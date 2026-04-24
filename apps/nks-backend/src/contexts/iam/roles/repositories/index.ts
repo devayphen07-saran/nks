@@ -1,2 +1,2 @@
 export * from './roles.repository';
-export * from './role-entity-permission.repository';
+export * from './role-permissions.repository';

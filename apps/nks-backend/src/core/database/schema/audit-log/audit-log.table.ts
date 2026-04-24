@@ -19,6 +19,11 @@ export const auditLogs = pgTable(
   {
     // appendOnlyEntity — rows are immutable; no soft-delete, no update timestamps, no UI flags.
     ...appendOnlyEntity(),
+    // guuid — public stable identifier for external lookup without exposing sequential numeric id.
+    guuid: varchar('guuid', { length: 255 })
+      .notNull()
+      .unique()
+      .$defaultFn(() => crypto.randomUUID()),
 
     userFk: bigint('user_fk', { mode: 'number' }).references(() => users.id, {
       onDelete: 'set null',

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, and, isNull, count } from 'drizzle-orm';
+import { eq, and, isNull, count, asc, desc } from 'drizzle-orm';
+import type { AnyColumn } from 'drizzle-orm/column';
 import { ilikeAny } from '../../../../core/database/query-helpers';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
@@ -13,10 +14,13 @@ import type {
   UpdateLookupValueDto,
 } from '../dto/admin-lookups.dto';
 
+const DEFAULT_LOOKUP_PAGE_SIZE = 200;
+
 // ─── Row Types ──────────────────────────────────────────────────────────────
 
 type CodeValueRow = {
   id: number;
+  guuid: string;
   code: string;
   label: string;
   description: string | null;
@@ -38,6 +42,7 @@ type CodeCategoryRef = { id: number; code: string; name: string };
 /** Columns to select from code_value for generic lookup endpoints */
 const codeValueSelect = {
   id: codeValue.id,
+  guuid: codeValue.guuid,
   code: codeValue.code,
   label: codeValue.label,
   description: codeValue.description,
@@ -53,7 +58,21 @@ const codeValueSelect = {
 export class LookupsRepository extends BaseRepository {
   constructor(@InjectDb() db: NodePgDatabase<typeof schema>) { super(db); }
 
-  private queryCodeValues(categoryCode: string, limit = 200) {
+  private getValueOrderColumn(sortBy: string = 'sortOrder') {
+    switch (sortBy) {
+      case 'code':      return codeValue.code;
+      case 'label':     return codeValue.label;
+      case 'createdAt': return codeValue.createdAt;
+      case 'sortOrder':
+      default:          return codeValue.sortOrder;
+    }
+  }
+
+  private applySortDirection(column: AnyColumn, sortOrder: string = 'asc') {
+    return sortOrder === 'desc' ? desc(column) : asc(column);
+  }
+
+  private queryCodeValues(categoryCode: string, limit = DEFAULT_LOOKUP_PAGE_SIZE) {
     return this.db
       .select(codeValueSelect)
       .from(codeValue)
@@ -166,24 +185,26 @@ export class LookupsRepository extends BaseRepository {
       .orderBy(codeCategory.sortOrder, codeCategory.name);
   }
 
-  /** All non-deleted global values for a category (active + inactive — admin view) */
+  /** All non-deleted global values for a category (admin view — supports sortBy, sortOrder, isActive) */
   async findCodeValuesByCategory(
     categoryCode: string,
-    opts: { page: number; pageSize: number; search?: string },
+    opts: { page: number; pageSize: number; search?: string; sortBy?: string; sortOrder?: string; isActive?: boolean },
   ): Promise<{ rows: CodeValueRow[]; total: number }> {
-    const { page, pageSize, search } = opts;
-    const offset = (page - 1) * pageSize;
+    const { page, pageSize, search, sortBy = 'sortOrder', sortOrder = 'asc', isActive } = opts;
+    const offset = LookupsRepository.toOffset(page, pageSize);
 
     const where = and(
       eq(codeCategory.code, categoryCode),
       isNull(codeValue.storeFk),
       isNull(codeValue.deletedAt),
+      isActive !== undefined ? eq(codeValue.isActive, isActive) : undefined,
       ilikeAny(search, codeValue.label, codeValue.code),
     );
 
     return this.paginate(
-      this.db.select(codeValueSelect).from(codeValue).innerJoin(codeCategory, eq(codeValue.categoryFk, codeCategory.id)).where(where).orderBy(codeValue.sortOrder, codeValue.code).limit(pageSize).offset(offset),
-      this.db.select({ total: count() }).from(codeValue).innerJoin(codeCategory, eq(codeValue.categoryFk, codeCategory.id)).where(where),
+      this.db.select(codeValueSelect).from(codeValue).innerJoin(codeCategory, eq(codeValue.categoryFk, codeCategory.id)).where(where).orderBy(this.applySortDirection(this.getValueOrderColumn(sortBy), sortOrder)).limit(pageSize).offset(offset),
+      () => this.db.select({ total: count() }).from(codeValue).innerJoin(codeCategory, eq(codeValue.categoryFk, codeCategory.id)).where(where),
+      page, pageSize,
     );
   }
 
@@ -227,6 +248,26 @@ export class LookupsRepository extends BaseRepository {
       .where(
         and(
           eq(codeValue.id, id),
+          eq(codeCategory.code, categoryCode),
+          isNull(codeValue.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  /** Fetch a code_value by guuid and verify it belongs to categoryCode. */
+  async findCodeValueByGuuidAndCategory(
+    guuid: string,
+    categoryCode: string,
+  ): Promise<CodeValueRow & { numericId: number } | null> {
+    const [row] = await this.db
+      .select({ ...codeValueSelect, numericId: codeValue.id })
+      .from(codeValue)
+      .innerJoin(codeCategory, eq(codeValue.categoryFk, codeCategory.id))
+      .where(
+        and(
+          eq(codeValue.guuid, guuid),
           eq(codeCategory.code, categoryCode),
           isNull(codeValue.deletedAt),
         ),

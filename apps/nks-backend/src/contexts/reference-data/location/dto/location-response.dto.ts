@@ -1,8 +1,5 @@
 export interface StateResponse {
-  id: number;
-  createdBy: number | null;
-  modifiedBy: number | null;
-  deletedBy: number | null;
+  guuid: string;
   stateName: string;
   stateCode: string;
   gstStateCode: string | null;
@@ -13,41 +10,28 @@ export interface StateResponse {
   isSystem: boolean;
   createdAt: Date;
   updatedAt: Date | null;
-  deletedAt: Date | null;
 }
 
-export type StateListResponse = StateResponse[];
-
 export interface DistrictResponse {
-  id: number;
-  createdBy: number | null;
-  modifiedBy: number | null;
-  deletedBy: number | null;
+  guuid: string;
   districtName: string;
   districtCode: string | null;
   lgdCode: string | null;
-  stateFk: number;
+  stateGuuid: string;
   description: string | null;
   isActive: boolean;
   isHidden: boolean;
   isSystem: boolean;
   createdAt: Date;
   updatedAt: Date | null;
-  deletedAt: Date | null;
 }
 
-export type DistrictListResponse = DistrictResponse[];
-
 export interface PincodeResponse {
-  id: number;
-  createdBy: number | null;
-  modifiedBy: number | null;
-  deletedBy: number | null;
+  guuid: string;
   code: string;
   localityName: string;
   areaName: string | null;
-  districtFk: number;
-  // REMOVED: stateFk (state derived via district relationship)
+  districtGuuid: string;
   latitude: string | null;
   longitude: string | null;
   isActive: boolean;
@@ -55,7 +39,4 @@ export interface PincodeResponse {
   isSystem: boolean;
   createdAt: Date;
   updatedAt: Date | null;
-  deletedAt: Date | null;
 }
-
-export type PincodeListResponse = PincodeResponse[];

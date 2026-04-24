@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PG_UNIQUE_VIOLATION } from '../../../../common/constants/pg-error-codes';
-import { eq, and, isNull, ne, sql } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, lte, ne, sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
 import { TransactionService } from '../../../../core/database/transaction.service';
+import type { DbTransaction } from '../../../../core/database/transaction.service';
 import * as schema from '../../../../core/database/schema';
 import type {
   User as DbUser,
@@ -39,6 +40,54 @@ export class AuthUsersRepository extends BaseRepository {
       .from(schema.users)
       .where(and(eq(schema.users.email, email), isNull(schema.users.deletedAt)))
       .limit(1);
+
+    return user ?? null;
+  }
+
+  /**
+   * Find user + email provider password in a single JOIN.
+   * Replaces the two-query pattern (findByEmail + findByUserIdAndProvider)
+   * used on every login request.
+   */
+  async findByEmailWithPassword(
+    email: string,
+  ): Promise<{ user: DbUser; passwordHash: string } | null> {
+    const [row] = await this.db
+      .select({
+        user: schema.users,
+        passwordHash: schema.userAuthProvider.password,
+      })
+      .from(schema.users)
+      .innerJoin(
+        schema.userAuthProvider,
+        and(
+          eq(schema.userAuthProvider.userId, schema.users.id),
+          eq(schema.userAuthProvider.providerId, 'email'),
+        ),
+      )
+      .where(and(eq(schema.users.email, email), isNull(schema.users.deletedAt)))
+      .limit(1);
+
+    if (!row?.passwordHash) return null;
+    return { user: row.user, passwordHash: row.passwordHash };
+  }
+
+  /**
+   * Reset failed login counters and record the successful login in one atomic write.
+   * Replaces the two-query pattern (update + recordLogin) on every successful login.
+   */
+  async resetAndRecordLogin(userId: number): Promise<DbUser | null> {
+    const [user] = await this.db
+      .update(schema.users)
+      .set({
+        failedLoginAttempts: 0,
+        accountLockedUntil: null,
+        lastActiveAt: new Date(),
+        lastLoginAt: new Date(),
+        loginCount: sql`${schema.users.loginCount} + 1`,
+      })
+      .where(eq(schema.users.id, userId))
+      .returning();
 
     return user ?? null;
   }
@@ -82,6 +131,22 @@ export class AuthUsersRepository extends BaseRepository {
       .select()
       .from(schema.users)
       .where(and(eq(schema.users.guuid, guuid), isNull(schema.users.deletedAt)))
+      .limit(1);
+
+    return user ?? null;
+  }
+
+  async findByIamUserId(iamUserId: string): Promise<DbUser | null> {
+    const [user] = await this.db
+      .select()
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.iamUserId, iamUserId),
+          eq(schema.users.isActive, true),
+          isNull(schema.users.deletedAt),
+        ),
+      )
       .limit(1);
 
     return user ?? null;
@@ -149,15 +214,63 @@ export class AuthUsersRepository extends BaseRepository {
   }
 
   /**
-   * Update login info (last login time, login count)
+   * Atomically increment the failed login counter and return the new count.
+   * Uses SQL-level arithmetic to prevent lost-update races under concurrent requests.
    */
-  async recordLogin(userId: number): Promise<void> {
+  async incrementFailedAttempts(userId: number): Promise<number> {
+    const [row] = await this.db
+      .update(schema.users)
+      .set({ failedLoginAttempts: sql`${schema.users.failedLoginAttempts} + 1` })
+      .where(eq(schema.users.id, userId))
+      .returning({ count: schema.users.failedLoginAttempts });
+    return row?.count ?? 0;
+  }
+
+  /**
+   * Lock the account until the given timestamp.
+   * Conditional on accountLockedUntil IS NULL to prevent concurrent requests
+   * from extending an existing lockout window.
+   */
+  async lockAccount(userId: number, until: Date): Promise<void> {
     await this.db
       .update(schema.users)
-      .set({
-        lastLoginAt: new Date(),
-        loginCount: sql`login_count + 1`,
-      })
+      .set({ accountLockedUntil: until })
+      .where(
+        and(eq(schema.users.id, userId), isNull(schema.users.accountLockedUntil)),
+      );
+  }
+
+  /**
+   * Conditionally unlock an account whose lockout has expired.
+   * WHERE accountLockedUntil IS NOT NULL AND accountLockedUntil <= NOW() prevents
+   * two concurrent requests from both resetting the lock (CAS-safe auto-unlock).
+   * Returns true if the row was updated, false if the lock was already cleared by
+   * a concurrent request or the lock has not yet expired.
+   */
+  async autoUnlockIfExpired(userId: number): Promise<boolean> {
+    const now = new Date();
+    const [row] = await this.db
+      .update(schema.users)
+      .set({ accountLockedUntil: null, failedLoginAttempts: 0 })
+      .where(
+        and(
+          eq(schema.users.id, userId),
+          isNotNull(schema.users.accountLockedUntil),
+          lte(schema.users.accountLockedUntil, now),
+        ),
+      )
+      .returning({ id: schema.users.id });
+    return !!row;
+  }
+
+  /**
+   * Update lastActiveAt for a user. Called by AuthGuard on every authenticated request,
+   * throttled externally (once per 5 minutes) to limit write frequency.
+   */
+  async touchLastActiveAt(userId: number): Promise<void> {
+    await this.db
+      .update(schema.users)
+      .set({ lastActiveAt: new Date() })
       .where(eq(schema.users.id, userId));
   }
 
@@ -167,11 +280,21 @@ export class AuthUsersRepository extends BaseRepository {
    */
   async findEmailAndGuuid(
     userId: number,
-  ): Promise<{ email: string | null; guuid: string } | null> {
+  ): Promise<{ email: string | null; guuid: string; iamUserId: string; defaultStoreFk: number | null } | null> {
     const [user] = await this.db
-      .select({ email: schema.users.email, guuid: schema.users.guuid })
+      .select({
+        email: schema.users.email,
+        guuid: schema.users.guuid,
+        iamUserId: schema.users.iamUserId,
+        defaultStoreFk: schema.users.defaultStoreFk,
+      })
       .from(schema.users)
-      .where(eq(schema.users.id, userId))
+      .where(
+        and(
+          eq(schema.users.id, userId),
+          isNull(schema.users.deletedAt),
+        ),
+      )
       .limit(1);
 
     return user ?? null;
@@ -191,7 +314,11 @@ export class AuthUsersRepository extends BaseRepository {
       .select({ id: schema.users.id })
       .from(schema.users)
       .where(
-        and(eq(schema.users.email, email), ne(schema.users.id, excludeUserId)),
+        and(
+          eq(schema.users.email, email),
+          ne(schema.users.id, excludeUserId),
+          isNull(schema.users.deletedAt),
+        ),
       )
       .limit(1);
 
@@ -208,7 +335,11 @@ export class AuthUsersRepository extends BaseRepository {
       .select({ id: schema.users.id })
       .from(schema.users)
       .where(
-        and(eq(schema.users.phoneNumber, phone), eq(schema.users.id, userId)),
+        and(
+          eq(schema.users.phoneNumber, phone),
+          eq(schema.users.id, userId),
+          isNull(schema.users.deletedAt),
+        ),
       )
       .limit(1);
 
@@ -223,7 +354,7 @@ export class AuthUsersRepository extends BaseRepository {
     await this.db
       .update(schema.users)
       .set({
-        loginCount: sql`login_count + 1`,
+        loginCount: sql`${schema.users.loginCount} + 1`,
         lastLoginAt: new Date(),
         lastActiveAt: new Date(),
       })
@@ -245,63 +376,52 @@ export class AuthUsersRepository extends BaseRepository {
   }
 
   /**
-   * Increment the permissions version for a user.
+   * Increment the permissions version for a user atomically.
    * Called when roles or permissions change.
+   * Uses SQL-level SUBSTRING + CAST to avoid read-compute-write races.
    */
   async incrementPermissionsVersion(userId: number): Promise<string> {
-    const [user] = await this.db
-      .select({ permissionsVersion: schema.users.permissionsVersion })
-      .from(schema.users)
-      .where(eq(schema.users.id, userId))
-      .limit(1);
-
-    if (!user) return 'v1';
-
-    const newVersion = this.incrementVersion(user.permissionsVersion ?? 'v1');
-
-    await this.db
+    const [updated] = await this.db
       .update(schema.users)
-      .set({ permissionsVersion: newVersion })
-      .where(eq(schema.users.id, userId));
+      .set({
+        permissionsVersion: sql`'v' || (COALESCE(CAST(SUBSTRING(${schema.users.permissionsVersion} FROM 2) AS INTEGER), 0) + 1)`,
+      })
+      .where(eq(schema.users.id, userId))
+      .returning({ permissionsVersion: schema.users.permissionsVersion });
 
-    return newVersion;
+    return updated?.permissionsVersion ?? 'v1';
   }
 
   /**
-   * Get all active store IDs for a user.
+   * Get all active store IDs for a user — staff memberships + owned stores.
    * Used for building the permissions snapshot across all stores.
    */
   async findActiveStoreIds(userId: number): Promise<number[]> {
-    const rows = await this.db
-      .select({ storeId: schema.storeUserMapping.storeFk })
-      .from(schema.storeUserMapping)
-      .where(
-        and(
-          eq(schema.storeUserMapping.userFk, userId),
-          eq(schema.storeUserMapping.isActive, true),
+    const [staffRows, ownedRows] = await Promise.all([
+      this.db
+        .select({ storeId: schema.storeUserMapping.storeFk })
+        .from(schema.storeUserMapping)
+        .where(
+          and(
+            eq(schema.storeUserMapping.userFk, userId),
+            eq(schema.storeUserMapping.isActive, true),
+          ),
         ),
-      );
+      this.db
+        .select({ storeId: schema.store.id })
+        .from(schema.store)
+        .where(
+          and(
+            eq(schema.store.ownerUserFk, userId),
+            eq(schema.store.isActive, true),
+            isNull(schema.store.deletedAt),
+          ),
+        ),
+    ]);
 
-    return rows.map((r) => r.storeId).filter((id): id is number => id !== null);
-  }
-
-  /**
-   * Increment version string from format "vN" to "v(N+1)".
-   * Extracts numeric part, increments, and reconstructs.
-   */
-  private incrementVersion(currentVersion: string | null | undefined): string {
-    if (!currentVersion) return 'v1';
-    const match = /^v(\d+)$/.exec(currentVersion);
-    if (!match) return 'v1'; // reset on malformed value
-    return `v${parseInt(match[1], 10) + 1}`;
-  }
-
-  /**
-   * Run a callback inside a database transaction via TransactionService.
-   * Used by services that need to span multiple repository calls atomically.
-   */
-  async withTransaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
-    return this.txService.run(fn);
+    const staffIds = staffRows.map((r) => r.storeId).filter((id): id is number => id !== null);
+    const ownedIds = ownedRows.map((r) => r.storeId).filter((id): id is number => id !== null);
+    return [...new Set([...staffIds, ...ownedIds])];
   }
 
   /**
@@ -334,7 +454,7 @@ export class AuthUsersRepository extends BaseRepository {
       isVerified: boolean;
     } | null,
     onRoleAssignment: (
-      tx: NodePgDatabase<typeof schema>,
+      tx: DbTransaction,
       userId: number,
     ) => Promise<void>,
   ): Promise<DbUser | null> {

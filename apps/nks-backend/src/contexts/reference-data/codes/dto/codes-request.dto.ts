@@ -1,6 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { searchableSchema, paginationSchema } from '../../../../common/dto/pagination.schema';
+import { searchableSchema } from '../../../../common/dto/pagination.schema';
 
 export const CreateCodeCategorySchema = z.object({
   code: z.string().min(1).max(30),
@@ -13,7 +13,7 @@ export const CreateCodeValueSchema = z.object({
   label: z.string().min(1).max(50),
   description: z.string().max(100).optional(),
   sortOrder: z.number().int().optional(),
-  storeId: z.number().int().optional(),
+  storeGuuid: z.uuid().optional(),
 });
 
 export const UpdateCodeValueSchema = z.object({
@@ -23,13 +23,21 @@ export const UpdateCodeValueSchema = z.object({
 });
 
 // categories: standard page=1, pageSize=20 max 100
-export const GetCodeCategoriesQuerySchema = searchableSchema;
+// Phase 1: Added sortBy and isActive filters
+export const GetCodeCategoriesQuerySchema = searchableSchema.extend({
+  sortBy: z.enum(['name', 'code', 'createdAt']).default('name'),
+  sortOrder: z.enum(['asc', 'desc']).default('asc'),
+  isActive: z.coerce.boolean().optional(),
+});
 
 // values: larger pageSize (max 200, default 50) + optional storeId scope
-export const GetCodeValuesQuerySchema = paginationSchema.extend({
+// Phase 1: Added sortBy and isActive filters
+export const GetCodeValuesQuerySchema = searchableSchema.extend({
   pageSize: z.coerce.number().int().positive().max(200).default(50),
-  storeId:  z.coerce.number().int().positive().optional(),
-  search:   z.string().trim().min(1).max(100).optional(),
+  storeGuuid: z.string().optional(),
+  sortBy: z.enum(['code', 'label', 'sortOrder', 'createdAt']).default('sortOrder'),
+  sortOrder: z.enum(['asc', 'desc']).default('asc'),
+  isActive: z.coerce.boolean().optional(),
 });
 
 export class CreateCodeCategoryDto extends createZodDto(CreateCodeCategorySchema) {}

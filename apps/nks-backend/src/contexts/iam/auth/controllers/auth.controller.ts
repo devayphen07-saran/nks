@@ -8,16 +8,17 @@ import {
   Res,
   Param,
   Query,
-  ParseIntPipe,
   HttpCode,
   HttpStatus,
   UseGuards,
   UnauthorizedException,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../../../../common/guards/auth.guard';
 import type { Request, Response } from 'express';
 import { ErrorCode, errPayload } from '../../../../common/constants/error-codes.constants';
 import { AuthService } from '../services/session/auth.service';
+import { SessionService } from '../services/session/session.service';
 import { PasswordAuthService } from '../services/flows/password-auth.service';
 import { TokenLifecycleService } from '../services/token/token-lifecycle.service';
 import { OnboardingService } from '../services/flows/onboarding.service';
@@ -25,6 +26,7 @@ import { PermissionsService, type PermissionsSnapshot } from '../services/permis
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthControllerHelpers } from '../../../../common/utils/auth-helpers';
 import { extractCookieValue } from '../../../../common/utils/cookie.utils';
+import { ResponseMessage } from '../../../../common/decorators/response-message.decorator';
 import {
   LoginDto,
   RegisterDto,
@@ -35,14 +37,13 @@ import {
 } from '../dto';
 import { OnboardingCompleteDto, OnboardingCompleteResponseDto } from '../dto/onboarding.dto';
 import { SessionListDto } from '../dto/permissions.dto';
-import { ApiResponse } from '../../../../common/utils/api-response';
 import { RateLimitingGuard } from '../../../../common/guards/rate-limiting.guard';
 import { Public } from '../../../../common/decorators/public.decorator';
 import { CurrentUser } from '../../../../common/decorators/current-user.decorator';
 import { RateLimit } from '../../../../common/decorators/rate-limit.decorator';
+import { NoEntityPermissionRequired } from '../../../../common/decorators/no-entity-permission-required.decorator';
 import { JWTConfigService } from '../../../../config/jwt.config';
 import type { SessionUser } from '../interfaces/session-user.interface';
-import { AUTH_CONSTANTS } from '../../../../common/constants/app-constants';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -50,6 +51,7 @@ import { AUTH_CONSTANTS } from '../../../../common/constants/app-constants';
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly sessionService: SessionService,
     private readonly passwordAuthService: PasswordAuthService,
     private readonly tokenLifecycleService: TokenLifecycleService,
     private readonly jwtConfigService: JWTConfigService,
@@ -62,21 +64,25 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(RateLimitingGuard)
   @RateLimit(10)
+  @ResponseMessage('Login successful')
   @ApiOperation({ summary: 'Login with email + password' })
   async login(
     @Body() dto: LoginDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<ApiResponse<AuthResponseEnvelope>> {
+  ): Promise<AuthResponseEnvelope> {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
     const result = await this.passwordAuthService.login(dto, deviceInfo);
     AuthControllerHelpers.applySessionCookie(res, result);
-    return ApiResponse.ok(result, 'Login successful');
+    return result;
   }
 
   @Post('register')
   @Public()
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(RateLimitingGuard)
+  @RateLimit(10)
+  @ResponseMessage('Registration successful')
   @ApiOperation({
     summary: 'Register new user. First user auto-assigned SUPER_ADMIN.',
   })
@@ -84,11 +90,11 @@ export class AuthController {
     @Body() dto: RegisterDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<ApiResponse<AuthResponseEnvelope>> {
+  ): Promise<AuthResponseEnvelope> {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
     const result = await this.passwordAuthService.register(dto, deviceInfo);
     AuthControllerHelpers.applySessionCookie(res, result);
-    return ApiResponse.ok(result, 'Registration successful');
+    return result;
   }
 
   @Post('refresh-token')
@@ -96,6 +102,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(RateLimitingGuard)
   @RateLimit(30)
+  @ResponseMessage('Token refreshed successfully')
   @ApiOperation({
     summary: 'Refresh access token using refresh token',
     description:
@@ -105,21 +112,17 @@ export class AuthController {
     @Body() dto: RefreshTokenDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<
-    ApiResponse<{
-      sessionId: string;
-      sessionToken: string;
-      jwtToken: string;
-      expiresAt: string;
-      refreshToken: string;
-      refreshExpiresAt: string;
-      defaultStore: { guuid: string } | null;
-      offlineToken: string;
-    }>
-  > {
+  ): Promise<{
+    sessionId: string;
+    sessionToken: string;
+    jwtToken: string;
+    expiresAt: string;
+    refreshToken: string;
+    refreshExpiresAt: string;
+    defaultStore: { guuid: string } | null;
+    offlineToken: string;
+  }> {
     const cookieToken = this.parseSessionCookie(req);
-    // Prefer body token (mobile sends refresh token in body).
-    // Fall back to cookie only for web clients that don't send a body.
     const providedRefreshToken = dto.refreshToken ?? cookieToken;
 
     if (!providedRefreshToken) {
@@ -127,8 +130,7 @@ export class AuthController {
     }
 
     const deviceId =
-      (req.headers as Record<string, string | undefined>)['x-device-id'] ??
-      null;
+      (req.headers as Record<string, string | undefined>)['x-device-id'] ?? null;
 
     const result = await this.tokenLifecycleService.refreshAccessToken(
       providedRefreshToken,
@@ -136,49 +138,48 @@ export class AuthController {
     );
 
     AuthControllerHelpers.setSessionCookie(res, result.sessionToken);
-    return ApiResponse.ok(result, 'Token refreshed successfully');
+    return result;
   }
 
   @Get('me')
   @HttpCode(HttpStatus.OK)
+  @NoEntityPermissionRequired('self-service: user reading their own session and profile data')
+  @ResponseMessage('Authenticated')
   @ApiOperation({
     summary: 'Get current authenticated user',
     description:
       'Validates the session and returns user profile + roles. Web calls this on mount to verify the httpOnly cookie is still valid.',
   })
-  getMe(@Req() req: AuthenticatedRequest): ApiResponse<MeResponseDto> {
+  getMe(@Req() req: AuthenticatedRequest): MeResponseDto {
     const u = req.user;
-    const me: MeResponseDto = {
-      id: u.id,
+    return {
       guuid: u.guuid,
-      name: u.name,
+      iamUserId: u.iamUserId,
+      firstName: u.firstName,
+      lastName: u.lastName,
       email: u.email,
       emailVerified: u.emailVerified,
       phoneNumber: u.phoneNumber,
       phoneNumberVerified: u.phoneNumberVerified,
       image: u.image,
     };
-    return ApiResponse.ok(me, 'Authenticated');
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
+  @NoEntityPermissionRequired('self-service: user revoking their own session')
+  @ResponseMessage('Logged out')
   @ApiOperation({ summary: 'Invalidate the current session token' })
   async logout(
-    @Req() req: Request,
+    @Req() req: AuthenticatedRequest,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<ApiResponse<null>> {
+  ): Promise<null> {
     const token = this.parseSessionCookie(req);
     if (token) {
-      await this.authService.logout(token);
+      await this.authService.logout(token, req.user.userId);
     }
-    res.clearCookie('nks_session', {
-      httpOnly: true,
-      sameSite: 'strict',
-      secure: AUTH_CONSTANTS.SESSION.COOKIE_SECURE,
-      path: '/',
-    });
-    return ApiResponse.ok(null, 'Logged out');
+    AuthControllerHelpers.clearSessionCookie(res);
+    return null;
   }
 
   @Get('mobile-jwks')
@@ -189,25 +190,17 @@ export class AuthController {
     description:
       'Returns the RS256 public key in JWKS format for verifying access and offline JWTs on device.',
   })
-  getMobileJwks(@Res({ passthrough: true }) res: Response): Record<string, unknown> {
-    const publicKeyJwk = this.jwtConfigService.getPublicKeyAsJwk();
+  getMobileJwks(@Res() res: Response): void {
+    const jwks = this.jwtConfigService.getPublicKeyAsJWKS();
     res.set('Cache-Control', 'public, max-age=3600');
     res.set('Content-Type', 'application/jwk-set+json');
-    return {
-      keys: [
-        {
-          ...publicKeyJwk,
-          kid: this.jwtConfigService.getCurrentKid(),
-          use: 'sig',
-          alg: 'RS256',
-          pem: this.jwtConfigService.getPublicKeyPem(),
-        },
-      ],
-    };
+    res.json(jwks);
   }
 
   @Get('sessions')
   @HttpCode(HttpStatus.OK)
+  @NoEntityPermissionRequired('self-service: user listing their own sessions')
+  @ResponseMessage('Sessions retrieved')
   @ApiOperation({
     summary: 'List user device sessions',
     description:
@@ -215,34 +208,29 @@ export class AuthController {
   })
   async getSessions(
     @Req() req: AuthenticatedRequest,
-  ): Promise<ApiResponse<SessionListDto>> {
-    const sessions = await this.authService.getUserSessions(req.user.userId);
-    const currentSessionId = req.headers['x-session-id'] as string;
-    return ApiResponse.ok(
-      {
-        sessions,
-        currentSessionId: currentSessionId ? Number(currentSessionId) : null,
-        total: sessions.length,
-      } as SessionListDto,
-      'Sessions retrieved',
-    );
+  ): Promise<SessionListDto> {
+    const sessions = await this.sessionService.getUserSessions(req.user.userId);
+    const currentSessionId = (req.headers['x-session-id'] as string) ?? null;
+    return { sessions, currentSessionId, total: sessions.length };
   }
 
-  @Delete('sessions/:sessionId')
+  @Delete('sessions/:sessionGuuid')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @NoEntityPermissionRequired('self-service: user revoking one of their own sessions')
   @ApiOperation({
     summary: 'Terminate a specific session',
     description: 'Remotely logout from a specific device/session',
   })
   async terminateSession(
-    @Param('sessionId', ParseIntPipe) sessionId: number,
+    @Param('sessionGuuid', ParseUUIDPipe) sessionGuuid: string,
     @Req() req: AuthenticatedRequest,
   ): Promise<void> {
-    await this.authService.terminateSession(req.user.userId, sessionId);
+    await this.sessionService.terminateSession(req.user.userId, sessionGuuid);
   }
 
   @Delete('sessions')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @NoEntityPermissionRequired('self-service: user revoking all their own sessions')
   @ApiOperation({
     summary: 'Terminate all sessions',
     description:
@@ -251,19 +239,15 @@ export class AuthController {
   async terminateAllSessions(
     @Req() req: AuthenticatedRequest,
   ): Promise<void> {
-    await this.authService.terminateAllSessions(req.user.userId);
+    await this.sessionService.terminateAllSessions(req.user.userId);
   }
 
-  /**
-   * GET /auth/session-status
-   * Mobile reconnection check — no AuthGuard so revoked/expired sessions
-   * still get a useful response rather than a 401.
-   */
   @Get('session-status')
   @Public()
   @UseGuards(RateLimitingGuard)
   @RateLimit(5)
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Session status checked')
   @ApiOperation({
     summary: 'Check session revocation status',
     description:
@@ -271,25 +255,23 @@ export class AuthController {
   })
   async getSessionStatus(
     @Req() req: Request,
-  ): Promise<ApiResponse<{ active: boolean; revoked: boolean; wipe: boolean }>> {
+  ): Promise<{ active: boolean; revoked: boolean; wipe: boolean }> {
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith('Bearer ')
       ? authHeader.slice(7)
       : this.parseSessionCookie(req);
 
     if (!token) {
-      return ApiResponse.ok(
-        { active: false, revoked: true, wipe: false },
-        'No session token',
-      );
+      return { active: false, revoked: true, wipe: false };
     }
 
-    const result = await this.authService.checkSessionStatus(token);
-    return ApiResponse.ok(result, result.active ? 'Session active' : 'Session revoked');
+    return this.authService.checkSessionStatus(token);
   }
 
   @Post('profile-complete')
   @HttpCode(HttpStatus.OK)
+  @NoEntityPermissionRequired('self-service: user completing their own profile')
+  @ResponseMessage('Profile updated')
   @ApiOperation({
     summary: 'Complete user profile (name / email+password / phone)',
     description: 'Called during onboarding to set name and add credentials.',
@@ -297,13 +279,14 @@ export class AuthController {
   async profileComplete(
     @Req() req: AuthenticatedRequest,
     @Body() dto: OnboardingCompleteDto,
-  ): Promise<ApiResponse<OnboardingCompleteResponseDto>> {
-    const result = await this.onboardingService.completeOnboarding(Number(req.user.id), dto);
-    return ApiResponse.ok(result, result.message);
+  ): Promise<OnboardingCompleteResponseDto> {
+    return this.onboardingService.completeOnboarding(req.user.userId, dto);
   }
 
   @Get('permissions-snapshot')
   @HttpCode(HttpStatus.OK)
+  @NoEntityPermissionRequired('self-service: user reading their own permission snapshot')
+  @ResponseMessage('Permissions snapshot retrieved')
   @ApiOperation({
     summary: 'Get full permissions snapshot',
     description:
@@ -311,13 +294,14 @@ export class AuthController {
   })
   async getPermissionsSnapshot(
     @CurrentUser() user: SessionUser,
-  ): Promise<ApiResponse<PermissionsSnapshot>> {
-    const snapshot = await this.permissionsService.buildPermissionsSnapshot(user.userId);
-    return ApiResponse.ok(snapshot, 'Permissions snapshot retrieved');
+  ): Promise<PermissionsSnapshot> {
+    return this.permissionsService.buildPermissionsSnapshot(user.userId);
   }
 
   @Get('permissions-delta')
   @HttpCode(HttpStatus.OK)
+  @NoEntityPermissionRequired('self-service: user reading their own permissions delta')
+  @ResponseMessage('Permissions delta retrieved')
   @ApiOperation({
     summary: 'Get permissions delta since version',
     description:
@@ -326,32 +310,27 @@ export class AuthController {
   async getPermissionsDelta(
     @CurrentUser() user: SessionUser,
     @Query('version') sinceVersion: string,
-  ): Promise<ApiResponse<{ version: string; added: PermissionsSnapshot; removed: PermissionsSnapshot; modified: PermissionsSnapshot }>> {
-    const delta = await this.permissionsService.calculateDelta(user.userId, sinceVersion ?? '');
-    return ApiResponse.ok(delta, 'Permissions delta retrieved');
+  ): Promise<{ version: string; added: PermissionsSnapshot; removed: PermissionsSnapshot; modified: PermissionsSnapshot }> {
+    return this.permissionsService.calculateDelta(user.userId, sinceVersion ?? '');
   }
 
-  /**
-   * POST /auth/sync-time
-   * Mobile calls this at login and after token refresh to calculate device clock offset.
-   * Returns offset = serverTime - deviceTime (seconds). Positive means device is behind.
-   */
   @Post('sync-time')
   @Public()
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Server time')
   @ApiOperation({
     summary: 'Sync device clock with server time',
     description: 'Returns the offset between server and device time in seconds. Used by mobile for clock drift detection before offline operations.',
   })
-  getSyncTime(@Body() dto: SyncTimeDto): ApiResponse<{ serverTime: number; offset: number }> {
+  getSyncTime(@Body() dto: SyncTimeDto): { serverTime: number; offset: number } {
     const serverTime = Math.floor(Date.now() / 1000);
     const offset = serverTime - dto.deviceTime;
-    return ApiResponse.ok({ serverTime, offset }, 'Server time');
+    return { serverTime, offset };
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────
 
   private parseSessionCookie(req: Request): string | undefined {
-    return extractCookieValue(req.headers.cookie ?? '', 'nks_session');
+    return extractCookieValue(req.headers.cookie ?? '', AuthControllerHelpers.SESSION_COOKIE_NAME);
   }
 }

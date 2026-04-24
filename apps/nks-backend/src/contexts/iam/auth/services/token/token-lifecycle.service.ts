@@ -1,30 +1,37 @@
 import * as crypto from 'crypto';
+import { JsonWebTokenError } from 'jsonwebtoken';
+import { Injectable, Logger } from '@nestjs/common';
+import { TokenLifecycleValidator } from '../../validators';
 import {
-  Injectable,
   UnauthorizedException,
-  InternalServerErrorException,
-  Logger,
-} from '@nestjs/common';
+  InternalServerException,
+} from '../../../../../common/exceptions';
 import { JWTConfigService } from '../../../../../config/jwt.config';
 import { RefreshTokenService } from '../session/refresh-token.service';
 import { SessionsRepository } from '../../repositories/sessions.repository';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
-import { RolesRepository } from '../../../roles/repositories/roles.repository';
+import { RoleQueryService } from '../../../roles/role-query.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
 import {
   JWT_AUDIENCE,
   OFFLINE_JWT_EXPIRATION,
+  ACCESS_TOKEN_TTL_MS,
+  REFRESH_TOKEN_TTL_MS,
 } from '../../auth.constants';
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
-import { ErrorCode, errPayload } from '../../../../../common/constants/error-codes.constants';
+import {
+  ErrorCode,
+  errPayload,
+} from '../../../../../common/constants/error-codes.constants';
+import { AuditService } from '../../../../compliance/audit/audit.service';
 
 export interface VerifyClaimsResponse {
   isValid: boolean;
   sub?: string;
   rolesChanged: boolean;
   currentRoles?: string[];
-  stores?: Array<{ id: number | null; name: string | null }>;
+  stores?: Array<{ guuid: string | null; name: string | null }>;
 }
 
 /**
@@ -46,9 +53,10 @@ export class TokenLifecycleService {
     private readonly refreshTokenService: RefreshTokenService,
     private readonly sessionsRepository: SessionsRepository,
     private readonly authUsersRepository: AuthUsersRepository,
-    private readonly rolesRepository: RolesRepository,
+    private readonly roleQuery: RoleQueryService,
     private readonly permissionsService: PermissionsService,
     private readonly authUtils: AuthUtilsService,
+    private readonly auditService: AuditService,
   ) {}
 
   async refreshAccessToken(
@@ -65,7 +73,12 @@ export class TokenLifecycleService {
     offlineToken: string;
     rolesChanged: boolean;
   }> {
-    // Step 1: Hash for DB lookup (token is fully opaque)
+    // Step 1: Reject oversized inputs before hashing to prevent DoS via large payloads.
+    // base64url(32 bytes) = 43 chars; 512 gives headroom for future token format changes.
+    if (!refreshToken || refreshToken.length > 512) {
+      throw new UnauthorizedException(errPayload(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
+    }
+
     const refreshTokenHash = crypto
       .createHash('sha256')
       .update(refreshToken)
@@ -76,13 +89,13 @@ export class TokenLifecycleService {
       await this.sessionsRepository.findByRefreshTokenHashForUpdate(
         refreshTokenHash,
       );
-    if (!session) throw new UnauthorizedException(errPayload(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
+    TokenLifecycleValidator.assertRefreshTokenValid(session);
 
     const isValidToken = this.refreshTokenService.verifyTokenHash(
       refreshToken,
       session.refreshTokenHash,
     );
-    if (!isValidToken) throw new UnauthorizedException(errPayload(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
+    TokenLifecycleValidator.assertTokenHashValid(isValidToken);
 
     // Step 2b: Theft detection — if token was already rotated, terminate all sessions
     if (session.refreshTokenRevokedAt !== null) {
@@ -94,28 +107,39 @@ export class TokenLifecycleService {
           attemptedAt: new Date(),
         },
       );
+      // Emit to audit trail — structured log alone is not enough: the audit
+      // table is the security-facing record that compliance tools query.
+      this.auditService.log({
+        action: 'TOKEN_REVOKE',
+        userId: session.userId,
+        description: 'TOKEN THEFT: refresh token reused after rotation — all sessions force-terminated',
+        severity: 'critical',
+        resourceType: 'session',
+        resourceId: session.id,
+        metadata: {
+          sessionId: session.id,
+          revokedAt: session.refreshTokenRevokedAt,
+          reason: 'TOKEN_THEFT_DETECTED',
+        },
+      });
       await this.sessionsRepository.revokeAndDeleteAllForUser(
         session.userId,
         'TOKEN_REUSE',
       );
-      throw new UnauthorizedException(errPayload(ErrorCode.AUTH_SESSION_COMPROMISED));
+      TokenLifecycleValidator.assertNotCompromised(
+        session.refreshTokenRevokedAt,
+      );
     }
 
-    if (session.expiresAt < new Date())
-      throw new UnauthorizedException(errPayload(ErrorCode.AUTH_SESSION_EXPIRED));
+    TokenLifecycleValidator.assertSessionNotExpired(session.expiresAt);
 
     // Step 3a: Device binding — mobile tokens must match device
-    if (session.deviceId !== null && session.deviceId !== deviceId) {
-      throw new UnauthorizedException(errPayload(ErrorCode.AUTH_DEVICE_MISMATCH));
-    }
+    TokenLifecycleValidator.assertDeviceMatch(session.deviceId, deviceId);
 
     // Step 3b: Refresh token expiry
-    if (
-      session.refreshTokenExpiresAt &&
-      session.refreshTokenExpiresAt < new Date()
-    ) {
-      throw new UnauthorizedException(errPayload(ErrorCode.AUTH_REFRESH_TOKEN_EXPIRED));
-    }
+    TokenLifecycleValidator.assertRefreshTokenNotExpired(
+      session.refreshTokenExpiresAt,
+    );
 
     // Step 4: Fetch permissions + user in parallel
     const [permissions, user] = await Promise.all([
@@ -124,14 +148,14 @@ export class TokenLifecycleService {
     ]);
 
     if (!user?.guuid) {
-      throw new InternalServerErrorException(
+      throw new InternalServerException(
         'User record missing guuid — cannot sign JWT',
       );
     }
 
-    const userRoles = permissions.roles || [];
+    const userRoles = permissions.roles ?? [];
     const currentRoleHash = this.authUtils.hashRoles(userRoles);
-    const accessTokenExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min
+    const accessTokenExpiresAt = new Date(Date.now() + ACCESS_TOKEN_TTL_MS);
 
     // Role change detection — compare current role hash against the hash stored
     // at session creation time. A mismatch means an admin added/removed a role
@@ -145,26 +169,25 @@ export class TokenLifecycleService {
       );
     }
 
-    // Step 5: Rotate session — BetterAuth issues a new opaque token
+    // Step 5: Rotate session — BetterAuth issues a new opaque token.
+    // BREAKING: tied to better-auth@^1.6.2 internalAdapter API.
+    // internalAdapter is undocumented. If createSession disappears or changes
+    // signature on a BetterAuth upgrade, this will fail at runtime with no TS error.
     const ctx = await this.authUtils.getBetterAuthContext();
     const createdSession = await ctx.internalAdapter.createSession(
       String(session.userId),
     );
-    if (!createdSession)
-      throw new UnauthorizedException(errPayload(ErrorCode.AUTH_SESSION_ROTATION_FAILED));
+    TokenLifecycleValidator.assertSessionCreated(createdSession);
 
     const newSession = await this.sessionsRepository.findByToken(
       createdSession.token,
     );
-    if (!newSession)
-      throw new UnauthorizedException(errPayload(ErrorCode.AUTH_SESSION_ROTATION_FAILED));
+    TokenLifecycleValidator.assertSessionCreated(newSession);
 
     // Step 6: Generate new refresh token (in-memory only, not yet persisted)
     const { token: newRefreshToken, tokenHash: newRefreshTokenHash } =
       this.refreshTokenService.generateRefreshToken();
-    const newRefreshTokenExpiresAt = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000,
-    ); // 7d
+    const newRefreshTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
 
     // Step 7: Atomically persist the new session + revoke the old refresh token.
     // Re-validate activeStoreFk — user's role in that store may have been revoked since last login.
@@ -198,8 +221,8 @@ export class TokenLifecycleService {
       this.logger.warn(
         `Refresh race detected for session ${session.id} — another refresh already completed`,
       );
-      throw new UnauthorizedException(errPayload(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
     }
+    TokenLifecycleValidator.assertRotationSucceeded(rotated);
 
     // Step 8: Sign JWT only after session rotation is confirmed in DB.
     // Signing before rotation risks an orphaned JWT that passes AuthGuard
@@ -208,22 +231,33 @@ export class TokenLifecycleService {
       sub: user.guuid,
       sid: newSession.guuid,
       jti: crypto.randomUUID(),
+      iamUserId: user.iamUserId,
       ...(user.email ? { email: user.email } : {}),
       roles: userRoles.map((r) => r.roleCode),
       iss: 'nks-auth',
       aud: JWT_AUDIENCE,
     });
 
-    // Step 8: Fetch default store
+    // Step 9: Resolve default store from users.defaultStoreFk (persistent preference).
+    // Validate user still has a role in that store before trusting it.
+    const defaultStoreId = user.defaultStoreFk ?? null;
+    const validatedDefaultStoreId =
+      defaultStoreId !== null &&
+      userRoles.some((r) => r.storeId === defaultStoreId)
+        ? defaultStoreId
+        : null;
+
+    // Resolve guuid for the response using existing pattern.
     const storeOwnerRoleId = await this.authUtils.getCachedSystemRoleId(
       SystemRoleCodes.STORE_OWNER,
     );
-    const primaryStore = storeOwnerRoleId
-      ? await this.rolesRepository.findPrimaryStoreForUser(
-          session.userId,
-          storeOwnerRoleId,
-        )
-      : null;
+    const primaryStore =
+      storeOwnerRoleId && validatedDefaultStoreId
+        ? await this.roleQuery.findPrimaryStoreForUser(
+            session.userId,
+            storeOwnerRoleId,
+          )
+        : null;
 
     const offlineToken = this.jwtConfigService.signOfflineToken(
       {
@@ -231,12 +265,12 @@ export class TokenLifecycleService {
         ...(user.email ? { email: user.email } : {}),
         roles: userRoles.map((r) => r.roleCode),
         stores: userRoles
-          .filter((r) => r.storeId && r.storeName)
+          .filter((r) => r.storeGuuid && r.storeName)
           .map((r) => ({
-            id: r.storeId as number,
+            guuid: r.storeGuuid as string,
             name: r.storeName as string,
           })),
-        activeStoreId: userRoles?.find((r) => r.isPrimary && r.storeId)?.storeId ?? null,
+        activeStoreGuuid: primaryStore?.guuid ?? null,
       },
       OFFLINE_JWT_EXPIRATION,
     );
@@ -261,18 +295,21 @@ export class TokenLifecycleService {
       const payload = this.jwtConfigService.verifyToken(jwtToken);
 
       if (payload.aud !== JWT_AUDIENCE) {
-        throw new UnauthorizedException(errPayload(ErrorCode.AUTH_INVALID_JWT_AUDIENCE));
+        throw new UnauthorizedException(
+          errPayload(ErrorCode.AUTH_INVALID_JWT_AUDIENCE),
+        );
       }
 
       const user = await this.authUsersRepository.findByGuuid(payload.sub);
-      if (!user) throw new UnauthorizedException(errPayload(ErrorCode.USER_NOT_FOUND));
+      if (!user)
+        throw new UnauthorizedException(errPayload(ErrorCode.USER_NOT_FOUND));
 
       const currentPermissions =
         await this.permissionsService.getUserPermissions(user.id);
-      const currentRoles = currentPermissions.roles || [];
+      const currentRoles = currentPermissions.roles ?? [];
       const currentRoleCodes = currentRoles.map((r) => r.roleCode);
 
-      const tokenRoles = payload.roles || [];
+      const tokenRoles = payload.roles ?? [];
       const rolesChanged = !this.arraysEqual(
         [...currentRoleCodes].sort(),
         [...tokenRoles].sort(),
@@ -288,11 +325,16 @@ export class TokenLifecycleService {
         rolesChanged,
         currentRoles: currentRoleCodes,
         stores: currentRoles
-          .filter((r) => r.storeId)
-          .map((r) => ({ id: r.storeId, name: r.storeName })),
+          .filter((r) => r.storeGuuid)
+          .map((r) => ({ guuid: r.storeGuuid, name: r.storeName })),
       };
     } catch (error) {
-      this.logger.error(`JWT verification failed: ${error}`);
+      // Re-throw infrastructure failures (DB, permissions service) so the caller
+      // gets a 500 rather than a silent isValid:false that masks the real problem.
+      if (!(error instanceof JsonWebTokenError) && !(error instanceof UnauthorizedException)) {
+        throw error;
+      }
+      this.logger.warn(`JWT verification failed: ${error instanceof Error ? error.message : String(error)}`);
       return { isValid: false, rolesChanged: false };
     }
   }

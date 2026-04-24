@@ -5,7 +5,8 @@ import {
   CallHandler,
   Logger,
 } from '@nestjs/common';
-import { Observable, tap } from 'rxjs';
+import { Observable } from 'rxjs';
+import { finalize } from 'rxjs/operators';
 import type { Request, Response } from 'express';
 
 /**
@@ -29,12 +30,17 @@ export class LoggingInterceptor implements NestInterceptor {
     const requestId = req.headers['x-request-id'] as string | undefined;
 
     return next.handle().pipe(
-      tap(() => {
+      finalize(() => {
         const ms = Date.now() - start;
+        // req.route?.path is the route template (e.g. /users/:id/sessions) rather than
+        // the actual URL with param values. This keeps log lines groupable in Datadog/ELK
+        // — without it, every UUID in a path generates a unique log entry.
+        const routePath = (req as Request & { route?: { path?: string } }).route?.path ?? url;
         this.logger.log(
-          `${method} ${url} → ${res.statusCode} (${ms}ms)${requestId ? ` [${requestId}]` : ''}`,
+          `${method} ${routePath} → ${res.statusCode} (${ms}ms)${requestId ? ` [${requestId}]` : ''}`,
         );
       }),
     );
   }
+
 }

@@ -8,6 +8,9 @@ import { searchableSchema } from '../../../../common/dto/pagination.schema';
 export const GetLookupValuesQuerySchema = searchableSchema.extend({
   pageSize: z.coerce.number().int().positive().max(200).default(50),
   search:   z.string().trim().min(2).max(100).optional(),
+  sortBy: z.enum(['code', 'label', 'sortOrder', 'createdAt']).default('sortOrder'),
+  sortOrder: z.enum(['asc', 'desc']).default('asc'),
+  isActive: z.coerce.boolean().optional(),
 });
 
 export class GetLookupValuesQueryDto extends createZodDto(GetLookupValuesQuerySchema) {}
@@ -34,7 +37,7 @@ export interface LookupTypeResponse {
 }
 
 export interface LookupValueAdminResponse {
-  id:          number;
+  guuid:       string;
   code:        string;
   label:       string;
   description: string | null | undefined;

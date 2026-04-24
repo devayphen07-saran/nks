@@ -2,6 +2,8 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import { JWTConfigService } from '../../../../../config/jwt.config';
 import { KeyRotationAlertService } from './key-rotation-alert.service';
+import { InternalServerException } from '../../../../../common/exceptions';
+import { ErrorCode, errPayload } from '../../../../../common/constants/error-codes.constants';
 
 export interface KeyRotationConfig {
   enabled: boolean;
@@ -96,8 +98,18 @@ export class KeyRotationScheduler implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Check if rotation is needed based on schedule and maintenance window
-   * Performs rotation if conditions are met
+   * Check if rotation is needed based on schedule and maintenance window.
+   * Performs rotation if conditions are met.
+   *
+   * MULTI-POD WARNING: This check runs independently on every pod via setInterval.
+   * `lastRotationTime` is in-process — two pods that both pass `isRotationDue()`
+   * in the same maintenance window will both call `performKeyRotation()`, potentially
+   * writing two different new keys simultaneously (split-brain).
+   *
+   * Mitigation path: add a distributed lock (Redis SET rotationLock EX 3600 NX)
+   * at the top of this method — skip the rotation if the lock cannot be acquired.
+   * Until that is implemented, ensure only ONE replica has JWT_KEY_ROTATION_ENABLED=true
+   * via a Kubernetes leader-election init container or equivalent.
    */
   private async checkAndRotateIfNeeded(): Promise<void> {
     // Check if we're in maintenance window
@@ -172,12 +184,13 @@ export class KeyRotationScheduler implements OnModuleInit, OnModuleDestroy {
       // When ready, implement generateNewKeyPair() to call your key management service.
       const newKeyPair = await this.generateNewKeyPair();
       if (!newKeyPair) {
-        throw new Error(
-          'Key generation not yet implemented. Rotate keys manually: ' +
+        this.logger.warn(
+          'Key generation not yet implemented — rotate keys manually: ' +
           '1) Generate new PEM files via HSM/KMS, ' +
           '2) Replace secrets/jwt_rsa_*.pem, ' +
           '3) Restart the service.',
         );
+        throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
       }
 
       const newKid = this.jwtConfig.getCurrentKid();
@@ -218,48 +231,16 @@ export class KeyRotationScheduler implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /**
-   * Generate new RSA key pair
-   * In production, this should use HSM or secure key management
-   *
-   * For now, returns a placeholder that indicates the operation
-   * that needs to happen outside of normal runtime
-   */
+  // Key generation is intentionally not implemented — use HSM/KMS externally.
+  // To rotate: replace secrets/jwt_rsa_*.pem and restart the service.
   private async generateNewKeyPair(): Promise<{
     privateKey: string;
     publicKey: string;
   } | null> {
-    // Note: In production, this would:
-    // 1. Call HSM/KMS to generate new 2048-bit RSA key
-    // 2. Securely store private key
-    // 3. Return both keys for use
-    //
-    // This is a critical security operation that should be handled by:
-    // - AWS KMS, HashiCorp Vault, Azure Key Vault, or similar
-    // - Manual HSM rotation with proper security controls
-    // - Not in application code
-    //
-    // For MVP, key rotation is manual via HSM
-    // This method documents where automated generation would occur
-
     this.logger.warn(
       'Key generation not implemented in application (use HSM/KMS in production)',
     );
     return null;
-  }
-
-  /**
-   * Reload JWTConfigService to recompute kid
-   * This is a workaround for in-memory service state
-   * In production, consider externalizing key management
-   */
-  private async reloadJWTConfig(): Promise<void> {
-    // NOTE: Implement proper reload mechanism when externalizing key management
-    // Current approach: JWTConfigService reloads from RSAKeyManager in constructor
-    // Could trigger via:
-    // - Destroy and recreate service instance
-    // - Emit event for other services to reload
-    // - Call internal reload method (if available)
   }
 
   /**
@@ -275,22 +256,14 @@ export class KeyRotationScheduler implements OnModuleInit, OnModuleDestroy {
     message: string;
   }> {
     const oldKid = this.jwtConfig.getCurrentKid();
-
-    try {
-      await this.performKeyRotation('emergency');
-      const newKid = this.jwtConfig.getCurrentKid();
-
-      return {
-        success: true,
-        oldKid,
-        newKid,
-        message: 'Emergency key rotation completed successfully',
-      };
-    } catch (error) {
-      throw new Error(
-        `Emergency key rotation failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    await this.performKeyRotation('emergency');
+    const newKid = this.jwtConfig.getCurrentKid();
+    return {
+      success: true,
+      oldKid,
+      newKid,
+      message: 'Emergency key rotation completed successfully',
+    };
   }
 
   /**

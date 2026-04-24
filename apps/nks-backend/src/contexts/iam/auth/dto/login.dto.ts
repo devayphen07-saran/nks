@@ -7,7 +7,7 @@ import { z } from 'zod';
  * users whose passwords were created under a prior weaker policy (M7).
  */
 export const LoginSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  email: z.email('Invalid email address'),
   password: z.string().min(1, 'Password is required').max(100),
 });
 

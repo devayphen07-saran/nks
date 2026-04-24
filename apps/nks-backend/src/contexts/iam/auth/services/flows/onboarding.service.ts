@@ -1,13 +1,10 @@
-import {
-  Injectable,
-  UnauthorizedException,
-  BadRequestException,
-  ConflictException,
-} from '@nestjs/common';
-import { ErrorCode, errPayload } from '../../../../../common/constants/error-codes.constants';
+import { Injectable } from '@nestjs/common';
+import { InternalServerException } from '../../../../../common/exceptions';
+import { OnboardingValidator } from '../../validators';
 import { OnboardingCompleteDto, OnboardingCompleteResponseDto } from '../../dto';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { AuthProviderRepository } from '../../repositories/auth-provider.repository';
+import { TransactionService } from '../../../../../core/database/transaction.service';
 import { OtpService } from '../otp/otp.service';
 import { PasswordService } from '../security/password.service';
 
@@ -27,6 +24,7 @@ export class OnboardingService {
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly authProviderRepository: AuthProviderRepository,
+    private readonly txService: TransactionService,
     private readonly otpService: OtpService,
     private readonly passwordService: PasswordService,
   ) {}
@@ -36,31 +34,34 @@ export class OnboardingService {
     dto: OnboardingCompleteDto,
   ): Promise<OnboardingCompleteResponseDto> {
     const user = await this.authUsersRepository.findById(userId);
-    if (!user) throw new UnauthorizedException(errPayload(ErrorCode.USER_NOT_FOUND));
+    OnboardingValidator.assertUserFound(user);
 
     let emailVerificationSent = false;
     let phoneVerificationSent = false;
     let nextStep: 'verifyEmail' | 'verifyPhone' | 'complete' = 'complete';
 
-    if (dto.email && !dto.password) {
-      throw new BadRequestException(errPayload(ErrorCode.AUTH_PASSWORD_REQUIRED));
-    }
+    OnboardingValidator.assertPasswordRequired(dto.email, dto.password);
 
     // Hash password outside the transaction — bcrypt/argon2 is CPU-heavy and
     // holding an open connection for 100-300ms exhausts the pool under load.
     const passwordHash =
       dto.email && dto.password ? await this.passwordService.hash(dto.password) : null;
 
-    await this.authUsersRepository.withTransaction(async (tx) => {
-      await this.authUsersRepository.update(userId, { name: dto.name }, tx);
+    await this.txService.run(async (tx) => {
+      await this.authUsersRepository.update(userId, {
+        ...(dto.firstName.trim() ? { firstName: dto.firstName.trim() } : {}),
+        ...(dto.lastName.trim() ? { lastName: dto.lastName.trim() } : {}),
+      }, tx);
 
       if (dto.email) {
+        if (!passwordHash) throw new InternalServerException('Password hash missing — assertPasswordRequired should have caught this');
+
         const emailTaken = await this.authUsersRepository.emailExistsForOtherUser(
           dto.email,
           userId,
           tx,
         );
-        if (emailTaken) throw new ConflictException(errPayload(ErrorCode.USER_EMAIL_ALREADY_EXISTS));
+        OnboardingValidator.assertEmailNotTaken(emailTaken);
 
         await this.authUsersRepository.update(
           userId,
@@ -72,14 +73,14 @@ export class OnboardingService {
           await this.authProviderRepository.findIdByUserIdAndProvider(userId, 'email', tx);
 
         if (existingProviderId) {
-          await this.authProviderRepository.updatePassword(existingProviderId, passwordHash!, tx);
+          await this.authProviderRepository.updatePassword(existingProviderId, passwordHash, tx);
         } else {
           await this.authProviderRepository.create(
             {
               accountId: dto.email,
               providerId: 'email',
               userId,
-              password: passwordHash!,
+              password: passwordHash,
               isVerified: false,
             },
             tx,

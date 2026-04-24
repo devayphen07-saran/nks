@@ -4,7 +4,7 @@ import { z } from 'zod';
 // ─── Request ──────────────────────────────────────────────────────────────────
 
 export const AssignStatusSchema = z.object({
-  statusGuuid: z.string().uuid(),
+  statusGuuid: z.uuid(),
 });
 
 export class AssignStatusDto extends createZodDto(AssignStatusSchema) {}

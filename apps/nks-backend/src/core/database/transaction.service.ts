@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from './schema';
 import { InjectDb } from './inject-db.decorator';
@@ -80,8 +81,16 @@ export class TransactionService {
         name,
       });
 
-      // Drizzle's db.transaction() handles rollback automatically on error
-      const result = await this.db.transaction(fn);
+      // Drizzle's db.transaction() handles rollback automatically on error.
+      // When timeout is set, apply it as a session-local limit so runaway
+      // transactions fail fast rather than holding locks indefinitely.
+      const { timeout } = options;
+      const result = await this.db.transaction(async (tx) => {
+        if (timeout) {
+          await tx.execute(sql.raw(`SET LOCAL statement_timeout = ${Number(timeout)}`));
+        }
+        return fn(tx);
+      });
 
       const duration = Date.now() - startTime;
       this.logger.debug(`Transaction committed`, {

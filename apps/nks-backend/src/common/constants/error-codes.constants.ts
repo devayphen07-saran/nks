@@ -91,6 +91,10 @@ export const ErrorCode = {
   COMPANY_OWNER_CANNOT_BE_REMOVED: 'COMPANY_OWNER_CANNOT_BE_REMOVED',
   COMPANY_INACTIVE: 'COMPANY_INACTIVE',
 
+  // ─── Store ──────────────────────────────────────────────────────────────────
+  STORE_NOT_FOUND: 'STORE_NOT_FOUND',
+  AUTH_NO_STORE_CONTEXT: 'AUTH_NO_STORE_CONTEXT', // STORE-scope endpoint accessed with no active store
+
   // ─── RBAC ───────────────────────────────────────────────────────────────────
   ROLE_NOT_FOUND: 'ROLE_NOT_FOUND',
   ROLE_ALREADY_EXISTS: 'ROLE_ALREADY_EXISTS',
@@ -111,6 +115,7 @@ export const ErrorCode = {
   ROLE_PERMISSION_CEILING_EXCEEDED: 'ROLE_PERMISSION_CEILING_EXCEEDED',
   ROLE_PERMISSION_NOT_FOUND: 'ROLE_PERMISSION_NOT_FOUND',
   ROLE_PERMISSION_ALREADY_EXISTS: 'ROLE_PERMISSION_ALREADY_EXISTS',
+  ENTITY_CODE_UNKNOWN: 'ENTITY_CODE_UNKNOWN', // entityCode in @RequireEntityPermission not in entity_type table
 
   // ─── Location ───────────────────────────────────────────────────────────────
   COUNTRY_NOT_FOUND: 'COUNTRY_NOT_FOUND',
@@ -331,6 +336,9 @@ export const ErrorMessages: Record<string, string> = {
   // Routes
   [ErrorCode.ROUTE_STORE_ACCESS_DENIED]: 'You do not have access to this store.',
 
+  // Store
+  [ErrorCode.STORE_NOT_FOUND]: 'Store not found.',
+
   // Roles (extended)
   [ErrorCode.ROLE_STORE_MISMATCH]: 'You can only manage roles for your active store.',
   [ErrorCode.ROLE_CODE_RESERVED]: 'This role code is reserved for system roles.',
@@ -371,6 +379,6 @@ export const ErrorMessages: Record<string, string> = {
  *
  * Usage:  throw new UnauthorizedException(errPayload(ErrorCode.AUTH_INVALID_CREDENTIALS));
  */
-export function errPayload(code: ErrorCodeType): { errorCode: string; message: string } {
+export function errPayload(code: ErrorCodeType): { errorCode: ErrorCodeType; message: string } {
   return { errorCode: code, message: ErrorMessages[code] ?? code };
 }

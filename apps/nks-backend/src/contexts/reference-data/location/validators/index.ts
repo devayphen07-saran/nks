@@ -1,2 +1,1 @@
-export { StateCodeValidator } from './state-code.validator';
-export { PincodeValidator } from './pincode.validator';
+export { LocationValidator } from './location.validator';

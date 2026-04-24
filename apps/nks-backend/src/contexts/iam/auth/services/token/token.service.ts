@@ -1,20 +1,21 @@
-import * as crypto from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { signOfflineSession } from '../../../../../common/utils/offline-session-hmac';
 import { JWTConfigService, JWTPayload } from '../../../../../config/jwt.config';
 import { RefreshTokenService } from '../session/refresh-token.service';
 import { SessionsRepository } from '../../repositories/sessions.repository';
-import { RolesRepository } from '../../../roles/repositories/roles.repository';
+import { RoleQueryService } from '../../../roles/role-query.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
-import { AuthMapper, type TokenPair } from '../../mappers/auth-mapper';
+import { AuthMapper, type TokenPair } from '../../mapper/auth-mapper';
 import type { SessionUserRole } from '../../interfaces/session-user.interface';
 import type { AuthResponseEnvelope } from '../../dto';
 import {
   JWT_AUDIENCE,
   OFFLINE_JWT_TTL_DAYS,
   OFFLINE_JWT_EXPIRATION,
+  ACCESS_TOKEN_TTL_MS,
+  REFRESH_TOKEN_TTL_MS,
 } from '../../auth.constants';
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
 
@@ -34,7 +35,7 @@ export class TokenService {
     private readonly jwtConfigService: JWTConfigService,
     private readonly refreshTokenService: RefreshTokenService,
     private readonly sessionsRepository: SessionsRepository,
-    private readonly rolesRepository: RolesRepository,
+    private readonly roleQuery: RoleQueryService,
     private readonly permissionsService: PermissionsService,
     private readonly configService: ConfigService,
     private readonly authUtils: AuthUtilsService,
@@ -43,30 +44,21 @@ export class TokenService {
   // ─── Existing API ─────────────────────────────────────────────────────────
 
   createAccessToken(payload: Omit<JWTPayload, 'iat' | 'exp' | 'kid'>): string {
-    try {
-      const token = this.jwtConfigService.signToken(payload);
-      this.logger.debug(`Access token created for user ${payload.sub}`);
-      return token;
-    } catch (error) {
-      this.logger.error('Failed to create access token', error);
-      throw error;
-    }
+    const token = this.jwtConfigService.signToken(payload);
+    this.logger.debug(`Access token created for user ${payload.sub}`);
+    return token;
   }
 
   verifyAccessToken(token: string): JWTPayload {
-    try {
-      return this.jwtConfigService.verifyToken(token);
-    } catch (error) {
-      this.logger.warn('Access token verification failed');
-      throw error;
-    }
+    return this.jwtConfigService.verifyToken(token);
   }
 
   decodeToken(token: string): JWTPayload | null {
     if (!token) return null;
     try {
       return this.jwtConfigService.decodeToken(token);
-    } catch {
+    } catch (err: unknown) {
+      this.logger.debug(`Token decode failed: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   }
@@ -83,11 +75,18 @@ export class TokenService {
     userRoles: SessionUserRole[],
     userEmail: string,
     sessionGuuid: string,
+    jti: string,
+    iamUserId: string,
+    firstName?: string,
+    lastName?: string,
   ): Promise<TokenPair> {
-    const jwtToken = this.jwtConfigService.signToken({
+    const jwtToken = this.createAccessToken({
       sub: userGuuid,
       sid: sessionGuuid,
-      jti: crypto.randomUUID(),
+      jti,
+      iamUserId,
+      ...(firstName ? { firstName } : {}),
+      ...(lastName ? { lastName } : {}),
       ...(userEmail ? { email: userEmail } : {}),
       roles: userRoles.map((r) => r.roleCode),
       iss: 'nks-auth',
@@ -98,10 +97,8 @@ export class TokenService {
       this.refreshTokenService.generateRefreshToken();
 
     const now = new Date();
-    const jwtExpiresAt = new Date(now.getTime() + 15 * 60 * 1000); // 15 min
-    const refreshTokenExpiresAt = new Date(
-      now.getTime() + 7 * 24 * 60 * 60 * 1000,
-    ); // 7d
+    const jwtExpiresAt = new Date(now.getTime() + ACCESS_TOKEN_TTL_MS);
+    const refreshTokenExpiresAt = new Date(now.getTime() + REFRESH_TOKEN_TTL_MS);
 
     await this.sessionsRepository.setRefreshTokenData(sessionToken, {
       refreshTokenHash,
@@ -125,41 +122,53 @@ export class TokenService {
     user: {
       id: number;
       guuid: string;
+      iamUserId: string;
+      firstName: string;
+      lastName: string;
       email: string | null;
-      name: string;
       emailVerified: boolean;
       image: string | null | undefined;
       phoneNumber: string | null | undefined;
       phoneNumberVerified: boolean;
+      defaultStoreFk?: number | null;
     },
     token: string,
     expiresAt: Date,
+    sessionGuuid: string,
     tokenPair?: TokenPair,
     cachedPermissions?: Awaited<
       ReturnType<PermissionsService['getUserPermissions']>
     >,
+    deviceId?: string,
   ): Promise<AuthResponseEnvelope> {
-    const sessionId = crypto.randomUUID();
+    const sessionId = sessionGuuid;
     const refreshExpiresAt =
       tokenPair?.refreshTokenExpiresAt ??
-      new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    const storeOwnerRoleId = await this.authUtils.getCachedSystemRoleId(
-      SystemRoleCodes.STORE_OWNER,
-    );
-    const primaryStore = storeOwnerRoleId
-      ? await this.rolesRepository.findPrimaryStoreForUser(
-          user.id,
-          storeOwnerRoleId,
-        )
-      : null;
+      new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
 
     const permissions =
       cachedPermissions ??
       (await this.permissionsService.getUserPermissions(user.id));
 
+    // Default store: from users.defaultStoreFk (persistent preference).
+    // Validate the user still has a role in that store before trusting it.
+    const defaultStoreId = user.defaultStoreFk ?? null;
     const primaryStoreId =
-      permissions.roles?.find((r) => r.isPrimary && r.storeId)?.storeId ?? null;
+      defaultStoreId !== null &&
+      permissions.roles.some((r) => r.storeId === defaultStoreId)
+        ? defaultStoreId
+        : null;
+
+    // Resolve store guuid using existing repository pattern.
+    const storeOwnerRoleId = await this.authUtils.getCachedSystemRoleId(
+      SystemRoleCodes.STORE_OWNER,
+    );
+    const primaryStore = storeOwnerRoleId && primaryStoreId
+      ? await this.roleQuery.findPrimaryStoreForUser(
+          user.id,
+          storeOwnerRoleId,
+        )
+      : null;
 
     const offlineToken = this.jwtConfigService.signOfflineToken(
       {
@@ -167,12 +176,12 @@ export class TokenService {
         ...(user.email ? { email: user.email } : {}),
         roles: permissions.roles.map((r) => r.roleCode),
         stores: permissions.roles
-          .filter((r) => r.storeId && r.storeName)
+          .filter((r) => r.storeGuuid && r.storeName)
           .map((r) => ({
-            id: r.storeId as number,
+            guuid: r.storeGuuid as string,
             name: r.storeName as string,
           })),
-        activeStoreId: primaryStoreId,
+        activeStoreGuuid: primaryStore?.guuid ?? null,
       },
       OFFLINE_JWT_EXPIRATION,
     );
@@ -182,8 +191,8 @@ export class TokenService {
     );
     const offlineSessionSignature = signOfflineSession(
       {
-        userId: user.id,
-        storeId: primaryStoreId,
+        userGuuid: user.guuid,
+        storeGuuid: primaryStore?.guuid ?? null,
         roles: permissions.roles.map((r) => r.roleCode),
         offlineValidUntil:
           Date.now() + OFFLINE_JWT_TTL_DAYS * 24 * 60 * 60 * 1000,
@@ -191,25 +200,28 @@ export class TokenService {
       offlineSessionSecret,
     );
 
-    return AuthMapper.toAuthResponseEnvelope(
+    return AuthMapper.buildAuthResponseEnvelope(
       {
         user: {
           id: user.id,
           guuid: user.guuid,
+          iamUserId: user.iamUserId,
+          firstName: user.firstName,
+          lastName: user.lastName,
           email: user.email,
-          name: user.name,
           phoneNumber: user.phoneNumber ?? null,
         },
         token,
         session: { token, expiresAt, sessionId },
       },
       tokenPair,
-      primaryStore && primaryStoreId ? { id: primaryStoreId, guuid: primaryStore.guuid } : null,
+      primaryStore ? { guuid: primaryStore.guuid } : null,
       sessionId,
       expiresAt,
       refreshExpiresAt,
       offlineToken,
       offlineSessionSignature,
+      deviceId,
     );
   }
 

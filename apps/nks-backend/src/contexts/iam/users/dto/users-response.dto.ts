@@ -6,7 +6,9 @@ import { searchableSchema } from '../../../../common/dto/pagination.schema';
 
 export interface UserRow {
   guuid: string;
-  name: string;
+  iamUserId: string;
+  firstName: string;
+  lastName: string;
   email: string | null;
   emailVerified: boolean;
   phoneNumber: string | null;
@@ -25,14 +27,20 @@ export interface UserRow {
 
 // ─── Query ────────────────────────────────────────────────────────────────────
 
-export const ListUsersQuerySchema = searchableSchema;
+export const ListUsersQuerySchema = searchableSchema.extend({
+  sortBy: z.enum(['firstName', 'email', 'createdAt']).default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  isActive: z.coerce.boolean().optional(),
+});
 export class ListUsersQueryDto extends createZodDto(ListUsersQuerySchema) {}
 
 // ─── Response ─────────────────────────────────────────────────────────────────
 
 const UserResponseSchema = z.object({
   guuid: z.string(),
-  name: z.string(),
+  iamUserId: z.string(),
+  firstName: z.string(),
+  lastName: z.string(),
   email: z.string().nullable(),
   emailVerified: z.boolean(),
   phoneNumber: z.string().nullable(),

@@ -9,6 +9,7 @@ export const SendOtpResponseSchema = z.object({
 
 export const ResendOtpResponseSchema = z.object({
   reqId: z.string().describe('New MSG91 request ID'),
+  mobile: z.string().describe('Phone number OTP was resent to'),
   data: z.any().optional(),
 });
 

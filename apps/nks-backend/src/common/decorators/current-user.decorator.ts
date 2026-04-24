@@ -1,4 +1,8 @@
-import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import {
+  createParamDecorator,
+  ExecutionContext,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { AuthenticatedRequest } from '../guards/auth.guard';
 import type {
   SessionUser,
@@ -19,8 +23,8 @@ import type {
  * @CurrentUser('userId') userId: number
  *
  * // Other available fields
- * @CurrentUser('email') email: string
- * @CurrentUser('name')  name: string
+ * @CurrentUser('email') email: string | null
+ * @CurrentUser('name')  name: string | null
  */
 export const CurrentUser = createParamDecorator(
   (
@@ -29,6 +33,9 @@ export const CurrentUser = createParamDecorator(
   ): SessionUser | SessionUser[SessionUserKey] => {
     const request = ctx.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user;
+    if (!user) {
+      throw new UnauthorizedException('User not authenticated');
+    }
     return field ? user[field] : user;
   },
 );

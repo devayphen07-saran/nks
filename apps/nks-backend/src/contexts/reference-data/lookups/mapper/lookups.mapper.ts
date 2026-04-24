@@ -17,11 +17,46 @@ import type {
   CurrencyResponse,
   VolumeResponse,
 } from '../dto/lookups-response.dto';
+import type { LookupValueAdminResponse } from '../dto/admin-lookups.dto';
+
+// ── Admin row shape ───────────────────────────────────────────────────────────
+
+interface AdminCodeValueRow {
+  id:          number;
+  guuid:       string;
+  code:        string;
+  label:       string;
+  description: string | null;
+  isActive:    boolean;
+  isHidden:    boolean;
+  isSystem:    boolean;
+  sortOrder:   number | null;
+  createdAt:   Date;
+  updatedAt:   Date | null;
+}
+
+export class AdminLookupMapper {
+  static buildLookupValueDto(adminCodeValueRow: AdminCodeValueRow): LookupValueAdminResponse {
+    return {
+      guuid:       adminCodeValueRow.guuid,
+      code:        adminCodeValueRow.code,
+      label:       adminCodeValueRow.label,
+      description: adminCodeValueRow.description ?? undefined,
+      isActive:    adminCodeValueRow.isActive,
+      isHidden:    adminCodeValueRow.isHidden,
+      isSystem:    adminCodeValueRow.isSystem,
+      sortOrder:   adminCodeValueRow.sortOrder,
+      createdAt:   adminCodeValueRow.createdAt.toISOString(),
+      updatedAt:   adminCodeValueRow.updatedAt?.toISOString() ?? null,
+    };
+  }
+}
 
 // ── Row shapes ────────────────────────────────────────────────────────────────
 
 interface CountryRow {
   id:          number;
+  guuid:       string;
   isoCode2:    string;
   countryName: string;
   dialCode:    string | null;
@@ -35,6 +70,7 @@ interface CountryRow {
 
 interface CommunicationTypeRow {
   id:              number;
+  guuid:           string;
   code:            string;
   label:           string;
   description:     string | null;
@@ -53,6 +89,7 @@ interface CommunicationTypeRow {
 
 interface CurrencyRow {
   id:          number;
+  guuid:       string;
   code:        string;
   symbol:      string | null;
   description: string | null;
@@ -65,6 +102,7 @@ interface CurrencyRow {
 
 interface VolumeRow {
   id:          number;
+  guuid:       string;
   volumeCode:  string;
   volumeName:  string;
   volumeType:  string | null;
@@ -78,62 +116,62 @@ interface VolumeRow {
 // ── Mapper ────────────────────────────────────────────────────────────────────
 
 export class LookupMapper {
-  static toCountry(row: CountryRow): CountryResponse {
+  static buildCountryDto(countryRow: CountryRow): CountryResponse {
     return {
-      id:          row.id,
-      countryCode: row.isoCode2,
-      countryName: row.countryName,
-      dialingCode: row.dialCode    ?? undefined,
-      description: row.description ?? undefined,
-      isActive:    row.isActive,
-      isHidden:    row.isHidden,
-      isSystem:    row.isSystem,
-      createdAt:   row.createdAt.toISOString(),
-      updatedAt:   row.updatedAt?.toISOString() ?? '',
+      guuid:       countryRow.guuid,
+      countryCode: countryRow.isoCode2,
+      countryName: countryRow.countryName,
+      dialingCode: countryRow.dialCode    ?? undefined,
+      description: countryRow.description ?? undefined,
+      isActive:    countryRow.isActive,
+      isHidden:    countryRow.isHidden,
+      isSystem:    countryRow.isSystem,
+      createdAt:   countryRow.createdAt.toISOString(),
+      updatedAt:   countryRow.updatedAt?.toISOString() ?? null,
     };
   }
 
-  static toCommunicationType(row: CommunicationTypeRow): CommunicationTypeResponse {
+  static buildCommunicationTypeDto(communicationTypeRow: CommunicationTypeRow): CommunicationTypeResponse {
     return {
-      id:          row.id,
-      code:        row.code,
-      title:       row.label,
-      description: row.description ?? undefined,
-      isActive:    row.isActive,
-      isHidden:    row.isHidden,
-      isSystem:    row.isSystem,
-      createdAt:   row.createdAt.toISOString(),
-      updatedAt:   row.updatedAt?.toISOString() ?? '',
+      guuid:       communicationTypeRow.guuid,
+      code:        communicationTypeRow.code,
+      title:       communicationTypeRow.label,
+      description: communicationTypeRow.description ?? undefined,
+      isActive:    communicationTypeRow.isActive,
+      isHidden:    communicationTypeRow.isHidden,
+      isSystem:    communicationTypeRow.isSystem,
+      createdAt:   communicationTypeRow.createdAt.toISOString(),
+      updatedAt:   communicationTypeRow.updatedAt?.toISOString() ?? null,
     };
   }
 
-  static toCurrency(row: CurrencyRow): CurrencyResponse {
+  static buildCurrencyDto(currencyRow: CurrencyRow): CurrencyResponse {
     return {
-      id:          row.id,
-      code:        row.code,
-      symbol:      row.symbol      ?? undefined,
-      title:       row.symbol      ?? row.code,
-      description: row.description ?? undefined,
-      isActive:    row.isActive,
-      isHidden:    row.isHidden,
-      isSystem:    row.isSystem,
-      createdAt:   row.createdAt.toISOString(),
-      updatedAt:   row.updatedAt?.toISOString() ?? '',
+      guuid:       currencyRow.guuid,
+      code:        currencyRow.code,
+      symbol:      currencyRow.symbol      ?? undefined,
+      title:       currencyRow.symbol      ?? currencyRow.code,
+      description: currencyRow.description ?? undefined,
+      isActive:    currencyRow.isActive,
+      isHidden:    currencyRow.isHidden,
+      isSystem:    currencyRow.isSystem,
+      createdAt:   currencyRow.createdAt.toISOString(),
+      updatedAt:   currencyRow.updatedAt?.toISOString() ?? null,
     };
   }
 
-  static toVolume(row: VolumeRow): VolumeResponse {
+  static buildVolumeDto(volumeRow: VolumeRow): VolumeResponse {
     return {
-      id:          row.id,
-      code:        row.volumeCode,
-      title:       row.volumeName,
-      unit:        row.volumeType  ?? undefined,
+      guuid:       volumeRow.guuid,
+      code:        volumeRow.volumeCode,
+      title:       volumeRow.volumeName,
+      unit:        volumeRow.volumeType  ?? undefined,
       description: undefined,
-      isActive:    row.isActive,
-      isHidden:    row.isHidden,
-      isSystem:    row.isSystem,
-      createdAt:   row.createdAt.toISOString(),
-      updatedAt:   row.updatedAt?.toISOString() ?? '',
+      isActive:    volumeRow.isActive,
+      isHidden:    volumeRow.isHidden,
+      isSystem:    volumeRow.isSystem,
+      createdAt:   volumeRow.createdAt.toISOString(),
+      updatedAt:   volumeRow.updatedAt?.toISOString() ?? null,
     };
   }
 }

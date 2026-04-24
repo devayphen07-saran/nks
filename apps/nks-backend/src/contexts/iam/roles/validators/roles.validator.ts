@@ -15,6 +15,15 @@ import { EntityCodes } from '../../../../common/constants/entity-codes.constants
  */
 export class RolesValidator {
   /**
+   * Ensure a store was found by guuid; throw 404 otherwise.
+   */
+  static assertStoreFound(storeId: number | null): asserts storeId is number {
+    if (storeId === null) {
+      throw new NotFoundException(errPayload(ErrorCode.STORE_NOT_FOUND));
+    }
+  }
+
+  /**
    * Ensure the target storeId matches the caller's active store.
    */
   static assertStoreMatch(activeStoreId: number | null, targetStoreId: number): void {
@@ -39,6 +48,15 @@ export class RolesValidator {
     const systemCodes = Object.values(SystemRoleCodes) as string[];
     if (systemCodes.includes(code.toUpperCase())) {
       throw new BadRequestException(errPayload(ErrorCode.ROLE_CODE_RESERVED));
+    }
+  }
+
+  /**
+   * Ensure an active store is set; required for permission ceiling checks.
+   */
+  static assertActiveStoreId(activeStoreId: number | null): asserts activeStoreId is number {
+    if (activeStoreId === null) {
+      throw new ForbiddenException(errPayload(ErrorCode.INSUFFICIENT_PERMISSIONS));
     }
   }
 

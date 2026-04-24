@@ -24,7 +24,7 @@ export function buildCorsConfig(configService: ConfigService): CorsOptions {
       if (allowedOrigins.includes(origin)) {
         return callback(null, origin);
       }
-      callback(new Error(`CORS origin not allowed: ${origin}`));
+      callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

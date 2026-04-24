@@ -1,9 +1,9 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import type { Role } from '../../../../core/database/schema/rbac/roles/roles.table';
 
 // ─── Entity Permission Types ─────────────────────────────────────────────────
 
+/** Fixed-column permission shape used by PermissionsSnapshot and the role detail response. */
 export interface EntityPermission {
   canView: boolean;
   canCreate: boolean;
@@ -12,12 +12,32 @@ export interface EntityPermission {
   deny?: boolean;
 }
 
+/** Legacy map keyed by entity code — used by RoleEntityPermissionRepository and auth snapshot. */
 export interface RoleEntityPermissions {
   [entityCode: string]: EntityPermission;
 }
 
+/**
+ * Dynamic permission entry for a single entity in the new role_permissions table.
+ * `actions` is an open map: any action code returned by the DB is present.
+ * `deny = true` means all grants for this entity are suppressed.
+ */
+export interface DynamicEntityPermissionEntry {
+  /** action code (uppercase) → allowed flag. */
+  actions: Record<string, boolean>;
+  deny: boolean;
+}
+
+/**
+ * Dynamic permission map returned by RolePermissionsRepository.
+ * Keyed by entity code (e.g. 'USER', 'INVOICE').
+ */
+export interface DynamicEntityPermissions {
+  [entityCode: string]: DynamicEntityPermissionEntry;
+}
+
 export interface RoutePermission {
-  routeId: number;
+  routeGuuid: string;
   routePath: string;
   routeName: string;
   routeScope: string | null;
@@ -29,7 +49,6 @@ export interface RoutePermission {
 }
 
 const RoleResponseSchema = z.object({
-  id: z.number(),
   guuid: z.string(),
   roleName: z.string(),
   code: z.string(),
@@ -41,7 +60,7 @@ const RoleResponseSchema = z.object({
 export class RoleResponseDto extends createZodDto(RoleResponseSchema) {}
 
 export interface RouteWithPermissionsRow {
-  id: number;
+  guuid: string;
   routeName: string;
   routePath: string;
   fullPath: string;
@@ -49,7 +68,6 @@ export interface RouteWithPermissionsRow {
   routeType: string;
   routeScope: string;
   isPublic: boolean;
-  parentRouteFk: number | null;
   sortOrder: number | null;
   canView: boolean;
   canCreate: boolean;
@@ -69,6 +87,7 @@ export interface UserRoleRow {
 }
 
 export interface UserRoleWithStoreRow extends UserRoleRow {
+  storeGuuid: string | null;
   storeName: string | null;
 }
 
@@ -79,15 +98,23 @@ export interface AuthContextRow {
 
 // ─── Response envelope types ──────────────────────────────────────────────────
 
-export type RoleResponse = Role;
-
-export interface RoleDetailResponse extends Role {
-  entityPermissions: Record<string, EntityPermission>;
+export interface RoleDetailResponse {
+  guuid: string;
+  roleName: string;
+  code: string;
+  description: string | null;
+  sortOrder: number | null;
+  isSystem: boolean;
+  storeGuuid: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string | null;
+  entityPermissions: RoleEntityPermissions;
   routePermissions: RoutePermission[];
 }
 
 export interface CreateRoleResponse {
-  data: RoleResponse;
+  data: RoleResponseDto;
   message: string;
 }
 
@@ -97,6 +124,6 @@ export interface RoleDetailedResponse {
 }
 
 export interface UpdateRoleResponse {
-  data: RoleResponse;
+  data: RoleResponseDto;
   message: string;
 }

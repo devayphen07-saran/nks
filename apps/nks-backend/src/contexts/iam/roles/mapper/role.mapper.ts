@@ -1,16 +1,43 @@
-import { RoleResponseDto, type EntityPermission, type RoleEntityPermissions } from '../dto/role-response.dto';
+import {
+  RoleResponseDto,
+  type EntityPermission,
+  type RoleEntityPermissions,
+  type RoleDetailResponse,
+  type RoutePermission,
+} from '../dto/role-response.dto';
 import type { Role } from '../../../../core/database/schema';
 
 export class RoleMapper {
-  static toResponseDto(entity: Role): RoleResponseDto {
+  static buildRoleDetailDto(
+    role: Role,
+    storeGuuid: string | null,
+    entityPermissions: RoleEntityPermissions,
+    routePermissions: RoutePermission[],
+  ): RoleDetailResponse {
     return {
-      id: entity.id,
-      guuid: entity.guuid,
-      roleName: entity.roleName,
-      code: entity.code,
-      description: entity.description,
-      sortOrder: entity.sortOrder,
-      isSystem: entity.isSystem,
+      guuid: role.guuid,
+      roleName: role.roleName,
+      code: role.code,
+      description: role.description ?? null,
+      sortOrder: role.sortOrder ?? null,
+      isSystem: role.isSystem,
+      storeGuuid,
+      isActive: role.isActive,
+      createdAt: role.createdAt.toISOString(),
+      updatedAt: role.updatedAt?.toISOString() ?? null,
+      entityPermissions,
+      routePermissions,
+    };
+  }
+
+  static buildRoleDto(role: Role): RoleResponseDto {
+    return {
+      guuid: role.guuid,
+      roleName: role.roleName,
+      code: role.code,
+      description: role.description,
+      sortOrder: role.sortOrder,
+      isSystem: role.isSystem,
     };
   }
 
@@ -18,13 +45,14 @@ export class RoleMapper {
    * Transform entity permissions from array to dictionary format
    * Converts [{entityCode, canView, ...}] to {entityCode: {canView, ...}}
    */
-  static toEntityPermissionMap(
+  static buildEntityPermissionMap(
     perms: Array<{
       entityCode: string;
       canView: boolean;
       canCreate: boolean;
       canEdit: boolean;
       canDelete: boolean;
+      deny?: boolean;
     }>,
   ): Record<string, EntityPermission> {
     return perms.reduce(
@@ -34,6 +62,7 @@ export class RoleMapper {
           canCreate: perm.canCreate,
           canEdit: perm.canEdit,
           canDelete: perm.canDelete,
+          deny: perm.deny ?? false,
         };
         return acc;
       },

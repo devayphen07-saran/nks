@@ -21,8 +21,6 @@ import {
   seedSystemRoles,
   seedRoutes,
   seedRoleRouteMappings,
-  seedRoleEntityPermissions,
-  seedRoleEntityPermissionsAdmin,
   seedTaxAgencies,
   seedTaxNames,
   seedTaxLevels,
@@ -46,6 +44,8 @@ import {
   seedPlanTypes,
   seedTaxLineStatuses,
   seedEntityTypes,
+  seedPermissionActions,
+  seedSuperAdminPermissions,
 } from './seeds';
 
 const INIT = process.env.INIT === 'true';
@@ -141,11 +141,11 @@ const seeds = [
   { name: 'volumes', fn: seedVolumes },
   { name: 'entity', fn: seedEntities },
   { name: 'system_roles', fn: seedSystemRoles },
-  { name: 'entity_type', fn: seedEntityTypes }, // ← Must run before role_entity_permission
+  { name: 'entity_type',            fn: seedEntityTypes },          // ← Must run before super_admin_permissions
+  { name: 'permission_actions',     fn: seedPermissionActions },     // ← Must run before super_admin_permissions
+  { name: 'super_admin_permissions', fn: seedSuperAdminPermissions }, // ← Depends on system_roles + entity_type + permission_actions
   { name: 'routes', fn: seedRoutes },
   { name: 'role_route_mapping', fn: seedRoleRouteMappings },
-  { name: 'role_entity_permission', fn: seedRoleEntityPermissions },
-  { name: 'role_entity_permission_admin', fn: seedRoleEntityPermissionsAdmin },
   // Lookup Tables
   { name: 'store_legal_type', fn: seedStoreLegalTypes },
   { name: 'store_category', fn: seedStoreCategories },

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, and, isNull, count } from 'drizzle-orm';
+import { eq, and, isNull, count, asc, desc } from 'drizzle-orm';
+import type { AnyColumn } from 'drizzle-orm/column';
 import { ilikeAny } from '../../../../core/database/query-helpers';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
@@ -12,20 +13,65 @@ type Pincode = typeof schema.pincode.$inferSelect;
 
 @Injectable()
 export class LocationRepository extends BaseRepository {
-  constructor(@InjectDb() db: NodePgDatabase<typeof schema>) { super(db); }
+  constructor(@InjectDb() db: NodePgDatabase<typeof schema>) {
+    super(db);
+  }
 
-  async getStates(search?: string): Promise<State[]> {
+  private resolveOrderColumn(
+    sortBy: string,
+    columnMap: Record<string, AnyColumn>,
+    defaultKey: string,
+  ): AnyColumn {
+    return columnMap[sortBy] ?? columnMap[defaultKey];
+  }
+
+  private applySortDirection(column: AnyColumn, sortOrder: string = 'asc') {
+    return sortOrder === 'desc' ? desc(column) : asc(column);
+  }
+
+  /**
+   * Phase 1: Helper to build isActive filter
+   * true = active only, false = inactive only, undefined = active only (default)
+   */
+  async getStates(
+    search?: string,
+    sortBy = 'name',
+    sortOrder = 'asc',
+    isActive?: boolean,
+  ): Promise<State[]> {
+    const activeFilter = eq(schema.state.isActive, isActive ?? true);
+
+    const whereConditions = [
+      isNull(schema.state.deletedAt),
+      activeFilter,
+      ilikeAny(search, schema.state.stateName, schema.state.stateCode),
+    ].filter((c): c is typeof c & {} => c !== null);
+
     return this.db
       .select()
       .from(schema.state)
+      .where(and(...whereConditions))
+      .orderBy(this.applySortDirection(this.resolveOrderColumn(sortBy, {
+        code: schema.state.stateCode,
+        createdAt: schema.state.createdAt,
+        name: schema.state.stateName,
+      }, 'name'), sortOrder));
+  }
+
+  async getDistrictByGuuid(guuid: string): Promise<District | null> {
+    const [result] = await this.db
+      .select()
+      .from(schema.district)
       .where(
         and(
-          eq(schema.state.isActive, true),
-          isNull(schema.state.deletedAt),
-          ilikeAny(search, schema.state.stateName, schema.state.stateCode),
+          eq(schema.district.guuid, guuid),
+          eq(schema.district.isActive, true),
+          isNull(schema.district.deletedAt),
         ),
       )
-      .orderBy(schema.state.stateName);
+      .limit(1);
+
+    return result ?? null;
   }
 
   async getStateByCode(code: string): Promise<State | null> {
@@ -44,7 +90,10 @@ export class LocationRepository extends BaseRepository {
     return result ?? null;
   }
 
-  async getDistrictsByState(stateId: number, search?: string): Promise<District[]> {
+  async getDistrictsByState(
+    stateId: number,
+    search?: string,
+  ): Promise<District[]> {
     return this.db
       .select()
       .from(schema.district)
@@ -59,36 +108,102 @@ export class LocationRepository extends BaseRepository {
       .orderBy(schema.district.districtName);
   }
 
-  async getDistrictsByStateCode(code: string, search?: string): Promise<District[]> {
+  async getDistrictsByStateCode(
+    code: string,
+    search?: string,
+    sortBy = 'name',
+    sortOrder = 'asc',
+    isActive?: boolean,
+  ): Promise<(District & { stateGuuid: string })[] | null> {
     const state = await this.getStateByCode(code);
-    if (!state) return [];
-    return this.getDistrictsByState(state.id, search);
+    if (!state) return null;
+
+    const districtActiveFilter = isActive === undefined ? true : isActive;
+    const districts = await this.db
+      .select()
+      .from(schema.district)
+      .where(
+        and(
+          eq(schema.district.stateFk, state.id),
+          eq(schema.district.isActive, districtActiveFilter),
+          isNull(schema.district.deletedAt),
+          ilikeAny(search, schema.district.districtName),
+        ),
+      )
+      .orderBy(this.applySortDirection(this.resolveOrderColumn(sortBy, {
+        code: schema.district.districtCode,
+        createdAt: schema.district.createdAt,
+        name: schema.district.districtName,
+      }, 'name'), sortOrder));
+
+    return districts.map((d) => ({ ...d, stateGuuid: state.guuid }));
   }
 
   async getPincodesByDistrict(
     districtId: number,
-    opts: { page: number; pageSize: number; search?: string },
-  ): Promise<{ rows: Pincode[]; total: number }> {
-    const { page, pageSize, search } = opts;
-    const offset = (page - 1) * pageSize;
+    districtGuuid: string,
+    opts: { page: number; pageSize: number; search?: string; sortBy?: string; sortOrder?: string; isActive?: boolean },
+  ): Promise<{ rows: (Pincode & { districtGuuid: string })[]; total: number }> {
+    const { page, pageSize, search, sortBy = 'code', sortOrder = 'asc', isActive } = opts;
+    const offset = LocationRepository.toOffset(page, pageSize);
+    const pincodeActiveFilter = isActive === undefined ? true : isActive;
 
     const where = and(
       eq(schema.pincode.districtFk, districtId),
-      eq(schema.pincode.isActive, true),
+      eq(schema.pincode.isActive, pincodeActiveFilter),
       isNull(schema.pincode.deletedAt),
-      ilikeAny(search, schema.pincode.code, schema.pincode.localityName, schema.pincode.areaName),
+      ilikeAny(
+        search,
+        schema.pincode.code,
+        schema.pincode.localityName,
+        schema.pincode.areaName,
+      ),
     );
 
-    return this.paginate(
-      this.db.select().from(schema.pincode).where(where).orderBy(schema.pincode.code).limit(pageSize).offset(offset),
-      this.db.select({ total: count() }).from(schema.pincode).where(where),
+    const { rows, total } = await this.paginate(
+      this.db
+        .select()
+        .from(schema.pincode)
+        .where(where)
+        .orderBy(this.applySortDirection(this.resolveOrderColumn(sortBy, {
+          area: schema.pincode.areaName,
+          createdAt: schema.pincode.createdAt,
+          code: schema.pincode.code,
+        }, 'code'), sortOrder))
+        .limit(pageSize)
+        .offset(offset),
+      () => this.db.select({ total: count() }).from(schema.pincode).where(where),
+      page, pageSize,
     );
+
+    return { rows: rows.map((p) => ({ ...p, districtGuuid })), total };
   }
 
-  async getPincodeByCode(code: string): Promise<Pincode | null> {
+  async getPincodeByCode(code: string): Promise<(Pincode & { districtGuuid: string }) | null> {
     const [result] = await this.db
-      .select()
+      .select({
+        id: schema.pincode.id,
+        guuid: schema.pincode.guuid,
+        code: schema.pincode.code,
+        localityName: schema.pincode.localityName,
+        areaName: schema.pincode.areaName,
+        districtFk: schema.pincode.districtFk,
+        districtGuuid: schema.district.guuid,
+        latitude: schema.pincode.latitude,
+        longitude: schema.pincode.longitude,
+        sortOrder: schema.pincode.sortOrder,
+        isActive: schema.pincode.isActive,
+        isHidden: schema.pincode.isHidden,
+        isSystem: schema.pincode.isSystem,
+        createdAt: schema.pincode.createdAt,
+        updatedAt: schema.pincode.updatedAt,
+        deletedAt: schema.pincode.deletedAt,
+        createdBy: schema.pincode.createdBy,
+        modifiedBy: schema.pincode.modifiedBy,
+        deletedBy: schema.pincode.deletedBy,
+      })
       .from(schema.pincode)
+      .innerJoin(schema.district, eq(schema.pincode.districtFk, schema.district.id))
       .where(
         and(
           eq(schema.pincode.code, code),

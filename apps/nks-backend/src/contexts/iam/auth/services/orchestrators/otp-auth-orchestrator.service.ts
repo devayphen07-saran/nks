@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { OtpService } from '../otp/otp.service';
 import { UserCreationService } from '../flows/user-creation.service';
 import { AuthFlowOrchestrator } from './auth-flow-orchestrator.service';
@@ -54,6 +54,8 @@ export class OtpAuthOrchestrator {
       deviceName?: string;
       deviceType?: string;
       appVersion?: string;
+      ipAddress?: string;
+      userAgent?: string;
     },
   ): Promise<AuthResponseEnvelope> {
     // Step 1: Verify OTP via MSG91 (pure verification, no user data)

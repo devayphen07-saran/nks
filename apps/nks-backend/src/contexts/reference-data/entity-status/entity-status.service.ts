@@ -1,66 +1,67 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { ErrorCode, errPayload } from '../../../common/constants/error-codes.constants';
+import { Injectable } from '@nestjs/common';
 import { EntityStatusRepository } from './repositories/entity-status.repository';
 import { StatusService } from '../status/status.service';
+import { AuditService } from '../../compliance/audit/audit.service';
 import type { AssignStatusDto, EntityStatusResponse } from './dto/entity-status.dto';
 import { EntityStatusMapper } from './mapper/entity-status.mapper';
-import { EntityCodeValidator } from './validators';
+import { EntityCodeValidator, EntityStatusValidator } from './validators';
 
 @Injectable()
 export class EntityStatusService {
   constructor(
     private readonly repository:    EntityStatusRepository,
     private readonly statusService: StatusService,
+    private readonly auditService:  AuditService,
   ) {}
 
   async getStatusesForEntity(entityCode: string): Promise<EntityStatusResponse[]> {
     const code = EntityCodeValidator.normalize(entityCode);
-
-    // SECURITY: Validate entity code format using EntityCodeValidator
     EntityCodeValidator.validate(code);
 
     const rows = await this.repository.findByEntityCode(code);
-    return rows.map(EntityStatusMapper.toResponse);
+    return rows.map(EntityStatusMapper.buildEntityStatusDto);
   }
 
-  async assignStatus(entityCode: string, dto: AssignStatusDto): Promise<EntityStatusResponse[]> {
+  async assignStatus(entityCode: string, dto: AssignStatusDto, userId: number): Promise<EntityStatusResponse> {
     const code = EntityCodeValidator.normalize(entityCode);
-
-    // SECURITY: Validate entity code format using EntityCodeValidator
     EntityCodeValidator.validate(code);
 
-    // Resolve guuid → row
     const statusRow = await this.statusService.findByGuuid(dto.statusGuuid);
-    if (!statusRow) {
-      throw new NotFoundException(errPayload(ErrorCode.ENT_STATUS_NOT_FOUND));
-    }
+    EntityStatusValidator.assertStatusFound(statusRow);
 
-    // Check duplicate
     const existing = await this.repository.findMapping(code, statusRow.id);
-    if (existing?.isActive) {
-      throw new ConflictException(errPayload(ErrorCode.ENT_STATUS_ALREADY_ASSIGNED));
-    }
+    EntityStatusValidator.assertNotAlreadyAssigned(existing);
 
     await this.repository.assign(code, statusRow.id);
-    return this.getStatusesForEntity(code);
+
+    this.auditService.logEntityStatusAssigned(userId, code, statusRow.code);
+
+    return EntityStatusMapper.buildEntityStatusDto({
+      entityCode: code,
+      isActive: true,
+      statusGuuid: statusRow.guuid,
+      statusCode: statusRow.code,
+      name: statusRow.name,
+      fontColor: statusRow.fontColor ?? null,
+      bgColor: statusRow.bgColor ?? null,
+      borderColor: statusRow.borderColor ?? null,
+      isBold: statusRow.isBold ?? false,
+      sortOrder: statusRow.sortOrder ?? null,
+    });
   }
 
-  async removeStatus(entityCode: string, statusGuuid: string): Promise<void> {
+  async removeStatus(entityCode: string, statusGuuid: string, userId: number): Promise<void> {
     const code = EntityCodeValidator.normalize(entityCode);
-
-    // SECURITY: Validate entity code format using EntityCodeValidator
     EntityCodeValidator.validate(code);
 
     const statusRow = await this.statusService.findByGuuid(statusGuuid);
-    if (!statusRow) {
-      throw new NotFoundException(errPayload(ErrorCode.ENT_STATUS_NOT_FOUND));
-    }
+    EntityStatusValidator.assertStatusFound(statusRow);
 
     const mapping = await this.repository.findMapping(code, statusRow.id);
-    if (!mapping) {
-      throw new NotFoundException(errPayload(ErrorCode.ENT_STATUS_NOT_ASSIGNED));
-    }
+    EntityStatusValidator.assertAssignmentExists(mapping);
 
     await this.repository.remove(code, statusRow.id);
+
+    this.auditService.logEntityStatusRemoved(userId, code, statusRow.code);
   }
 }

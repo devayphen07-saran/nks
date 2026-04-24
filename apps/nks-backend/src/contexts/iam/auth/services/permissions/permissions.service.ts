@@ -1,9 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { RoleEntityPermissionRepository } from '../../../roles/repositories/role-entity-permission.repository';
+import { RoleQueryService } from '../../../roles/role-query.service';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
-import { RolesRepository } from '../../../roles/repositories/roles.repository';
 import { PermissionsChangelogRepository } from '../../repositories/permissions-changelog.repository';
-import { AuthMapper, type UserRoleEntry, type PermissionContext } from '../../mappers/auth-mapper';
+import { AuthMapper, type UserRoleEntry, type PermissionContext } from '../../mapper/auth-mapper';
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
 
 export interface PermissionsSnapshot {
@@ -30,56 +29,28 @@ export class PermissionsService {
 
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
-    private readonly roleEntityPermissionRepository: RoleEntityPermissionRepository,
-    private readonly rolesRepository: RolesRepository,
+    private readonly roleQuery: RoleQueryService,
     private readonly changelogRepository: PermissionsChangelogRepository,
   ) {}
 
   /**
-   * Fetch roles, activeStoreId, and permissionCodes for a user.
+   * Fetch roles and isSuperAdmin for a user.
    * Always fetches fresh from DB to ensure role changes are immediately reflected.
+   *
+   * NOTE: activeStoreId is a SESSION concern, not a permissions concern.
+   * It is read from session.activeStoreFk at auth time, not derived here.
    */
-  async getUserPermissions(
-    userId: number,
-  ): Promise<PermissionContext & { permissionCodes: string[] }> {
-    const userRoles = await this.rolesRepository.findUserRoles(userId);
+  async getUserPermissions(userId: number): Promise<PermissionContext> {
+    const userRoles = await this.roleQuery.findUserRoles(userId);
 
     const roleCodes = userRoles.map((r) => r.roleCode);
-    const activeStoreId =
-      userRoles.find((r) => r.storeFk != null)?.storeFk ?? null;
     const assignedAt = new Date().toISOString();
-    const roles = AuthMapper.mapToRoleEntries(userRoles, undefined, assignedAt);
+    const roles = AuthMapper.buildRoleEntries(userRoles, undefined, assignedAt);
 
     return {
       roles,
       isSuperAdmin: roleCodes.includes(SystemRoleCodes.SUPER_ADMIN),
-      activeStoreId,
-      permissionCodes: this.extractPermissionCodes(userRoles),
     };
-  }
-
-  private extractPermissionCodes(
-    userRoles: Array<{
-      roleCode?: string;
-      code?: string;
-      permissions?: unknown;
-    }>,
-  ): string[] {
-    const permissionCodes = new Set<string>();
-    userRoles.forEach((role) => {
-      const roleCode = role.roleCode || role.code;
-      if (roleCode) permissionCodes.add(roleCode);
-      if (role.permissions && Array.isArray(role.permissions)) {
-        (role.permissions as Array<string | { code?: string }>).forEach(
-          (perm) => {
-            if (typeof perm === 'string') permissionCodes.add(perm);
-            else if (typeof perm === 'object' && perm.code)
-              permissionCodes.add(perm.code);
-          },
-        );
-      }
-    });
-    return Array.from(permissionCodes);
   }
 
   /**
@@ -109,7 +80,7 @@ export class PermissionsService {
     const storeIds = await this.authUsersRepository.findActiveStoreIds(userId);
 
     // Single batched query: fetches all role assignments + permissions in 2 DB round-trips
-    return this.roleEntityPermissionRepository.getUserEntityPermissionsForAllStores(
+    return this.roleQuery.getUserEntityPermissionsForAllStores(
       userId,
       storeIds,
     );
@@ -195,77 +166,6 @@ export class PermissionsService {
     );
 
     return { version: currentVersion, added, removed, modified };
-  }
-
-  /**
-   * Fan-out a single entity permission change to every user who holds the given role,
-   * atomically incrementing each user's `permissionsVersion` and writing a changelog entry.
-   *
-   * Each user is processed independently — a failure for one user is logged and skipped
-   * rather than aborting the entire fan-out.  This avoids a single bad user record
-   * blocking changelog writes for an entire store's worth of users.
-   *
-   * Called by `RolesService.updateEntityPermissions` after each entity permission upsert.
-   *
-   * @param roleId      - The role whose entity permission was just changed
-   * @param entityCode  - Which entity (e.g. 'PRODUCT', 'CUSTOMER')
-   * @param operation   - Whether the permission row was ADDED, MODIFIED, or REMOVED
-   * @param newPerms    - The new permission flags (null for REMOVED)
-   */
-  async recordEntityPermissionChange(
-    roleId: number,
-    entityCode: string,
-    operation: 'ADDED' | 'REMOVED' | 'MODIFIED',
-    newPerms: Record<string, boolean> | null,
-  ): Promise<void> {
-    const userIds = await this.rolesRepository.findUsersByRoleId(roleId);
-
-    if (userIds.length === 0) {
-      this.logger.debug(`recordEntityPermissionChange: role ${roleId} has no active users — skipping`);
-      return;
-    }
-
-    let successCount = 0;
-
-    // Each user has their own permissionsVersion row — no shared state, safe to run in parallel.
-    await Promise.all(
-      userIds.map(async (userId) => {
-        try {
-          const newVersion = await this.authUsersRepository.incrementPermissionsVersion(userId);
-          const versionNumber = this.parseVersionNumber(newVersion);
-
-          await this.changelogRepository.record([{
-            userFk: userId,
-            versionNumber,
-            entityCode,
-            operation,
-            data: newPerms,
-          }]);
-
-          successCount++;
-        } catch (err) {
-          this.logger.error(
-            `recordEntityPermissionChange: failed for user ${userId}, role ${roleId}, entity ${entityCode}`,
-            err instanceof Error ? err.stack : String(err),
-          );
-          // Do not rethrow — partial fan-out failure must not roll back the role update itself.
-        }
-      }),
-    );
-
-    this.logger.log(
-      `recordEntityPermissionChange: role=${roleId} entity=${entityCode} op=${operation} users=${successCount}/${userIds.length}`,
-    );
-  }
-
-  /**
-   * Increment user's permissions version.
-   * Called when permissions change.
-   */
-  async incrementPermissionsVersion(userId: number): Promise<string> {
-    const newVersion = await this.authUsersRepository.incrementPermissionsVersion(userId);
-    this.logger.log(`Permissions version bumped for user ${userId}: → ${newVersion}`);
-    return newVersion;
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────

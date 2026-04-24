@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { PasswordValidator } from '../validators';
+import { PasswordValidator } from '../../../../../common/validators/password.validator';
 
 /**
  * Password Service
@@ -8,7 +8,7 @@ import { PasswordValidator } from '../validators';
  */
 @Injectable()
 export class PasswordService {
-  private readonly BCRYPT_ROUNDS = 12;
+  static readonly BCRYPT_ROUNDS = 12;
 
   /**
    * Validate password strength using PasswordValidator.
@@ -22,7 +22,7 @@ export class PasswordService {
    */
   async hash(password: string): Promise<string> {
     this.validateStrength(password);
-    return bcrypt.hash(password, this.BCRYPT_ROUNDS);
+    return bcrypt.hash(password, PasswordService.BCRYPT_ROUNDS);
   }
 
   /**

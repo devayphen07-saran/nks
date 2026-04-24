@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { isNull, asc, eq, and, inArray, sql } from 'drizzle-orm';
+import { isNull, asc, eq, and, inArray } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
 import * as schema from '../../../../core/database/schema';
+import { SystemRoleCodes } from '../../../../common/constants/system-role-codes.constant';
 import type { PartialRoute } from '../dto/routes.interface';
 
 type Db = NodePgDatabase<typeof schema>;
@@ -32,6 +33,7 @@ export class RoutesRepository extends BaseRepository {
     return this.db
       .selectDistinctOn([schema.routes.id], {
         id: schema.routes.id,
+        guuid: schema.routes.guuid,
         routePath: schema.routes.routePath,
         routeName: schema.routes.routeName,
         description: schema.routes.description,
@@ -68,40 +70,27 @@ export class RoutesRepository extends BaseRepository {
   }
 
   async findOwnerRoutes(): Promise<PartialRoute[]> {
-    return this.db
-      .select({
-        id: schema.routes.id,
-        routePath: schema.routes.routePath,
-        routeName: schema.routes.routeName,
-        description: schema.routes.description,
-        iconName: schema.routes.iconName,
-        routeType: schema.routes.routeType,
-        routeScope: schema.routes.routeScope,
-        isPublic: schema.routes.isPublic,
-        isHidden: schema.routes.isHidden,
-        parentRouteFk: schema.routes.parentRouteFk,
-        fullPath: schema.routes.fullPath,
-        sortOrder: schema.routes.sortOrder,
-        canView: sql<boolean>`true`,
-        canCreate: sql<boolean>`true`,
-        canEdit: sql<boolean>`true`,
-        canDelete: sql<boolean>`true`,
-        canExport: sql<boolean>`true`,
-      })
-      .from(schema.routes)
+    const [ownerRole] = await this.db
+      .select({ id: schema.roles.id })
+      .from(schema.roles)
       .where(
         and(
-          isNull(schema.routes.deletedAt),
-          eq(schema.routes.routeScope, 'store'),
+          eq(schema.roles.code, SystemRoleCodes.STORE_OWNER),
+          isNull(schema.roles.storeFk),
+          isNull(schema.roles.deletedAt),
         ),
       )
-      .orderBy(asc(schema.routes.sortOrder));
+      .limit(1);
+
+    if (!ownerRole) return [];
+    return this.findCustomRoleRoutes([ownerRole.id]);
   }
 
   async findCustomRoleRoutes(roleIds: number[]): Promise<PartialRoute[]> {
     return this.db
       .selectDistinctOn([schema.routes.id], {
         id: schema.routes.id,
+        guuid: schema.routes.guuid,
         routePath: schema.routes.routePath,
         routeName: schema.routes.routeName,
         description: schema.routes.description,

@@ -5,11 +5,21 @@ import { expo } from '@better-auth/expo';
 import * as schema from '../../../../core/database/schema';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-export const getAuth = (db: NodePgDatabase<typeof schema>) => {
+export type BetterAuthConfig = {
+  baseUrl: string;
+  secret: string;
+  googleClientId?: string;
+  googleClientSecret?: string;
+};
+
+export const getAuth = (
+  db: NodePgDatabase<typeof schema>,
+  config: BetterAuthConfig,
+) => {
   return betterAuth({
     useNumberId: true,
-    baseURL: process.env.BETTER_AUTH_BASE_URL,
-    secret: process.env.BETTER_AUTH_SECRET,
+    baseURL: config.baseUrl,
+    secret: config.secret,
     advanced: {
       database: { generateId: false },
     },
@@ -19,16 +29,20 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
       bearer(),
       jwt({
         jwt: {
-          issuer: process.env.BETTER_AUTH_BASE_URL!,
-          audience: process.env.BETTER_AUTH_BASE_URL!,
+          issuer: config.baseUrl,
+          audience: config.baseUrl,
           expirationTime: '15m',
-          definePayload: ({ user, session }) => ({
-            sub: user.id,
-            email: user.email,
-            role: (user as any).role ?? 'user',
-            storeId: (session as any).activeStoreFk,
-            sessionId: session.id,
-          }),
+          definePayload: ({ user, session }) => {
+            const u = user as typeof user & { role?: string };
+            const s = session as typeof session & { activeStoreFk?: number | null };
+            return {
+              sub: user.id,
+              email: user.email,
+              role: u.role ?? 'user',
+              storeId: s.activeStoreFk,
+              sessionId: session.id,
+            };
+          },
         },
         jwks: {
           keyPairConfig: { alg: 'EdDSA', crv: 'Ed25519' },
@@ -54,11 +68,11 @@ export const getAuth = (db: NodePgDatabase<typeof schema>) => {
     },
 
     socialProviders: {
-      ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+      ...(config.googleClientId && config.googleClientSecret
         ? {
             google: {
-              clientId: process.env.GOOGLE_CLIENT_ID,
-              clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+              clientId: config.googleClientId,
+              clientSecret: config.googleClientSecret,
             },
           }
         : {}),

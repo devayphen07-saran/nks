@@ -1,12 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
-export const StoreSelectSchema = z.object({
-  storeId: z.number().int().positive(),
-});
-
-export class StoreSelectDto extends createZodDto(StoreSelectSchema) {}
-
 /**
  * Unified endpoint for all profile updates after login:
  * - Update name (always allowed)
@@ -17,10 +11,11 @@ export class StoreSelectDto extends createZodDto(StoreSelectSchema) {}
  * Password is required when adding email, optional otherwise.
  */
 export const OnboardingCompleteSchema = z.object({
-  name: z.string().min(2), // Required - update user name
-  email: z.string().email().optional(), // Optional - add/update email
-  phoneNumber: z.string().optional(), // Optional - add/update phone
-  password: z.string().min(8).optional(), // Optional - required if adding email
+  firstName: z.string().trim().min(2, 'First name must be at least 2 characters'),
+  lastName: z.string().trim().min(1, 'Last name is required'),
+  email: z.email().optional(),
+  phoneNumber: z.string().optional(),
+  password: z.string().min(8).optional(),
 });
 
 export class OnboardingCompleteDto extends createZodDto(OnboardingCompleteSchema) {}

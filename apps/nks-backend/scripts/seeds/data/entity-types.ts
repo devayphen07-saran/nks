@@ -8,6 +8,7 @@ export default [
   { code: 'LOOKUP',          label: 'Lookup',           description: 'Reference data (salutations, designations, etc.)' },
   { code: 'AUDIT_LOG',       label: 'Audit Log',        description: 'System audit trail'                         },
   { code: 'USER',            label: 'User',             description: 'User accounts'                              },
+  { code: 'ENTITY_STATUS',   label: 'Entity Status',    description: 'Mapping between domain entities and allowed statuses' },
   { code: 'ROLE',            label: 'Role',             description: 'Role definitions and permissions'           },
   { code: 'ROUTE',           label: 'Route',            description: 'Application routes and navigation'          },
   { code: 'SYNC',            label: 'Sync',             description: 'Offline sync push operations'               },

@@ -1,12 +1,15 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
+import { ZodValidationPipe } from 'nestjs-zod';
 import { ScheduleModule } from '@nestjs/schedule';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { RequestIdMiddleware } from './common/middleware';
+import { LoggingInterceptor, TimeoutInterceptor, TransformInterceptor } from './common/interceptors';
+import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './core/database/database.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { GuardsModule } from './common/guards/guards.module';
-import { MailModule } from './shared/mail/mail.module';
 import { AuthModule } from './contexts/iam/auth/auth.module';
 import { RolesModule } from './contexts/iam/roles/roles.module';
 import { RoutesModule } from './contexts/iam/routes/routes.module';
@@ -19,17 +22,43 @@ import { StatusModule } from './contexts/reference-data/status/status.module';
 import { EntityStatusModule } from './contexts/reference-data/entity-status/entity-status.module';
 import { AuditModule } from './contexts/compliance/audit/audit.module';
 import { SyncModule } from './contexts/sync/sync.module';
+import { PermissionsChangelogModule } from './shared/permissions-changelog/permissions-changelog.module';
 import { LoggerModule } from './core/logger/logger.module';
+import { HealthModule } from './core/health/health.module';
 
+/**
+ * Module dependency graph (acyclic — arrows show "imports"):
+ *
+ *   AppModule
+ *     ├── ConfigModule          (global config, no upstream deps)
+ *     ├── DatabaseModule        (global DB pool, no upstream deps)
+ *     ├── AuditModule                 (@Global — injected anywhere without import)
+ *     ├── PermissionsChangelogModule  (@Global — injected anywhere without import)
+ *     ├── GuardsModule          → DatabaseModule
+ *     ├── AuthModule            → RolesModule → StoresModule → DatabaseModule
+ *     │                         → RateLimitingModule, MailModule (shared/mail)
+ *     ├── RolesModule           → StoresModule → DatabaseModule
+ *     ├── RoutesModule          → DatabaseModule
+ *     ├── UsersModule           → DatabaseModule
+ *     ├── StoresModule          → DatabaseModule
+ *     ├── SyncModule            → AuthModule (for guards)
+ *     └── Reference-data modules (Location, Lookups, Codes, Status, EntityStatus)
+ *           → DatabaseModule only
+ *
+ * CONSTRAINT: RolesModule, StoresModule must NEVER import AuthModule (circular).
+ * CONSTRAINT: AuthModule must NEVER import SyncModule (circular).
+ */
 @Module({
   imports: [
     ConfigModule,
     ScheduleModule.forRoot(),
+    EventEmitterModule.forRoot(),
     DatabaseModule,
+    HealthModule,
     GuardsModule,
     LoggerModule,
-    MailModule,
     AuditModule,
+    PermissionsChangelogModule,
     AuthModule,
     RolesModule,
     RoutesModule,
@@ -59,7 +88,12 @@ import { LoggerModule } from './core/logger/logger.module';
      * can remove it — the global guard makes it redundant. Controllers
      * using @UseGuards(AuthGuard, RBACGuard) should slim to @UseGuards(RBACGuard).
      */
-    { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_FILTER,      useClass: GlobalExceptionFilter },
+    { provide: APP_PIPE,        useClass: ZodValidationPipe },
+    { provide: APP_GUARD,       useClass: AuthGuard },
+    { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: TimeoutInterceptor },
   ],
 })
 export class AppModule implements NestModule {

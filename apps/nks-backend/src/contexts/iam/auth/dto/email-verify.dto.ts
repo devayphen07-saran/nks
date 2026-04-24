@@ -2,13 +2,13 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
 export const SendEmailOtpSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
 });
 
 export class SendEmailOtpDto extends createZodDto(SendEmailOtpSchema) {}
 
 export const VerifyEmailOtpSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   otp: z.string().min(6).max(6),
 });
 

@@ -20,7 +20,7 @@ export class StatusRepository extends BaseRepository {
     search?:  string;
   }): Promise<{ rows: Status[]; total: number }> {
     const { page, pageSize, search } = opts;
-    const offset = (page - 1) * pageSize;
+    const offset = StatusRepository.toOffset(page, pageSize);
 
     const where = and(
       isNull(status.deletedAt),
@@ -29,7 +29,8 @@ export class StatusRepository extends BaseRepository {
 
     return this.paginate(
       this.db.select().from(status).where(where).orderBy(status.sortOrder, status.code).limit(pageSize).offset(offset),
-      this.db.select({ total: count() }).from(status).where(where),
+      () => this.db.select({ total: count() }).from(status).where(where),
+      page, pageSize,
     );
   }
 
@@ -51,7 +52,7 @@ export class StatusRepository extends BaseRepository {
       .select()
       .from(status)
       .where(
-        and(eq(status.guuid, guuid), isNull(status.deletedAt)),
+        and(eq(status.guuid, guuid), eq(status.isActive, true), isNull(status.deletedAt)),
       )
       .limit(1);
     return row ?? null;
@@ -62,7 +63,7 @@ export class StatusRepository extends BaseRepository {
       .select()
       .from(status)
       .where(
-        and(eq(status.code, code), isNull(status.deletedAt)),
+        and(eq(status.code, code), eq(status.isActive, true), isNull(status.deletedAt)),
       )
       .limit(1);
     return row ?? null;

@@ -1,12 +1,12 @@
-import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { verifyOfflineSession } from '../../common/utils/offline-session-hmac';
-import { ErrorCode, errPayload } from '../../common/constants/error-codes.constants';
 import { SyncRepository } from './repositories/sync.repository';
-import { SyncDataMapper } from './mappers/sync-data.mapper';
+import { SyncDataMapper } from './mapper/sync-data.mapper';
 import { SyncDataValidator } from './validators/sync-data.validator';
-import { RevokedDevicesRepository } from '../iam/auth/repositories/revoked-devices.repository';
+import { SyncAccessValidator } from './validators/sync-access.validator';
+import { DeviceRevocationQueryService } from '../iam/auth/services/session/device-revocation-query.service';
 import { JWTConfigService } from '../../config/jwt.config';
 import { SyncHandlerFactory } from './handlers/sync-handler.factory';
 import type {
@@ -17,22 +17,36 @@ import type {
 
 export type { ChangesResponse };
 
+export interface GetChangesOptions {
+  userId: number;
+  cursor: string;
+  storeGuuid: string;
+  tablesCsv: string;
+  limit?: number;
+}
+
 const DEFAULT_SYNC_LIMIT = 200;
 
-/** Keys whose values must never appear in logs — tokens, credentials, PII. */
+/**
+ * Keys whose values must never appear in logs — tokens, credentials, PII.
+ *
+ * All entries MUST be lowercase: the redaction check lowercases the incoming
+ * key before lookup, so `apiKey`, `accessToken`, `sessionToken`, etc. need
+ * their already-lowercase equivalents here or they silently fall through.
+ */
 const SENSITIVE_KEYS = new Set([
   'password',
   'token',
   'secret',
   'key',
-  'apiKey',
-  'accessToken',
-  'refreshToken',
-  'sessionToken',
+  'apikey',
+  'accesstoken',
+  'refreshtoken',
+  'sessiontoken',
   'otp',
   'pin',
   'cvv',
-  'cardNumber',
+  'cardnumber',
 ]);
 
 /**
@@ -49,8 +63,31 @@ function sanitizeOpData(
   return result;
 }
 
-/** Tables supported for pull sync. Mobile sends a subset via the `tables` query param. */
-const SUPPORTED_TABLES = new Set(['state', 'district', 'routes']);
+/**
+ * Single source of truth for pull-sync tables.
+ * Adding a new table: add one entry here — handler, mapper, and SUPPORTED_TABLES stay in sync.
+ */
+const TABLE_REGISTRY = {
+  state: {
+    fetch: (repo: SyncRepository, cursorMs: number, cursorId: number, limit: number) =>
+      repo.getStateChanges(cursorMs, cursorId, limit),
+    map: SyncDataMapper.buildStateChange,
+  },
+  district: {
+    fetch: (repo: SyncRepository, cursorMs: number, cursorId: number, limit: number) =>
+      repo.getDistrictChanges(cursorMs, cursorId, limit),
+    map: SyncDataMapper.buildDistrictChange,
+  },
+  routes: {
+    fetch: (repo: SyncRepository, cursorMs: number, cursorId: number, limit: number) =>
+      repo.getRouteChanges(cursorMs, cursorId, limit),
+    map: SyncDataMapper.buildRouteChange,
+  },
+} as const;
+
+type SyncTableKey = keyof typeof TABLE_REGISTRY;
+
+const SUPPORTED_TABLES = new Set<string>(Object.keys(TABLE_REGISTRY));
 
 /**
  * Deterministic JSON serialisation with sorted keys.
@@ -83,7 +120,7 @@ export class SyncService {
   constructor(
     private readonly syncRepository: SyncRepository,
     private readonly configService: ConfigService,
-    private readonly revokedDevicesRepository: RevokedDevicesRepository,
+    private readonly deviceRevocationQuery: DeviceRevocationQueryService,
     private readonly jwtConfigService: JWTConfigService,
     private readonly syncHandlerFactory: SyncHandlerFactory,
   ) {}
@@ -112,13 +149,9 @@ export class SyncService {
     userId: number,
     activeStoreId: number | null,
     offlineSession?: OfflineSessionContext,
-  ): Promise<{
-    processed: number;
-    rejected: number;
-    status: 'ok' | 'partial';
-  }> {
+  ): Promise<{ processed: number; rejected: number; status: 'ok' | 'partial' }> {
     if (offlineSession) {
-      await this.validateOfflineSessionSignature(offlineSession);
+      await this.validateOfflineSessionSignature(offlineSession, userId);
     }
 
     const signingKey = offlineSession?.signature ?? null;
@@ -187,7 +220,7 @@ export class SyncService {
       });
     }
 
-    const status = rejected > 0 ? 'partial' : 'ok';
+    const status: 'ok' | 'partial' = rejected > 0 ? 'partial' : 'ok';
     return { processed, rejected, status };
   }
 
@@ -205,17 +238,17 @@ export class SyncService {
   }
 
   /**
-   * Build a compound cursor string from the last row in a change set.
+   * Build a compound cursor string from the last raw repository row.
    * Uses (updatedAt, id) to guarantee every row is delivered exactly once
    * even when multiple rows share the same updated_at timestamp.
    */
   private buildNextCursor(
-    changes: import('./dto/responses').SyncChange[],
+    rows: Array<{ id: number; updatedAt: Date }>,
     fallback: string,
   ): string {
-    if (changes.length === 0) return fallback;
-    const last = changes[changes.length - 1];
-    return `${last.updatedAt}:${last.id}`;
+    if (rows.length === 0) return fallback;
+    const last = rows[rows.length - 1];
+    return `${last.updatedAt.getTime()}:${last.id}`;
   }
 
   /**
@@ -225,21 +258,15 @@ export class SyncService {
    * Each table is fetched independently so mobile can advance per-table cursors.
    * Cursor format: "timestampMs:rowId" — breaks ties when rows share the same updated_at.
    */
-  async getChanges(
-    userId: number,
-    cursor: string,
-    storeGuuid: string,
-    tablesCsv: string,
-    limit: number = DEFAULT_SYNC_LIMIT,
-  ): Promise<ChangesResponse> {
+  async getChanges(opts: GetChangesOptions): Promise<ChangesResponse> {
+    const { userId, cursor, storeGuuid, tablesCsv, limit = DEFAULT_SYNC_LIMIT } = opts;
+
     const storeId = await this.syncRepository.verifyStoreMembership(
       userId,
       storeGuuid,
     );
 
-    if (!storeId) {
-      throw new ForbiddenException(errPayload(ErrorCode.SYNC_STORE_ACCESS_DENIED));
-    }
+    SyncAccessValidator.assertStoreMembership(storeId);
 
     const { ts: cursorMs, id: cursorId } = this.parseCursor(cursor);
 
@@ -248,38 +275,32 @@ export class SyncService {
       .map((t) => t.trim())
       .filter((t) => SUPPORTED_TABLES.has(t));
 
-    const allChanges: import('./dto/responses').SyncChange[] = [];
+    // Fetch limit+1 rows per table so we can detect whether more pages exist
+    // without ambiguity: exactly `limit` rows returned can't distinguish
+    // "all done" from "more available".
+    const fetchLimit = limit + 1;
 
-    for (const table of requestedTables) {
-      if (table === 'state') {
-        const rows = await this.syncRepository.getStateChanges(
-          cursorMs,
-          cursorId,
-          limit,
-        );
-        const slice = rows.length > limit ? rows.slice(0, limit) : rows;
-        allChanges.push(...slice.map(SyncDataMapper.stateRowToChange));
-      } else if (table === 'district') {
-        const rows = await this.syncRepository.getDistrictChanges(
-          cursorMs,
-          cursorId,
-          limit,
-        );
-        const slice = rows.length > limit ? rows.slice(0, limit) : rows;
-        allChanges.push(...slice.map(SyncDataMapper.districtRowToChange));
-      } else if (table === 'routes') {
-        const rows = await this.syncRepository.getRouteChanges(
-          cursorMs,
-          cursorId,
-          limit,
-        );
-        const slice = rows.length > limit ? rows.slice(0, limit) : rows;
-        allChanges.push(...slice.map(SyncDataMapper.routeRowToChange));
-      }
+    const fetched = await Promise.all(
+      requestedTables.map((table) =>
+        TABLE_REGISTRY[table as SyncTableKey]
+          .fetch(this.syncRepository, cursorMs, cursorId, fetchLimit)
+          .then((rows) => ({ table: table as SyncTableKey, rows })),
+      ),
+    );
+
+    const allChanges: import('./dto/responses').SyncChange[] = [];
+    const allRawRows: Array<{ id: number; updatedAt: Date }> = [];
+    let hasMore = false;
+
+    for (const { table, rows } of fetched) {
+      if (rows.length > limit) hasMore = true;
+      const slice = rows.slice(0, limit);
+      const { map } = TABLE_REGISTRY[table];
+      allChanges.push(...slice.map(map as (r: (typeof rows)[number]) => import('./dto/responses').SyncChange));
+      allRawRows.push(...slice);
     }
 
-    const hasMore = allChanges.length >= limit;
-    const nextCursor = this.buildNextCursor(allChanges, cursor);
+    const nextCursor = this.buildNextCursor(allRawRows, cursor);
 
     this.logger.debug(
       `Changes: ${allChanges.length} row(s) across [${requestedTables.join(',')}], hasMore=${hasMore}, nextCursor=${nextCursor}`,
@@ -342,41 +363,35 @@ export class SyncService {
    */
   private async validateOfflineSessionSignature(
     session: OfflineSessionContext,
+    userId: number,
   ): Promise<void> {
     if (!session) return;
 
-    if (session.offlineValidUntil < Date.now()) {
-      throw new ForbiddenException(errPayload(ErrorCode.SYNC_SESSION_EXPIRED));
-    }
+    SyncAccessValidator.assertSessionNotExpired(session.offlineValidUntil);
 
     const secret = this.configService.getOrThrow<string>(
       'OFFLINE_SESSION_HMAC_SECRET',
     );
     const isValid = verifyOfflineSession(
       {
-        userId: session.userId,
-        storeId: session.storeId,
+        userGuuid: session.userGuuid,
+        storeGuuid: session.storeGuuid,
         roles: session.roles,
         offlineValidUntil: session.offlineValidUntil,
       },
       secret,
       session.signature,
     );
-
-    if (!isValid) {
-      throw new ForbiddenException(errPayload(ErrorCode.SYNC_SESSION_INVALID_SIGNATURE));
-    }
+    SyncAccessValidator.assertSignatureValid(isValid);
 
     // Device revocation check — reject devices whose session was explicitly terminated,
     // even if the 3-day HMAC is still cryptographically valid.
     if (session.deviceId) {
-      const isRevoked = await this.revokedDevicesRepository.isRevoked(
-        session.userId,
+      const isRevoked = await this.deviceRevocationQuery.isRevoked(
+        userId,
         session.deviceId,
       );
-      if (isRevoked) {
-        throw new ForbiddenException(errPayload(ErrorCode.SYNC_DEVICE_REVOKED));
-      }
+      SyncAccessValidator.assertDeviceNotRevoked(isRevoked);
     }
 
     // Offline JWT write-guard — verify the RS256 offline token and cross-validate
@@ -398,20 +413,15 @@ export class SyncService {
           session.offlineToken,
         );
       } catch {
-        throw new ForbiddenException(errPayload(ErrorCode.SYNC_TOKEN_INVALID));
+        SyncAccessValidator.assertOfflineTokenValid(null);
+        return; // assertOfflineTokenValid always throws when passed null
       }
 
       // Cross-validate: JWT roles must match HMAC-signed roles (sorted comparison)
-      const jwtRolesSorted = [...jwtPayload.roles].sort().join(',');
-      const hmacRolesSorted = [...session.roles].sort().join(',');
-      if (jwtRolesSorted !== hmacRolesSorted) {
-        throw new ForbiddenException(errPayload(ErrorCode.SYNC_TOKEN_ROLE_MISMATCH));
-      }
+      SyncAccessValidator.assertRolesMatch(jwtPayload.roles, session.roles);
 
-      // Cross-validate: JWT activeStoreId must match HMAC-signed storeId
-      if (jwtPayload.activeStoreId !== session.storeId) {
-        throw new ForbiddenException(errPayload(ErrorCode.SYNC_TOKEN_STORE_MISMATCH));
-      }
+      // Cross-validate: JWT activeStoreGuuid must match HMAC-signed storeGuuid
+      SyncAccessValidator.assertStoreMatch(jwtPayload.activeStoreGuuid, session.storeGuuid);
     }
   }
 

@@ -3,20 +3,29 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { ErrorCode } from '../constants/error-codes.constants';
 import type { AuthenticatedRequest } from './auth.guard';
 
 /**
- * OwnershipGuard — ensures the authenticated user owns the resource.
+ * OwnershipGuard — ensures the authenticated user owns the resource whose
+ * identifier is passed in the URL path. SUPER_ADMIN bypasses the check.
  *
- * Compares req.user.userId against req.params.userId (or req.params.id).
- * SUPER_ADMIN bypasses the check.
+ * Accepted path parameters (in resolution order):
+ *   - `:iamUserId`  → matched against req.user.iamUserId
+ *                     (ayphen-style identity key — `/users/:iamUserId/...`)
+ *   - `:userGuuid`  → matched against req.user.guuid
+ *   - `:guuid`      → matched against req.user.guuid (fallback convention)
  *
  * Usage:
  *   @UseGuards(AuthGuard, OwnershipGuard)
- *   async getMyData(@Param('userId') userId: number) {}
+ *   @Get(':iamUserId/favorites')
+ *   async getFavorites(@Param('iamUserId') iamUserId: string) { ... }
+ *
+ * Security note: closes the known ayphen Java backend gap where
+ * `@PreAuthorize` checks generic role permissions but does NOT verify the
+ * URL-provided `iamUserId` against the authenticated caller. Never mount a
+ * `/users/:iamUserId/...` route without this guard (unless it is admin-only).
  */
 @Injectable()
 export class OwnershipGuard implements CanActivate {
@@ -24,19 +33,25 @@ export class OwnershipGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user;
 
-    if (!user?.userId) {
-      throw new UnauthorizedException({
-        errorCode: ErrorCode.UNAUTHORIZED,
-        message: 'User not found or authenticated',
-      });
-    }
-
     if (user.isSuperAdmin) return true;
 
-    const paramUserId =
-      Number(request.params?.userId) || Number(request.params?.id);
+    const params = request.params ?? {};
 
-    if (!paramUserId || user.userId !== paramUserId) {
+    // iamUserId takes precedence — it's the canonical external identifier
+    // used by ayphen clients. A route that declares it is explicitly opting
+    // into the ayphen identity scheme.
+    if (params.iamUserId !== undefined) {
+      if (user.iamUserId !== params.iamUserId) {
+        throw new ForbiddenException({
+          errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+          message: 'You can only access your own resources',
+        });
+      }
+      return true;
+    }
+
+    const paramGuuid = params.userGuuid ?? params.guuid;
+    if (!paramGuuid || user.guuid !== paramGuuid) {
       throw new ForbiddenException({
         errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
         message: 'You can only access your own resources',

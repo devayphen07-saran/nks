@@ -1,15 +1,26 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+type SlackAlertParams =
+  | {
+      type: 'success';
+      summary: string;
+      details: { oldKid: string; newKid: string; reason?: string; durationMs: number; rotatedAt?: Date };
+      critical?: boolean;
+    }
+  | {
+      type: 'failure';
+      summary: string;
+      details: { oldKid: string; error: string };
+      critical?: boolean;
+    };
+
 /**
  * Key Rotation Alert Service
  *
  * Notification channels (in priority order):
  *   1. Structured pino log  — always fires, works with any log aggregator
  *   2. Slack webhook         — optional, configure SLACK_WEBHOOK_URL
- *
- * Email is intentionally not implemented yet.
- * Wire @nestjs-modules/mailer and restore sendEmail() when ready.
  *
  * Configuration (env vars):
  *   SLACK_WEBHOOK_URL=https://hooks.slack.com/...   (optional)
@@ -122,8 +133,12 @@ export class KeyRotationAlertService {
    * IMPORTANT: Expose only via a SUPER_ADMIN-guarded endpoint:
    *
    *   @Get('test-alerts')
-   *   @UseGuards(AuthGuard, RBACGuard)
-   *   @Roles('SUPER_ADMIN')
+   *   @UseGuards(RBACGuard)
+   *   @RequireEntityPermission({
+   *     entityCode: EntityCodes.AUDIT_LOG,
+   *     action: PermissionActions.VIEW,
+   *     scope: 'PLATFORM',
+   *   })
    *   testAlerts() { return this.keyRotationAlertService.testAlertConfiguration(); }
    */
   async testAlertConfiguration(): Promise<{
@@ -176,12 +191,7 @@ export class KeyRotationAlertService {
    * Returns true if delivered, false if failed or not configured.
    * Never throws. Includes a 5-second timeout.
    */
-  private async sendSlackAlert(params: {
-    type: 'success' | 'failure';
-    summary: string;
-    details: any;
-    critical?: boolean;
-  }): Promise<boolean> {
+  private async sendSlackAlert(params: SlackAlertParams): Promise<boolean> {
     if (!this.slackWebhookUrl) return false;
 
     const color = params.type === 'success' ? '#36a64f' : '#ff0000';

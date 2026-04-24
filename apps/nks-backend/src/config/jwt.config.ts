@@ -4,12 +4,23 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
+import { ConfigService } from '@nestjs/config';
 import { RSAKeyManager } from '../core/crypto/rsa-keys';
+import { InternalServerException } from '../common/exceptions';
+import { ErrorCode, errPayload } from '../common/constants/error-codes.constants';
 
 export interface JWTPayload {
   sub: string;
   sid: string;
   jti: string;
+  /**
+   * Cross-service user identifier consumed by the ayphen frontend, ayphen-next
+   * and ayphen-iam libs. Treated as the primary external user ID — required,
+   * never null, embedded as a URL path parameter in those clients.
+   */
+  iamUserId: string;
+  firstName?: string;
+  lastName?: string;
   email?: string;
   roles: string[];
   iat: number;
@@ -25,8 +36,8 @@ export interface OfflineJWTPayload {
   jti: string;
   email?: string;
   roles: string[];
-  stores: Array<{ id: number; name: string }>;
-  activeStoreId: number | null;
+  stores: Array<{ guuid: string; name: string }>;
+  activeStoreGuuid: string | null;
   iat: number;
   exp: number;
   iss: string;
@@ -40,6 +51,9 @@ const JWTPayloadSchema = z.object({
   sub: z.string(),
   sid: z.string(),
   jti: z.string(),
+  iamUserId: z.string(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
   email: z.string().optional(),
   roles: z.array(z.string()),
   iat: z.number(),
@@ -54,8 +68,8 @@ const OfflineJWTPayloadSchema = z.object({
   jti: z.string(),
   email: z.string().optional(),
   roles: z.array(z.string()),
-  stores: z.array(z.object({ id: z.number(), name: z.string() })),
-  activeStoreId: z.number().nullable(),
+  stores: z.array(z.object({ guuid: z.string(), name: z.string() })),
+  activeStoreGuuid: z.string().nullable(),
   iat: z.number(),
   exp: z.number(),
   iss: z.string(),
@@ -87,7 +101,7 @@ function toJWK(raw: crypto.JsonWebKey): JWK {
   const n = typeof raw.n === 'string' ? raw.n : undefined;
   const e = typeof raw.e === 'string' ? raw.e : undefined;
   if (!kty || !n || !e) {
-    throw new Error('Exported JWK is missing required RSA fields (kty, n, e)');
+    throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
   }
   return {
     kty,
@@ -115,15 +129,12 @@ export class JWTConfigService {
   private publicKey: string;
   private currentKeyId: string = '';
   private fallbackKeys: FallbackKey[] = [];
-  private readonly FALLBACK_KEY_DURATION_DAYS = 30; // 30-day grace period for offline clients
+  private readonly FALLBACK_KEY_DURATION_DAYS = 30;
+  private readonly fallbackKeysPath: string;
 
-  /** Path where fallback key metadata is persisted across restarts */
-  private static readonly FALLBACK_KEYS_PATH = path.join(
-    process.cwd(),
-    'secrets/jwt_fallback_keys.json',
-  );
-
-  constructor() {
+  constructor(private readonly configService: ConfigService) {
+    const keysDir = this.configService.get<string>('JWT_KEYS_DIR') ?? path.join(process.cwd(), 'secrets');
+    this.fallbackKeysPath = path.join(keysDir, 'jwt_fallback_keys.json');
     try {
       this.privateKey = RSAKeyManager.getPrivateKey();
       this.publicKey = RSAKeyManager.getPublicKey();
@@ -150,8 +161,8 @@ export class JWTConfigService {
   /** Load fallback keys from disk, filtering out expired ones. */
   private loadFallbackKeysFromDisk(): FallbackKey[] {
     try {
-      if (!fs.existsSync(JWTConfigService.FALLBACK_KEYS_PATH)) return [];
-      const raw = fs.readFileSync(JWTConfigService.FALLBACK_KEYS_PATH, 'utf8');
+      if (!fs.existsSync(this.fallbackKeysPath)) return [];
+      const raw = fs.readFileSync(this.fallbackKeysPath, 'utf8');
       const parsed: Array<{
         kid: string;
         publicKeyPem: string;
@@ -178,11 +189,11 @@ export class JWTConfigService {
   /** Persist fallback keys to disk so they survive restarts. */
   private saveFallbackKeysToDisk(): void {
     try {
-      const dir = path.dirname(JWTConfigService.FALLBACK_KEYS_PATH);
+      const dir = path.dirname(this.fallbackKeysPath);
       if (!fs.existsSync(dir))
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       fs.writeFileSync(
-        JWTConfigService.FALLBACK_KEYS_PATH,
+        this.fallbackKeysPath,
         JSON.stringify(this.fallbackKeys, null, 2),
         { mode: 0o600 },
       );
@@ -240,8 +251,8 @@ export class JWTConfigService {
       sub: string;
       email?: string;
       roles: string[];
-      stores: Array<{ id: number; name: string }>;
-      activeStoreId: number | null;
+      stores: Array<{ guuid: string; name: string }>;
+      activeStoreGuuid: string | null;
     },
     expiresIn: string = '3d',
   ): string {
@@ -254,7 +265,7 @@ export class JWTConfigService {
       ...(payload.email ? { email: payload.email } : {}),
       roles: payload.roles,
       stores: payload.stores,
-      activeStoreId: payload.activeStoreId,
+      activeStoreGuuid: payload.activeStoreGuuid,
       iss: 'nks-auth',
       aud: 'nks-app',
       iat: now,
@@ -276,7 +287,10 @@ export class JWTConfigService {
   /** Parse duration strings like '3d', '12h', '30m' to seconds */
   private parseExpiresIn(value: string): number {
     const match = value.match(/^(\d+)([dhm])$/);
-    if (!match) throw new Error(`Invalid expiresIn format: ${value}`);
+    if (!match) {
+      this.logger.error(`Invalid expiresIn format: ${value}`);
+      throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
+    }
     const num = parseInt(match[1], 10);
     switch (match[2]) {
       case 'd':
@@ -525,15 +539,11 @@ export class JWTConfigService {
   }
 
   decodeToken(token: string): JWTPayload {
-    try {
-      const decoded = jwt.decode(token);
-      if (!decoded || typeof decoded === 'string') {
-        throw new Error('JWT decode returned null or raw string');
-      }
-      return decoded as JWTPayload;
-    } catch (error) {
-      this.logger.error('Failed to decode JWT', error);
-      throw error;
+    const decoded = jwt.decode(token);
+    if (!decoded || typeof decoded === 'string') {
+      this.logger.error('JWT decode returned null or raw string');
+      throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
     }
+    return JWTPayloadSchema.parse(decoded);
   }
 }

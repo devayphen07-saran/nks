@@ -4,9 +4,10 @@ import { z } from 'zod';
 // ─── User Response Schema (full — for GET /auth/me) ───────────────────────────
 
 const AuthUserSchema = z.object({
-  id: z.string(),
   guuid: z.string(),
-  name: z.string().nullable(),
+  iamUserId: z.string(),
+  firstName: z.string().nullable(),
+  lastName: z.string().nullable(),
   email: z.string().nullable(),
   emailVerified: z.boolean(),
   phoneNumber: z.string().nullable(),
@@ -19,9 +20,15 @@ const AuthUserSchema = z.object({
 // session/token flow. Fetch the full profile via GET /auth/me when required.
 
 const AuthMinimalUserSchema = z.object({
-  id: z.string(),
   guuid: z.string(),
-  name: z.string().nullable(),
+  /**
+   * Required cross-service user identifier. Consumed by ayphen-frontend,
+   * ayphen-next and ayphen-iam as the primary external user ID (used as a
+   * URL path parameter in those clients).
+   */
+  iamUserId: z.string(),
+  firstName: z.string().nullable(),
+  lastName: z.string().nullable(),
   email: z.string().nullable(),
   phoneNumber: z.string().nullable(),
 });
@@ -31,30 +38,37 @@ const AuthMinimalUserSchema = z.object({
 const AuthSessionSchema = z.object({
   sessionId: z.string(),
   sessionToken: z.string(),
+  /**
+   * Always 'Bearer' — included so clients can build the Authorization
+   * header without relying on a hard-coded convention.
+   */
+  tokenType: z.literal('Bearer'),
   expiresAt: z.string(),
   refreshToken: z.string(),
   refreshExpiresAt: z.string(),
   defaultStore: z
     .object({
-      id: z.number(),
       guuid: z.string(),
     })
     .nullable(),
   jwtToken: z.string().optional(),
 });
 
-// ─── Auth Data Schema (unified response) ──────────────────────────────────
+// ─── Sync Metadata Schema ─────────────────────────────────────────────────
+// Seeds the mobile sync engine without an extra round-trip: mobile can call
+// GET /sync/changes immediately after login using `cursor` as the starting
+// point. `deviceId` echoes the X-Device-Id header so mobile can confirm its
+// binding. `lastSyncedAt` is null on fresh login — per-device sync state
+// tracking is not yet persisted server-side.
 
-const AuthDataSchema = z.object({
-  user: AuthMinimalUserSchema,
-  session: AuthSessionSchema,
-  offlineToken: z.string().optional(),
-  offlineSessionSignature: z.string().optional(),
+const AuthSyncMetadataSchema = z.object({
+  cursor: z.string().describe('Initial sync cursor — "0:0" on fresh login'),
+  lastSyncedAt: z.string().nullable().describe('ISO timestamp of last known sync for this device, or null for full sync'),
+  deviceId: z.string().nullable().describe('Device identifier echoed from X-Device-Id header; null for web clients'),
 });
 
 // ─── Exported DTOs ────────────────────────────────────────────────────────
 
-export class AuthResponseDto extends createZodDto(AuthDataSchema) {}
 export class MeResponseDto extends createZodDto(AuthUserSchema) {}
 export class RefreshTokenResponseDto extends createZodDto(AuthSessionSchema) {}
 
@@ -67,7 +81,8 @@ export class RefreshTokenResponseDto extends createZodDto(AuthSessionSchema) {}
  */
 export interface AuthResponseEnvelope {
   user: z.infer<typeof AuthMinimalUserSchema>;
-  session: z.infer<typeof AuthSessionSchema>; // defaultStore includes { id, guuid }
+  session: z.infer<typeof AuthSessionSchema>;
+  sync: z.infer<typeof AuthSyncMetadataSchema>;
   offlineToken?: string;
   /** HMAC-SHA256 of the offline session payload, signed server-side.
    *  Mobile stores this and checks its presence on load; the signing secret

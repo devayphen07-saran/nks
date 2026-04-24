@@ -4,12 +4,14 @@ import {
   bigint,
   boolean,
   uniqueIndex,
+  index,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { baseEntity, auditFields } from '../../base.entity';
 import { users } from '../../auth/users';
 import { routeTypeEnum, routeScopeEnum } from '../../enums';
+import { entityType } from '../../lookups/entity-type';
 
 export const routes = pgTable(
   'routes',
@@ -43,12 +45,29 @@ export const routes = pgTable(
     // Without this flag the guard must maintain a hardcoded whitelist.
     isPublic: boolean('is_public').notNull().default(false),
 
+    // Dynamic permission binding — links this route to an entity type so the
+    // RoutesService can filter the navigation tree by the user's permissions
+    // without hardcoding entity codes in service logic.
+    // NULL for routes that are always visible (public routes, structural dividers).
+    entityTypeFk: bigint('entity_type_fk', { mode: 'number' }).references(
+      () => entityType.id,
+      { onDelete: 'set null' },
+    ),
+
+    // Which action must be allowed on entityTypeFk for this route to appear.
+    // Defaults to 'view' — override to 'create' for new-record routes, etc.
+    // Ignored when entityTypeFk is NULL.
+    defaultAction: varchar('default_action', { length: 50 }).default('view'),
+
     ...auditFields(() => users.id),
   },
   (table) => [
     uniqueIndex('routes_path_scope_idx')
       .on(table.routePath, table.routeScope)
       .where(sql`deleted_at IS NULL`),
+    index('routes_entity_type_idx')
+      .on(table.entityTypeFk)
+      .where(sql`entity_type_fk IS NOT NULL AND deleted_at IS NULL`),
   ],
 );
 

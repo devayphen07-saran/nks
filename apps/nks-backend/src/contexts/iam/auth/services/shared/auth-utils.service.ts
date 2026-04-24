@@ -2,10 +2,14 @@ import * as crypto from 'crypto';
 import { Injectable } from '@nestjs/common';
 import { InjectAuth } from '../../decorators/inject-auth.decorator';
 import type { Auth } from '../../config/better-auth';
-import { RolesRepository } from '../../../roles/repositories/roles.repository';
-import type { UserRoleEntry } from '../../mappers/auth-mapper';
+import { RoleQueryService } from '../../../roles/role-query.service';
+import type { UserRoleEntry } from '../../mapper/auth-mapper';
 
-/** BetterAuth internal interface — wrapped once here to avoid duplication. */
+/**
+ * BetterAuth does not expose $context in its public TypeScript API.
+ * This interface documents the exact internal shape we depend on.
+ * The cast in getBetterAuthContext() is intentional and isolated here.
+ */
 interface BetterAuthInternal {
   $context: Promise<{
     internalAdapter: {
@@ -31,13 +35,16 @@ export class AuthUtilsService {
 
   constructor(
     @InjectAuth() private readonly auth: Auth,
-    private readonly rolesRepository: RolesRepository,
+    private readonly roleQuery: RoleQueryService,
   ) {}
 
-  /** Look up a system role ID, caching the result for the lifetime of this service instance. */
+  /** Look up a system role ID, caching the result. FIFO-evicts oldest entry when cap (100) is reached. */
   async getCachedSystemRoleId(roleCode: string): Promise<number | null> {
     if (this.roleIdCache.has(roleCode)) return this.roleIdCache.get(roleCode) ?? null;
-    const id = await this.rolesRepository.findSystemRoleId(roleCode);
+    const id = await this.roleQuery.findSystemRoleId(roleCode);
+    if (this.roleIdCache.size >= 100) {
+      this.roleIdCache.delete(this.roleIdCache.keys().next().value!);
+    }
     this.roleIdCache.set(roleCode, id);
     return id;
   }

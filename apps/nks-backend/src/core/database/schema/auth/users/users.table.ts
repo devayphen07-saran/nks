@@ -26,11 +26,26 @@ export const users = pgTable(
   {
     ...coreEntity(),
 
-    // BetterAuth opaque user ID — used to cross-reference auth records without
-    // exposing our internal bigint PK to the auth layer.
-    iamUserId: varchar('iam_user_id', { length: 64 }).unique(),
+    // Cross-service identity anchor for the Ayphen platform.
+    //
+    // This is the **primary external user identifier** across the Ayphen
+    // frontend (ayphen-frontend), Next (ayphen-next), and IAM libs. Those
+    // clients interpolate it directly into REST paths — e.g.
+    // `/v1/users/:iamUserId/companies/owner`, `/v1/users/:iamUserId/favorites`,
+    // `/v1/companies/:tenantId/users/:iamUserId/deactivate`.
+    //
+    // Required (NOT NULL) — ayphen treats it as non-optional in
+    // `auth-types.ts` and DTOs, so NKS must mint one for every user at
+    // creation. Generated via crypto.randomUUID() at registration and
+    // never re-used or rotated.
+    //
+    // Included as a required claim in every RS256 access and offline JWT
+    // so external services can correlate NKS users without hitting this DB.
+    // Query entry-point: AuthUsersRepository.findByIamUserId().
+    iamUserId: varchar('iam_user_id', { length: 64 }).notNull().unique(),
 
-    name: varchar('name', { length: 255 }).notNull(),
+    firstName: varchar('first_name', { length: 255 }).notNull(),
+    lastName: varchar('last_name', { length: 255 }).notNull().default(''),
     email: varchar('email', { length: 255 }).unique(),
     emailVerified: boolean('email_verified').notNull().default(false),
     image: text('image'),
@@ -71,6 +86,13 @@ export const users = pgTable(
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     lastActiveAt: timestamp('last_active_at', { withTimezone: true }),
 
+    // Default store — user's preferred store, auto-populated into session on login.
+    // NULL for new users with no store. Set on first store creation.
+    // Changed via PUT /stores/default. Only one default at a time.
+    // FK (→ store.id ON DELETE SET NULL) is in migration 031 — cannot be declared
+    // here due to the users ↔ store circular import. Relation in users.relations.ts.
+    defaultStoreFk: bigint('default_store_fk', { mode: 'number' }),
+
     // Onboarding lifecycle
     profileCompleted: boolean('profile_completed').notNull().default(false),
     profileCompletedAt: timestamp('profile_completed_at', {
@@ -96,6 +118,7 @@ export const users = pgTable(
     index('users_email_idx').on(table.email),
     index('users_phone_number_idx').on(table.phoneNumber),
     uniqueIndex('users_iam_user_id_idx').on(table.iamUserId),
+    index('users_default_store_idx').on(table.defaultStoreFk),
     index('users_blocked_by_idx').on(table.blockedBy),
     index('users_profile_completed_idx').on(table.profileCompleted),
     index('users_permissions_version_idx').on(table.permissionsVersion),

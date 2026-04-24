@@ -1,80 +1,58 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { ErrorCode, errPayload } from '../../../common/constants/error-codes.constants';
+import { Injectable } from '@nestjs/common';
 import { LocationRepository } from './repositories/location.repository';
-import {
-  StateResponse,
-  StateListResponse,
-  DistrictListResponse,
-  PincodeListResponse,
-  PincodeResponse,
-} from './dto/location-response.dto';
-import { StateCodeValidator, PincodeValidator } from './validators';
+import { LocationMapper } from './location.mapper';
+import type { StateResponse, DistrictResponse, PincodeResponse } from './dto/location-response.dto';
+import { LocationValidator } from './validators';
+import { paginated } from '../../../common/utils/paginated-result';
+import type { PaginatedResult } from '../../../common/utils/paginated-result';
 
 @Injectable()
 export class LocationService {
-  constructor(private readonly locationRepository: LocationRepository) {}
+  constructor(
+    private readonly locationRepository: LocationRepository,
+  ) {}
 
-  /**
-   * Get all active states
-   */
-  async getStates(search?: string): Promise<StateListResponse> {
-    return this.locationRepository.getStates(search);
+  async listStates(search?: string, sortBy = 'name', sortOrder = 'asc', isActive?: boolean): Promise<StateResponse[]> {
+    const rows = await this.locationRepository.getStates(search, sortBy, sortOrder, isActive);
+    return rows.map(LocationMapper.buildStateDto);
   }
 
-  /**
-   * Get state by state code
-   */
   async getStateByCode(code: string): Promise<StateResponse> {
-    // SECURITY: Validate state code format using StateCodeValidator
-    StateCodeValidator.validate(code);
-
     const state = await this.locationRepository.getStateByCode(code);
-
-    if (!state) {
-      throw new NotFoundException(errPayload(ErrorCode.STATE_NOT_FOUND));
-    }
-
-    return state;
+    LocationValidator.assertStateFound(state);
+    return LocationMapper.buildStateDto(state);
   }
 
-  /**
-   * Get districts by state code (e.g. 'KA', 'MH')
-   */
-  async getDistrictsByStateCode(code: string, search?: string): Promise<DistrictListResponse> {
-    StateCodeValidator.validate(code);
-
-    const state = await this.locationRepository.getStateByCode(code);
-    if (!state) {
-      throw new NotFoundException(errPayload(ErrorCode.STATE_NOT_FOUND));
-    }
-
-    return this.locationRepository.getDistrictsByState(state.id, search);
+  async listDistrictsByStateCode(
+    code: string,
+    search?: string,
+    sortBy = 'name',
+    sortOrder = 'asc',
+    isActive?: boolean,
+  ): Promise<DistrictResponse[]> {
+    const districts = await this.locationRepository.getDistrictsByStateCode(code, search, sortBy, sortOrder, isActive);
+    LocationValidator.assertDistrictsFound(districts);
+    return districts.map(LocationMapper.buildDistrictDto);
   }
 
-  /**
-   * Get pincodes by district ID
-   */
   async listPincodes(
-    districtId: number,
-    opts: { page: number; pageSize: number; search?: string },
-  ): Promise<{ rows: PincodeListResponse; total: number }> {
-    const { rows, total } = await this.locationRepository.getPincodesByDistrict(districtId, opts);
-    return { rows, total };
+    districtGuuid: string,
+    opts: { page: number; pageSize: number; search?: string; sortBy?: string; sortOrder?: string; isActive?: boolean },
+  ): Promise<PaginatedResult<PincodeResponse>> {
+    const district = await this.locationRepository.getDistrictByGuuid(districtGuuid);
+    LocationValidator.assertDistrictFound(district);
+    const { rows, total } = await this.locationRepository.getPincodesByDistrict(district.id, district.guuid, opts);
+    return paginated({
+      items: rows.map(LocationMapper.buildPincodeDto),
+      page: opts.page,
+      pageSize: opts.pageSize,
+      total,
+    });
   }
 
-  /**
-   * Get pincode by code (6-digit PIN)
-   */
   async getPincodeByCode(code: string): Promise<PincodeResponse> {
-    // SECURITY: Validate pincode format using PincodeValidator
-    PincodeValidator.validate(code);
-
     const pincode = await this.locationRepository.getPincodeByCode(code);
-
-    if (!pincode) {
-      throw new NotFoundException(errPayload(ErrorCode.POSTAL_CODE_NOT_FOUND));
-    }
-
-    return pincode;
+    LocationValidator.assertPincodeFound(pincode);
+    return LocationMapper.buildPincodeDto(pincode);
   }
 }
