@@ -12,7 +12,10 @@ export const staffInviteStatus = pgTable('staff_invite_status', {
   code: varchar('code', { length: 30 }).notNull().unique(),
   label: varchar('label', { length: 100 }).notNull(),
   description: text('description'),
-  isTerminal: boolean('is_terminal').default(false),
+  // Exactly one row must have isPending = true (PENDING status).
+  // staff_invite.isPending mirrors this flag to avoid a subquery in the partial unique index.
+  isPending: boolean('is_pending').notNull().default(false),
+  isTerminal: boolean('is_terminal').notNull().default(false),
   ...auditFields(() => users.id),
 });
 

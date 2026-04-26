@@ -18,9 +18,15 @@ export type PartialRoute = {
   routeScope: 'admin' | 'store';
   isPublic: boolean;
   isHidden: boolean;
+  enable: boolean;
   parentRouteFk: number | null;  // internal — used only for tree construction
   fullPath: string;
   sortOrder: number | null;
+  entityTypeFk: number | null;
+  defaultAction: string | null;
+  /** Mirrors entity_type.default_allow — true means VIEW is granted without an explicit role_permissions row. Null when no entity is bound. */
+  defaultAllow: boolean | null;
+  hasAccess?: boolean;
   canView?: boolean;
   canCreate?: boolean;
   canEdit?: boolean;

@@ -1,4 +1,5 @@
-import { pgTable, bigint, boolean, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigint, boolean, check, unique, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { junctionEntity } from '../../base.entity';
 import { users } from '../../auth/users';
 import { roles } from '../../rbac/roles';
@@ -40,6 +41,12 @@ export const roleRouteMapping = pgTable(
     unique('role_route_mapping_unique_idx').on(table.roleFk, table.routeFk),
     // role_fk covered by the composite unique above (leading column)
     index('role_route_mapping_route_idx').on(table.routeFk),
+    check('role_route_mapping_no_allow_deny_conflict', sql`NOT (allow = true AND deny = true)`),
+    // CRUD flags are meaningless when allow=false — enforce consistency.
+    check(
+      'role_route_mapping_crud_requires_allow',
+      sql`allow = true OR (can_view = false AND can_create = false AND can_edit = false AND can_delete = false AND can_export = false)`,
+    ),
   ],
 );
 

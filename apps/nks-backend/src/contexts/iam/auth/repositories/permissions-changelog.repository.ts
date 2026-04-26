@@ -59,16 +59,36 @@ export class PermissionsChangelogRepository {
       )
       .orderBy(schema.permissionsChangelog.versionNumber);
 
-    // Collapse multiple changes for the same entityCode — keep the latest operation.
-    const latest = new Map<string, { entityCode: string; operation: string; data: unknown }>();
+    // Collapse multiple changes for the same entityCode into a single net operation.
+    //
+    // Naive "keep latest" breaks the REMOVED → MODIFIED cycle: a permission
+    // that was removed then re-granted (via a different role assignment) would
+    // appear as MODIFIED — but the client never received the ADDED event, so it
+    // would apply a diff against a non-existent entry.
+    //
+    // Net-effect rules (applied in order):
+    //   last=REMOVED                     → REMOVED   (entity gone, regardless of history)
+    //   last=ADDED                        → ADDED
+    //   last=MODIFIED, no prior REMOVED   → MODIFIED  (in-place update, entry already known)
+    //   last=MODIFIED, had prior REMOVED  → ADDED     (re-grant after revocation; client must create)
+    type EntityState = { lastOp: string; data: unknown; hadRemoval: boolean };
+    const state = new Map<string, EntityState>();
+
     for (const row of rows) {
-      latest.set(row.entityCode, {
-        entityCode: row.entityCode,
-        operation: row.operation,
-        data: row.data,
+      const existing = state.get(row.entityCode);
+      state.set(row.entityCode, {
+        lastOp:     row.operation,
+        data:       row.data,
+        hadRemoval: (existing?.hadRemoval ?? false) || row.operation === 'REMOVED',
       });
     }
 
-    return Array.from(latest.values());
+    return Array.from(state.entries()).map(([entityCode, { lastOp, data, hadRemoval }]) => {
+      let operation = lastOp;
+      if (lastOp === 'MODIFIED' && hadRemoval) {
+        operation = 'ADDED';
+      }
+      return { entityCode, operation, data };
+    });
   }
 }

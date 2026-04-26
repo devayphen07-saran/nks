@@ -1,6 +1,7 @@
 import {
   pgTable,
   bigint,
+  check,
   timestamp,
   uniqueIndex,
   index,
@@ -72,6 +73,10 @@ export const storeUserMapping = pgTable(
     index('store_user_mapping_user_idx').on(table.userFk),
     index('store_user_mapping_designation_idx').on(table.designationFk),
     index('store_user_mapping_assigned_by_idx').on(table.assignedBy),
+    check(
+      'store_user_mapping_active_deleted_consistency',
+      sql`NOT (is_active = true AND deleted_at IS NOT NULL)`,
+    ),
   ],
 );
 

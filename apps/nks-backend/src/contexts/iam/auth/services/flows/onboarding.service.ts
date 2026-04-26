@@ -79,7 +79,7 @@ export class OnboardingService {
             {
               accountId: dto.email,
               providerId: 'email',
-              userId,
+              userFk: userId,
               password: passwordHash,
               isVerified: false,
             },

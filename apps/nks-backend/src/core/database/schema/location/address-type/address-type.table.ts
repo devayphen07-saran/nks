@@ -11,7 +11,7 @@ export const addressType = pgTable('address_type', {
   code: varchar('code', { length: 30 }).notNull().unique(),
   label: varchar('label', { length: 100 }).notNull(),
   description: text('description'),
-  isShippingApplicable: boolean('is_shipping_applicable').default(true),
+  isShippingApplicable: boolean('is_shipping_applicable').notNull().default(true),
   ...auditFields(() => users.id),
 });
 

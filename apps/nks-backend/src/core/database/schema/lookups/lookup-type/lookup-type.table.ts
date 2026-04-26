@@ -14,9 +14,9 @@ export const lookupType = pgTable('lookup_type', {
   code: varchar('code', { length: 30 }).notNull().unique(),
   title: varchar('title', { length: 50 }).notNull(),
   description: varchar('description', { length: 150 }),
-  hasTable: boolean('has_table').default(false),
-  isActive: boolean('is_active').default(true),
-  isCustomTable: boolean('is_custom_table').default(false),
+  hasTable: boolean('has_table').notNull().default(false),
+  isActive: boolean('is_active').notNull().default(true),
+  isCustomTable: boolean('is_custom_table').notNull().default(false),
 });
 
 export type LookupType = typeof lookupType.$inferSelect;

@@ -16,11 +16,6 @@ export interface UserRow {
   image: string | null;
   isBlocked: boolean;
   blockedReason: string | null;
-  primaryLoginMethod: string | null;
-  loginCount: number;
-  lastLoginAt: Date | null;
-  profileCompleted: boolean;
-  isActive: boolean;
   createdAt: Date;
   primaryRole: string | null;
 }
@@ -48,11 +43,6 @@ const UserResponseSchema = z.object({
   image: z.string().nullable(),
   isBlocked: z.boolean(),
   blockedReason: z.string().nullable(),
-  primaryLoginMethod: z.string().nullable(),
-  loginCount: z.number(),
-  lastLoginAt: z.string().nullable(),
-  profileCompleted: z.boolean(),
-  isActive: z.boolean(),
   createdAt: z.string(),
   primaryRole: z.string().nullable(),
 });

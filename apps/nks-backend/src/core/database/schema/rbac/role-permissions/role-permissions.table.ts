@@ -1,4 +1,4 @@
-import { pgTable, bigint, boolean, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigint, boolean, check, unique, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { roles } from '../roles';
 import { entityType } from '../../lookups/entity-type';
@@ -52,6 +52,7 @@ export const rolePermissions = pgTable(
     index('role_permissions_role_entity_idx')
       .on(table.roleFk, table.entityTypeFk)
       .where(sql`is_active = true AND deleted_at IS NULL`),
+    check('role_permissions_no_allow_deny_conflict', sql`NOT (allowed = true AND deny = true)`),
   ],
 );
 

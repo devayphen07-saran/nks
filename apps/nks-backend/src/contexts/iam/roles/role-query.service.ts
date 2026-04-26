@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RolesRepository } from './repositories/roles.repository';
-import { RolePermissionsRepository } from './repositories/role-permissions.repository';
+import { PermissionsRepository } from './repositories/role-permissions.repository';
+import type { EntityTypeRow } from './repositories/role-permissions.repository';
 import type { RoleEntityPermissions } from './dto/role-response.dto';
 
 /**
@@ -8,7 +9,7 @@ import type { RoleEntityPermissions } from './dto/role-response.dto';
  *
  * Exists so consumers outside `RolesModule` (AuthGuard in common/guards,
  * PermissionsService in iam/auth, …) never import `RolesRepository` or
- * `RolePermissionsRepository` directly. Keeps the repository layer
+ * `PermissionsRepository` directly. Keeps the repository layer
  * fully internal to this module.
  *
  * Kept focused on reads only; mutation flows continue to go through
@@ -18,7 +19,7 @@ import type { RoleEntityPermissions } from './dto/role-response.dto';
 export class RoleQueryService {
   constructor(
     private readonly rolesRepository: RolesRepository,
-    private readonly rolePermissionsRepository: RolePermissionsRepository,
+    private readonly rolePermissionsRepository: PermissionsRepository,
   ) {}
 
   // ─── Role reads ────────────────────────────────────────────────────────────
@@ -86,17 +87,24 @@ export class RoleQueryService {
   // ─── Permission reads ──────────────────────────────────────────────────────
 
   /**
-   * Batched merged permissions across every store the user holds a role in.
-   * Underlying repository query fans the work into 2 round-trips regardless
-   * of store count — do NOT loop over stores in the caller.
+   * Per-store permission map — DENY in one store never bleeds into another.
+   * Single round-trip regardless of store count; keyed by store guuid.
    */
-  getUserEntityPermissionsForAllStores(
+  getUserEntityPermissionsPerStore(
     userId: number,
     storeIds: number[],
-  ): Promise<RoleEntityPermissions> {
-    return this.rolePermissionsRepository.getUserEntityPermissionsForAllStores(
+  ): Promise<Record<string, RoleEntityPermissions>> {
+    return this.rolePermissionsRepository.getUserEntityPermissionsPerStore(
       userId,
       storeIds,
     );
+  }
+
+  /**
+   * All active, non-hidden entity types with parent code resolved.
+   * Used by getRoleWithPermissions to build the hierarchical permission tree.
+   */
+  getEntityTypeHierarchy(): Promise<EntityTypeRow[]> {
+    return this.rolePermissionsRepository.getEntityTypeHierarchy();
   }
 }

@@ -4,7 +4,6 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { ErrorCode, errPayload } from '../../../../common/constants/error-codes.constants';
-import { SystemRoleCodes } from '../../../../common/constants/system-role-codes.constant';
 import { EntityCodes } from '../../../../common/constants/entity-codes.constants';
 
 /**
@@ -42,12 +41,24 @@ export class RolesValidator {
   }
 
   /**
-   * Ensure the code is not a reserved system role code.
+   * Ensure the code does not collide with a system role already in the DB.
+   * The `isSystemCode` flag comes from a `findSystemRoleId` lookup in the service —
+   * the validator never touches the DB directly.
    */
-  static assertCodeNotReserved(code: string): void {
-    const systemCodes = Object.values(SystemRoleCodes) as string[];
-    if (systemCodes.includes(code.toUpperCase())) {
+  static assertCodeNotReserved(isSystemCode: boolean): void {
+    if (isSystemCode) {
       throw new BadRequestException(errPayload(ErrorCode.ROLE_CODE_RESERVED));
+    }
+  }
+
+  /**
+   * Ensure a system role is not being mutated.
+   * System roles (isSystem=true) are immutable by design — they define the
+   * platform's permission model and must not be modified by any store user.
+   */
+  static assertRoleNotSystem(isSystem: boolean): void {
+    if (isSystem) {
+      throw new ForbiddenException(errPayload(ErrorCode.ROLE_IS_SYSTEM));
     }
   }
 

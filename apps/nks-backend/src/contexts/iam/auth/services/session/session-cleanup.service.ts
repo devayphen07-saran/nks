@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { SessionCleanupRepository } from '../../repositories/session-cleanup.repository';
 import { SessionsRepository } from '../../repositories/sessions.repository';
 import { REVOKED_SESSION_RETENTION_DAYS } from '../../auth.constants';
 
@@ -20,7 +19,6 @@ export class SessionCleanupService {
   private readonly logger = new Logger(SessionCleanupService.name);
 
   constructor(
-    private readonly sessionCleanupRepository: SessionCleanupRepository,
     private readonly sessionsRepository: SessionsRepository,
   ) {}
 
@@ -41,7 +39,7 @@ export class SessionCleanupService {
     try {
       const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const deletedCount =
-        await this.sessionCleanupRepository.deleteExpiredSessions(cutoffTime);
+        await this.sessionsRepository.deleteExpiredSessions(cutoffTime);
       if (deletedCount > 0) {
         this.logger.log(`Expired session cleanup: deleted ${deletedCount} session(s)`);
       }

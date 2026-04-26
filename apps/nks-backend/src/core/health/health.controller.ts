@@ -6,6 +6,7 @@ import { InjectDb } from '../database/inject-db.decorator';
 import * as schema from '../database/schema';
 import { Public } from '../../common/decorators/public.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
+import { SkipRateLimit } from '../../common/decorators/rate-limit.decorator';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -25,6 +26,7 @@ type Db = NodePgDatabase<typeof schema>;
  */
 @ApiTags('Health')
 @Controller('health')
+@SkipRateLimit()
 export class HealthController {
   constructor(@InjectDb() private readonly db: Db) {}
 

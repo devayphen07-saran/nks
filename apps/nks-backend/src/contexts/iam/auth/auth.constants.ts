@@ -14,9 +14,6 @@ export const OFFLINE_JWT_TTL_DAYS = 3;
 /** Default offline JWT expiration string for jsonwebtoken. */
 export const OFFLINE_JWT_EXPIRATION = `${OFFLINE_JWT_TTL_DAYS}d` as const;
 
-/** Throttle window for updating lastActiveAt (ms) — avoids a DB write on every request. */
-export const LAST_ACTIVE_THROTTLE_MS = 5 * 60 * 1000;
-
 // ── Token / Session TTLs ──────────────────────────────────────────────────────
 // Centralised so issuance, verification, JTI blocklist, and revocation logic
 // all read the same source. Do not inline `15 * 60 * 1000` again — import the

@@ -2,16 +2,16 @@ import { Module } from '@nestjs/common';
 import { UsersController } from './users.controller';
 import { SelfUsersController } from './self-users.controller';
 import { UsersService } from './users.service';
-import { UsersRepository } from './repositories/users.repository';
 import { UserPreferencesRepository } from './repositories/user-preferences.repository';
 import { UserPreferencesService } from './user-preferences.service';
 import { RolesModule } from '../roles/roles.module';
 import { GuardsModule } from '../../../common/guards/guards.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports:     [GuardsModule, RolesModule],
+  imports:     [GuardsModule, RolesModule, AuthModule],
   controllers: [UsersController, SelfUsersController],
-  providers:   [UsersService, UsersRepository, UserPreferencesRepository, UserPreferencesService],
-  exports:     [UsersService, UsersRepository, UserPreferencesRepository, UserPreferencesService],
+  providers:   [UsersService, UserPreferencesRepository, UserPreferencesService],
+  exports:     [UsersService, UserPreferencesRepository, UserPreferencesService],
 })
 export class UsersModule {}

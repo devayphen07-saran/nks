@@ -1,6 +1,7 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { ZodValidationPipe } from 'nestjs-zod';
+import { TrimStringsPipe } from './common/pipes';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { RequestIdMiddleware } from './common/middleware';
@@ -9,6 +10,7 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './core/database/database.module';
 import { AuthGuard } from './common/guards/auth.guard';
+import { RateLimitingGuard } from './common/guards/rate-limiting.guard';
 import { GuardsModule } from './common/guards/guards.module';
 import { AuthModule } from './contexts/iam/auth/auth.module';
 import { RolesModule } from './contexts/iam/roles/roles.module';
@@ -31,6 +33,7 @@ import { HealthModule } from './core/health/health.module';
  *
  *   AppModule
  *     ├── ConfigModule          (global config, no upstream deps)
+ *     ├── ClsModule             (global ALS request context — no upstream deps)
  *     ├── DatabaseModule        (global DB pool, no upstream deps)
  *     ├── AuditModule                 (@Global — injected anywhere without import)
  *     ├── PermissionsChangelogModule  (@Global — injected anywhere without import)
@@ -89,8 +92,10 @@ import { HealthModule } from './core/health/health.module';
      * using @UseGuards(AuthGuard, RBACGuard) should slim to @UseGuards(RBACGuard).
      */
     { provide: APP_FILTER,      useClass: GlobalExceptionFilter },
+    { provide: APP_PIPE,        useClass: TrimStringsPipe },
     { provide: APP_PIPE,        useClass: ZodValidationPipe },
     { provide: APP_GUARD,       useClass: AuthGuard },
+    { provide: APP_GUARD,       useClass: RateLimitingGuard },
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TimeoutInterceptor },

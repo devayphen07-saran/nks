@@ -5,6 +5,7 @@ import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
 import { TransactionService } from '../../../../core/database/transaction.service';
 import * as schema from '../../../../core/database/schema';
+import { ACCESS_TOKEN_TTL_MS } from '../auth.constants';
 import type { UserSession, NewUserSession, UpdateUserSession } from '../../../../core/database/schema/auth/user-session';
 
 type Db = NodePgDatabase<typeof schema>;
@@ -29,7 +30,7 @@ export class SessionsRepository extends BaseRepository {
   /** Reusable WHERE clause: sessions belonging to userId that have not yet expired. */
   private activeSessionWhere(userId: number) {
     return and(
-      eq(schema.userSession.userId, userId),
+      eq(schema.userSession.userFk, userId),
       gt(schema.userSession.expiresAt, new Date()),
     );
   }
@@ -108,7 +109,7 @@ export class SessionsRepository extends BaseRepository {
     return this.db
       .select()
       .from(schema.userSession)
-      .where(eq(schema.userSession.userId, userId))
+      .where(eq(schema.userSession.userFk, userId))
       .orderBy(asc(schema.userSession.createdAt));
   }
 
@@ -158,6 +159,34 @@ export class SessionsRepository extends BaseRepository {
   }
 
   /**
+   * Atomically revoke the refresh token and hard-delete the session in one transaction.
+   *
+   * Using two separate calls (revokeRefreshToken then delete) would leave a brief
+   * window where a concurrent rotation could see refreshTokenRevokedAt set and
+   * trigger the theft-detection alarm on a legitimate logout. Wrapping both in a
+   * transaction eliminates that window: other transactions either see the row in its
+   * original state (blocked by our lock) or see it gone after we commit.
+   */
+  async revokeAndDeleteSession(sessionId: number, revokedReason = 'LOGOUT', jti?: string): Promise<void> {
+    await this.txService.run(async (tx) => {
+      if (jti) {
+        const jtiExpiresAt = new Date(Date.now() + ACCESS_TOKEN_TTL_MS);
+        await tx
+          .insert(schema.jtiBlocklist)
+          .values({ jti, expiresAt: jtiExpiresAt })
+          .onConflictDoNothing();
+      }
+      await tx
+        .update(schema.userSession)
+        .set({ refreshTokenRevokedAt: new Date(), revokedReason })
+        .where(eq(schema.userSession.id, sessionId));
+      await tx
+        .delete(schema.userSession)
+        .where(eq(schema.userSession.id, sessionId));
+    }, { name: 'SessionsRepo.revokeAndDeleteSession' });
+  }
+
+  /**
    * Mark session as rotated (refresh token was rotated)
    */
   async markAsRotated(sessionId: number): Promise<void> {
@@ -168,12 +197,29 @@ export class SessionsRepository extends BaseRepository {
   }
 
   /**
+   * Return all non-null JTIs for a user's sessions.
+   * Called before deleteAllForUser so callers can blocklist tokens first.
+   */
+  async findJtisByUserId(userId: number): Promise<string[]> {
+    const rows = await this.db
+      .select({ jti: schema.userSession.jti })
+      .from(schema.userSession)
+      .where(
+        and(
+          eq(schema.userSession.userFk, userId),
+          isNotNull(schema.userSession.jti),
+        ),
+      );
+    return rows.map((r) => r.jti as string);
+  }
+
+  /**
    * Delete all sessions for a user
    */
   async deleteAllForUser(userId: number): Promise<number> {
     const result = await this.db
       .delete(schema.userSession)
-      .where(eq(schema.userSession.userId, userId));
+      .where(eq(schema.userSession.userFk, userId));
 
     return result.rowCount ?? 0;
   }
@@ -340,16 +386,24 @@ export class SessionsRepository extends BaseRepository {
   async revokeAndDeleteAllForUser(
     userId: number,
     revokedReason: string,
+    jtis: string[] = [],
   ): Promise<void> {
     await this.txService.run(async (tx) => {
+      if (jtis.length > 0) {
+        const jtiExpiresAt = new Date(Date.now() + ACCESS_TOKEN_TTL_MS);
+        await tx
+          .insert(schema.jtiBlocklist)
+          .values(jtis.map((jti) => ({ jti, expiresAt: jtiExpiresAt })))
+          .onConflictDoNothing();
+      }
       await tx
         .update(schema.userSession)
         .set({ refreshTokenRevokedAt: new Date(), revokedReason })
-        .where(eq(schema.userSession.userId, userId));
+        .where(eq(schema.userSession.userFk, userId));
 
       await tx
         .delete(schema.userSession)
-        .where(eq(schema.userSession.userId, userId));
+        .where(eq(schema.userSession.userFk, userId));
     }, { name: 'SessionsRepo.revokeAndDeleteAllForUser' });
   }
 
@@ -366,7 +420,7 @@ export class SessionsRepository extends BaseRepository {
         createdAt: schema.userSession.createdAt,
       })
       .from(schema.userSession)
-      .where(eq(schema.userSession.userId, userId))
+      .where(eq(schema.userSession.userFk, userId))
       .orderBy(asc(schema.userSession.createdAt));
   }
 
@@ -393,7 +447,7 @@ export class SessionsRepository extends BaseRepository {
       const keepIds = tx
         .select({ id: schema.userSession.id })
         .from(schema.userSession)
-        .where(eq(schema.userSession.userId, userId))
+        .where(eq(schema.userSession.userFk, userId))
         .orderBy(desc(schema.userSession.createdAt))
         .limit(maxAllowed - 1);
 
@@ -401,7 +455,7 @@ export class SessionsRepository extends BaseRepository {
         .delete(schema.userSession)
         .where(
           and(
-            eq(schema.userSession.userId, userId),
+            eq(schema.userSession.userFk, userId),
             notInArray(schema.userSession.id, keepIds),
           ),
         );
@@ -413,27 +467,6 @@ export class SessionsRepository extends BaseRepository {
 
       return session ?? null;
     }, { name: 'SessionsRepo.createWithinLimit' });
-  }
-
-  async deleteOldestSessionsToLimit(
-    userId: number,
-    maxAllowed: number,
-  ): Promise<void> {
-    const keepIds = this.db
-      .select({ id: schema.userSession.id })
-      .from(schema.userSession)
-      .where(eq(schema.userSession.userId, userId))
-      .orderBy(desc(schema.userSession.createdAt))
-      .limit(maxAllowed);
-
-    await this.db
-      .delete(schema.userSession)
-      .where(
-        and(
-          eq(schema.userSession.userId, userId),
-          notInArray(schema.userSession.id, keepIds),
-        ),
-      );
   }
 
   /**
@@ -449,7 +482,7 @@ export class SessionsRepository extends BaseRepository {
       .where(
         and(
           eq(schema.userSession.id, sessionId),
-          eq(schema.userSession.userId, userId),
+          eq(schema.userSession.userFk, userId),
         ),
       )
       .limit(1);
@@ -563,5 +596,17 @@ export class SessionsRepository extends BaseRepository {
       if (deleted < batchSize) break;
     }
     return total;
+  }
+
+  /**
+   * Delete all sessions whose expiresAt is before the given cutoff date.
+   * Intended for the cleanup scheduler; callers compute the cutoff (including
+   * any grace period) before calling here.
+   */
+  async deleteExpiredSessions(cutoffDate: Date): Promise<number> {
+    const result = await this.db
+      .delete(schema.userSession)
+      .where(lt(schema.userSession.expiresAt, cutoffDate));
+    return result.rowCount ?? 0;
   }
 }

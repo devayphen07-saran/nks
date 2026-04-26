@@ -1,6 +1,7 @@
 import { SetMetadata } from '@nestjs/common';
 
 export const RATE_LIMIT_KEY = 'rate_limit_max';
+export const SKIP_RATE_LIMIT_KEY = 'skip_rate_limit';
 
 /**
  * Override the default rate limit (100 req / 15 min) for a specific endpoint.
@@ -12,3 +13,12 @@ export const RATE_LIMIT_KEY = 'rate_limit_max';
  * @RateLimit(30)   // refresh — 30 refreshes per 15 min per IP
  */
 export const RateLimit = (max: number) => SetMetadata(RATE_LIMIT_KEY, max);
+
+/**
+ * Exempt an endpoint from all rate limiting.
+ * Use sparingly — only for internal health checks and diagnostics.
+ *
+ * @example
+ * @SkipRateLimit()   // health check — must never be blocked by rate limiting
+ */
+export const SkipRateLimit = () => SetMetadata(SKIP_RATE_LIMIT_KEY, true);

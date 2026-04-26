@@ -29,7 +29,8 @@ export const subscriptionItem = pgTable('subscription_item', {
     .references(() => subscription.id, { onDelete: 'cascade' }),
 
   planPriceFk: bigint('plan_price_fk', { mode: 'number' })
-    .references(() => planPrice.id, { onDelete: 'set null' }),
+    .notNull()
+    .references(() => planPrice.id, { onDelete: 'restrict' }),
 
   // Business Fields
   priceMode: varchar('price_mode', { length: 30 }).notNull().default('RECURRING'), // RECURRING | ONE_TIME

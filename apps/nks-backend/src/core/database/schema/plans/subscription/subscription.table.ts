@@ -1,4 +1,5 @@
-import { pgTable, bigint, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigint, boolean, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { baseEntity, auditFields } from '../../base.entity';
 import { users } from '../../auth/users';
 import { store } from '../../store/store';
@@ -32,14 +33,22 @@ export const subscription = pgTable('subscription', {
     .notNull()
     .references(() => status.id, { onDelete: 'restrict' }),
 
+  // True for the single active subscription row per store.
+  // Enforced by a partial unique index — at most one isCurrent=true row per store.
+  isCurrent: boolean('is_current').notNull().default(false),
+
   // Business Fields
-  firstInvoiceRecordedAt: timestamp('first_invoice_recorded_at', { withTimezone: true }), // ← FIXED: standardized to timestamp
-  trialEnd: timestamp('trial_end', { withTimezone: true }), // ← FIXED: standardized to timestamp
+  firstInvoiceRecordedAt: timestamp('first_invoice_recorded_at', { withTimezone: true }),
+  trialEnd: timestamp('trial_end', { withTimezone: true }),
 
   // Audit Fields
   ...auditFields(() => users.id),
 },
 (table) => [
+  // At most one current subscription per store.
+  uniqueIndex('subscription_current_store_unique_idx')
+    .on(table.storeFk)
+    .where(sql`is_current = true AND deleted_at IS NULL`),
   index('subscription_plan_fk_idx').on(table.planFk),
   index('subscription_status_fk_idx').on(table.statusFk),
 ],

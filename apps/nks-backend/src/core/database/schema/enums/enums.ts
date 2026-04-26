@@ -123,4 +123,3 @@ export const authMethodEnum = pgEnum('auth_method', [
 
 // Role types are now handled via roles.roleType column (PLATFORM | STORE_SYSTEM | STORE_CUSTOM)
 // and user_role_mapping table — no PostgreSQL enums needed for roles.
-

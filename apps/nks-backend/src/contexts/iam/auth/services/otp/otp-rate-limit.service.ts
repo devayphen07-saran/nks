@@ -26,6 +26,7 @@ import { OtpRateLimitRepository } from '../../repositories/otp-rate-limit.reposi
 export class OtpRateLimitService {
   private readonly MAX_REQUESTS_PER_HOUR = 5; // Reduced from 100/24h
   private readonly WINDOW_DURATION_MS = 60 * 60 * 1000; // 1 hour
+  private readonly ROW_TTL_MS = 24 * 60 * 60 * 1000; // 24h — hard-delete cleanup TTL
 
   // Exponential backoff delays (in milliseconds)
   private readonly BACKOFF_DELAYS = [
@@ -77,6 +78,7 @@ export class OtpRateLimitService {
         lastAttemptAt: now,
         consecutiveFailures: 0,
         windowExpiresAt: new Date(now.getTime() + this.WINDOW_DURATION_MS),
+        expiresAt: new Date(now.getTime() + this.ROW_TTL_MS),
       });
       return;
     }
@@ -125,6 +127,7 @@ export class OtpRateLimitService {
       1, // New request count
       now,
       new Date(now.getTime() + this.WINDOW_DURATION_MS),
+      new Date(now.getTime() + this.ROW_TTL_MS),
     );
   }
 

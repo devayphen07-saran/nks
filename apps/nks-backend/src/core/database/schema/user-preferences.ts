@@ -17,7 +17,6 @@ export const userPreferences = pgTable(
     notificationsEnabled: boolean('notifications_enabled')
       .default(true)
       .notNull(),
-    twoFactorEnabled: boolean('two_factor_enabled').default(false).notNull(),
 
     // Audit: who created / modified / deleted this row
     ...auditFields(() => users.id),

@@ -2,7 +2,7 @@ import {
   timestamp,
   boolean,
   bigint,
-  varchar,
+  uuid,
   bigserial,
   integer,
 } from 'drizzle-orm/pg-core';
@@ -17,7 +17,7 @@ import type { AnyPgColumn } from 'drizzle-orm/pg-core';
  */
 export const coreEntity = () => ({
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  guuid: varchar('guuid', { length: 255 })
+  guuid: uuid('guuid')
     .notNull()
     .unique()
     .$defaultFn(() => crypto.randomUUID()),
@@ -38,7 +38,7 @@ export const coreEntity = () => ({
  */
 export const betterAuthEntity = () => ({
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  guuid: varchar('guuid', { length: 255 })
+  guuid: uuid('guuid')
     .notNull()
     .unique()
     .$defaultFn(() => crypto.randomUUID()),

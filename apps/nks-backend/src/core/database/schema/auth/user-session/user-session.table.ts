@@ -38,7 +38,7 @@ export const userSession = pgTable(
     token: text('token').notNull().unique(),
     ipAddress: varchar('ip_address', { length: 50 }),
     userAgent: text('user_agent'),
-    userId: bigint('user_fk', { mode: 'number' })
+    userFk: bigint('user_fk', { mode: 'number' })
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
 
@@ -104,14 +104,14 @@ export const userSession = pgTable(
       .default(false),
   },
   (table) => [
-    index('user_session_user_idx').on(table.userId),
+    index('user_session_user_idx').on(table.userFk),
     index('user_session_token_idx').on(table.token),
     // Refresh token lookup — hit on every token refresh
     index('user_session_refresh_token_hash_idx').on(table.refreshTokenHash),
     // Active-session queries — hit on every auth check (findActive*, getActiveSessionCount)
     index('user_session_expires_at_idx').on(table.expiresAt),
     // Index for theft detection: find sessions with revoked tokens
-    index('user_session_revoked_idx').on(table.userId, table.refreshTokenRevokedAt),
+    index('user_session_revoked_idx').on(table.userFk, table.refreshTokenRevokedAt),
   ],
 );
 

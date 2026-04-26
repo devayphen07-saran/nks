@@ -175,6 +175,7 @@ export class OtpService {
     );
 
     OtpValidator.assertOtpFound(otpRecord);
+    OtpValidator.assertOtpNotUsed(otpRecord.isUsed);
     OtpValidator.assertOtpNotExpired(otpRecord.expiresAt);
     OtpValidator.assertAttemptsNotExceeded(otpRecord.attempts, OTP_MAX_ATTEMPTS);
 
@@ -185,8 +186,12 @@ export class OtpService {
       OtpValidator.assertOtpValid(isValid);
     }
 
-    // Mark OTP as used
-    await this.otpRepository.markAsUsed(otpRecord.id);
+    // CAS mark-as-used: rejects if a concurrent call already flipped the flag,
+    // closing the race window between hash compare and the update landing.
+    const marked = await this.otpRepository.markAsUsed(otpRecord.id);
+    if (!marked) {
+      OtpValidator.assertOtpNotUsed(true); // throws OTP_ALREADY_USED
+    }
 
     // Find user by email (must exist from registration)
     const user = await this.authUsersRepository.findByEmail(email);
@@ -208,7 +213,7 @@ export class OtpService {
       );
     } else {
       await this.authProviderRepository.create({
-        userId: user.id,
+        userFk: user.id,
         providerId: 'email',
         accountId: email,
         isVerified: true,

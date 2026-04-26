@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { NotFoundException } from '../../../common/exceptions';
 import { ErrorCode, errPayload } from '../../../common/constants/error-codes.constants';
-import { UsersRepository } from './repositories/users.repository';
+import { AuthUsersRepository } from '../auth/repositories/auth-users.repository';
 import { UserMapper } from './mapper/user.mapper';
 import { paginated } from '../../../common/utils/paginated-result';
 import type { PaginatedResult } from '../../../common/utils/paginated-result';
@@ -10,7 +10,7 @@ import type { UserResponseDto } from './dto';
 @Injectable()
 export class UsersService {
   constructor(
-    private readonly usersRepository: UsersRepository,
+    private readonly authUsersRepository: AuthUsersRepository,
   ) {}
 
   async listUsers(opts: {
@@ -21,7 +21,7 @@ export class UsersService {
     sortOrder?: string;
     isActive?: boolean;
   }): Promise<PaginatedResult<UserResponseDto>> {
-    const { rows, total } = await this.usersRepository.findPage(opts);
+    const { rows, total } = await this.authUsersRepository.findAdminUserPage(opts);
     return paginated({ items: rows.map(UserMapper.buildUserDto), page: opts.page, pageSize: opts.pageSize, total });
   }
 
@@ -32,7 +32,7 @@ export class UsersService {
    * and throws NotFound on miss or soft-delete.
    */
   async getByIamUserId(iamUserId: string): Promise<UserResponseDto> {
-    const row = await this.usersRepository.findByIamUserId(iamUserId);
+    const row = await this.authUsersRepository.findAdminUserByIamUserId(iamUserId);
     if (!row) {
       throw new NotFoundException(errPayload(ErrorCode.USER_NOT_FOUND));
     }

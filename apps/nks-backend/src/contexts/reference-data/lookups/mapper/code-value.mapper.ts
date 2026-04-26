@@ -9,7 +9,7 @@ export interface CodeValueRow {
   isActive: boolean | null;
   isHidden: boolean | null;
   isSystem: boolean | null;
-  createdAt: Date | null;
+  createdAt: Date;
   updatedAt: Date | null;
 }
 
@@ -20,11 +20,6 @@ export class CodeValueMapper {
       code:        codeValueRow.code,
       title:       codeValueRow.label,
       description: codeValueRow.description ?? undefined,
-      isActive:    codeValueRow.isActive  ?? true,
-      isHidden:    codeValueRow.isHidden  ?? false,
-      isSystem:    codeValueRow.isSystem  ?? false,
-      createdAt:   codeValueRow.createdAt?.toISOString() ?? '',
-      updatedAt:   codeValueRow.updatedAt?.toISOString() ?? '',
     };
   }
 }

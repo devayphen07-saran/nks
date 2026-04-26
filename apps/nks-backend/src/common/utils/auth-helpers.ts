@@ -110,6 +110,34 @@ export class AuthControllerHelpers {
     }
   }
 
+  /**
+   * Returns true when the request comes from a native mobile client.
+   * Web clients (no deviceType, or deviceType === 'WEB') return false.
+   */
+  static isMobile(deviceType?: string): boolean {
+    return deviceType === 'ANDROID' || deviceType === 'IOS';
+  }
+
+  /**
+   * Strip sessionToken from the response body for web clients.
+   *
+   * The sessionToken is an opaque credential (functionally equivalent to a
+   * password). Web clients receive it via an httpOnly cookie — exposing it in
+   * the JSON body risks capture by CDN logs, API gateways, and browser devtools.
+   *
+   * Mobile clients need it in the body because they cannot use httpOnly cookies.
+   * Call this AFTER applySessionCookie() so the cookie is set before the field
+   * is removed from the returned object.
+   */
+  static forClient<T extends AuthResponseEnvelope>(
+    result: T,
+    deviceType?: string,
+  ): T {
+    if (AuthControllerHelpers.isMobile(deviceType)) return result;
+    const { sessionToken: _omit, ...sessionWithoutToken } = result.session;
+    return { ...result, session: sessionWithoutToken };
+  }
+
   static clearSessionCookie(res: Response): void {
     res.clearCookie(AuthControllerHelpers.SESSION_COOKIE_NAME, {
       httpOnly: true,

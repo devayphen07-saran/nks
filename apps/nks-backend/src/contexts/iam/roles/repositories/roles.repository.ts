@@ -316,6 +316,26 @@ export class RolesRepository extends BaseRepository {
 
   // ─── Store resolution ─────────────────────────────────────────────────────
 
+  /**
+   * Returns true when the given code matches a role that is marked isSystem=true
+   * in the DB. Used to block custom role creation with reserved codes — driven by
+   * the DB flag, not a hardcoded local list.
+   */
+  async isSystemRoleCode(code: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: schema.roles.id })
+      .from(schema.roles)
+      .where(
+        and(
+          eq(schema.roles.code, code.toUpperCase()),
+          eq(schema.roles.isSystem, true),
+          isNull(schema.roles.deletedAt),
+        ),
+      )
+      .limit(1);
+    return !!row;
+  }
+
   async findStoreIdByGuuid(guuid: string): Promise<number | null> {
     const [row] = await this.db
       .select({ id: schema.store.id })
@@ -374,6 +394,7 @@ export class RolesRepository extends BaseRepository {
       page?: number;
       pageSize?: number;
       storeId?: number | null;
+      isSuperAdmin?: boolean;
       sortBy?: string;
       sortOrder?: string;
       isActive?: boolean;
@@ -384,12 +405,22 @@ export class RolesRepository extends BaseRepository {
       page = 1,
       pageSize = 50,
       storeId,
+      isSuperAdmin = false,
       sortBy = 'name',
       sortOrder = 'asc',
       isActive,
     } = opts;
     const offset = RolesRepository.toOffset(page, pageSize);
     const activeFilter = isActive === undefined ? true : isActive;
+
+    // Super-admins see both platform roles (storeFk IS NULL) and the store's
+    // custom roles. Store staff see only their store's roles — platform/system
+    // roles must not be visible to non-admins.
+    const storeCondition = storeId
+      ? isSuperAdmin
+        ? or(isNull(schema.roles.storeFk), eq(schema.roles.storeFk, storeId))
+        : eq(schema.roles.storeFk, storeId)
+      : undefined;
 
     const where = and(
       eq(schema.roles.isActive, activeFilter),
@@ -399,9 +430,7 @@ export class RolesRepository extends BaseRepository {
         schema.roles.roleName,
         schema.roles.description,
       ),
-      storeId
-        ? or(isNull(schema.roles.storeFk), eq(schema.roles.storeFk, storeId))
-        : undefined,
+      storeCondition,
     );
 
     const { rows, total } = await this.paginate(
@@ -545,11 +574,17 @@ export class RolesRepository extends BaseRepository {
   /**
    * Assign a role to a user inside an existing transaction.
    * Idempotent: silently no-ops if the assignment already exists.
+   *
+   * `isPrimary` defaults to true for bootstrap flows (first-user seeding)
+   * where the caller knows this is the user's only platform role. Pass
+   * false when assigning a secondary platform role to an existing user so
+   * the partial unique index on (user_fk) WHERE is_primary=true is not violated.
    */
   async assignRoleWithinTransaction(
     tx: Db,
     userId: number,
     roleCode: string,
+    isPrimary: boolean = true,
   ): Promise<boolean> {
     const [roleRecord] = await tx
       .select({ id: schema.roles.id })
@@ -569,7 +604,7 @@ export class RolesRepository extends BaseRepository {
       .values({
         userFk: userId,
         roleFk: roleRecord.id,
-        isPrimary: true,
+        isPrimary,
         isActive: true,
       })
       .onConflictDoNothing();
@@ -657,6 +692,10 @@ export class RolesRepository extends BaseRepository {
         isNull(userRoleMapping.expiresAt),
         gt(userRoleMapping.expiresAt, new Date()),
       ),
+      // Exclude soft-deleted roles — a role that has been deleted must not
+      // continue to grant permissions to users who still hold the mapping.
+      eq(schema.roles.isActive, true),
+      isNull(schema.roles.deletedAt),
     );
   }
 }

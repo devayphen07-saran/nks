@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RolesRepository } from './repositories/roles.repository';
-import { RolePermissionsRepository } from './repositories/role-permissions.repository';
+import { PermissionsRepository } from './repositories/role-permissions.repository';
 import { PermissionEvaluatorService } from './permission-evaluator.service';
 import { TransactionService } from '../../../core/database/transaction.service';
 import { RolesValidator } from './validators';
@@ -25,7 +25,7 @@ export class RolesService {
 
   constructor(
     private readonly rolesRepository: RolesRepository,
-    private readonly rolePermissionsRepository: RolePermissionsRepository,
+    private readonly rolePermissionsRepository: PermissionsRepository,
     private readonly permissionEvaluator: PermissionEvaluatorService,
     private readonly txService: TransactionService,
     private readonly auditService: AuditService,
@@ -40,7 +40,9 @@ export class RolesService {
     const storeFk = await this.rolesRepository.findStoreIdByGuuid(dto.storeGuuid);
     RolesValidator.assertStoreFound(storeFk);
     RolesValidator.assertStoreMatch(activeStoreId, storeFk);
-    RolesValidator.assertCodeNotReserved(dto.code);
+
+    const isReserved = await this.rolesRepository.isSystemRoleCode(dto.code);
+    RolesValidator.assertCodeNotReserved(isReserved);
 
     const role = await this.rolesRepository.create({
       roleName: dto.name,
@@ -64,12 +66,14 @@ export class RolesService {
     RolesValidator.assertFound(role);
     RolesValidator.assertRoleStoreAccess(role.storeFk, activeStoreId);
 
-    const [entityPermissions, routePermissions, storeGuuid] = await Promise.all([
+    const [flatPermissions, entityHierarchy, routePermissions, storeGuuid] = await Promise.all([
       this.rolePermissionsRepository.getEntityPermissionMapForRole(role.id),
+      this.rolePermissionsRepository.getEntityTypeHierarchy(),
       this.rolesRepository.findRoutePermissionsByRoleId(role.id),
       role.storeFk ? this.rolesRepository.getStoreGuuidByFk(role.storeFk) : Promise.resolve(null),
     ]);
 
+    const entityPermissions = RoleMapper.buildEntityPermissionTree(entityHierarchy, flatPermissions);
     return RoleMapper.buildRoleDetailDto(role, storeGuuid, entityPermissions, routePermissions);
   }
 
@@ -81,6 +85,7 @@ export class RolesService {
   ): Promise<RoleResponseDto> {
     const role = await this.rolesRepository.findByGuuid(guuid);
     RolesValidator.assertFound(role);
+    RolesValidator.assertRoleNotSystem(role.isSystem);
     RolesValidator.assertRoleStoreAccess(role.storeFk, activeStoreId);
 
     const entityEntries = dto.entityPermissions
@@ -161,6 +166,64 @@ export class RolesService {
     return RoleMapper.buildRoleDto(updated);
   }
 
+  /**
+   * Assign a role to an existing user.
+   * Bumps permissionsVersion and writes ADDED changelog entries after the DB insert.
+   */
+  async assignRoleToUser(
+    assignedBy: number,
+    userFk: number,
+    roleFk: number,
+    storeFk: number | null,
+    isPrimary: boolean,
+  ): Promise<void> {
+    const row = await this.rolesRepository.assignRole(userFk, roleFk, storeFk, assignedBy, isPrimary);
+    if (row) {
+      void this.permissionsChangelog.recordRoleAssigned(userFk, roleFk);
+    }
+  }
+
+  /**
+   * Remove a specific role assignment from a user.
+   * Bumps permissionsVersion and writes REMOVED changelog entries after the soft-delete.
+   */
+  async removeRoleFromUser(
+    userFk: number,
+    roleFk: number,
+    storeFk: number | null,
+  ): Promise<void> {
+    await this.rolesRepository.removeRole(userFk, roleFk, storeFk);
+    void this.permissionsChangelog.recordRoleRemoved(userFk, roleFk);
+  }
+
+  /**
+   * Remove all role assignments for a user in a specific store.
+   * Bumps permissionsVersion for each removed role.
+   */
+  async removeAllUserStoreRoles(userFk: number, storeFk: number): Promise<void> {
+    // Capture affected roleIds BEFORE soft-deleting so we can fan-out per role.
+    const activeRoles = await this.rolesRepository.getActiveRolesForStore(userFk, storeFk);
+    await this.rolesRepository.removeAllStoreRoles(userFk, storeFk);
+    for (const { roleId } of activeRoles) {
+      void this.permissionsChangelog.recordRoleRemoved(userFk, roleId);
+    }
+  }
+
+  /**
+   * Soft-delete a role and fan-out REMOVED changelog entries to all users who held it.
+   * Permissions are fetched before deletion so the changelog captures what was lost.
+   */
+  async deleteRole(deletedBy: number, guuid: string): Promise<void> {
+    const role = await this.rolesRepository.findByGuuid(guuid);
+    RolesValidator.assertFound(role);
+    RolesValidator.assertRoleNotSystem(role.isSystem);
+    // Fan-out runs before softDelete so role permissions are still readable.
+    await this.permissionsChangelog.recordRoleSoftDeleted(role.id);
+    await this.rolesRepository.softDelete(role.id, deletedBy);
+    this.permissionEvaluator.invalidateForRole(role.id);
+    this.logger.log(`Role soft-deleted: ${role.code} by user ${deletedBy}`);
+  }
+
   async listUserRoles(userId: number): Promise<UserRoleWithStoreRow[]> {
     return this.rolesRepository.findUserRoles(userId);
   }
@@ -180,6 +243,7 @@ export class RolesService {
     page: number;
     pageSize: number;
     storeId: number | null;
+    isSuperAdmin: boolean;
     search?: string;
     sortBy?: string;
     sortOrder?: string;
@@ -190,6 +254,7 @@ export class RolesService {
       page: opts.page,
       pageSize: opts.pageSize,
       storeId: opts.storeId,
+      isSuperAdmin: opts.isSuperAdmin,
       sortBy: opts.sortBy,
       sortOrder: opts.sortOrder,
       isActive: opts.isActive,

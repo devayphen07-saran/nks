@@ -14,8 +14,10 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { StatusService } from './status.service';
+import { ParseStatusPipe } from './pipes/parse-status.pipe';
 import { CreateStatusDto, UpdateStatusDto, GetAllStatusesQueryDto } from './dto/status.dto';
 import type { StatusResponse } from './dto/status.dto';
+import type { Status } from '../../../core/database/schema/entity-system/status/status.table';
 import { RBACGuard } from '../../../common/guards/rbac.guard';
 import { RequireEntityPermission } from '../../../common/decorators/require-entity-permission.decorator';
 import { EntityResource } from '../../../common/decorators/entity-resource.decorator';
@@ -34,23 +36,15 @@ export class AdminStatusController {
   constructor(private readonly statusService: StatusService) {}
 
   @Get()
-  @RequireEntityPermission({
-    action: PermissionActions.VIEW,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.VIEW, scope: 'PLATFORM' })
   @ResponseMessage('Statuses retrieved successfully')
   @ApiOperation({ summary: 'List all statuses including inactive' })
-  async listStatuses(
-    @Query() query: GetAllStatusesQueryDto,
-  ): Promise<PaginatedResult<StatusResponse>> {
+  async listStatuses(@Query() query: GetAllStatusesQueryDto): Promise<PaginatedResult<StatusResponse>> {
     return this.statusService.listStatuses(query);
   }
 
   @Post()
-  @RequireEntityPermission({
-    action: PermissionActions.CREATE,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.CREATE, scope: 'PLATFORM' })
   @HttpCode(HttpStatus.CREATED)
   @ResponseMessage('Status created successfully')
   @ApiOperation({ summary: 'Create a new status' })
@@ -62,31 +56,25 @@ export class AdminStatusController {
   }
 
   @Put(':guuid')
-  @RequireEntityPermission({
-    action: PermissionActions.EDIT,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.EDIT, scope: 'PLATFORM' })
   @ResponseMessage('Status updated successfully')
   @ApiOperation({ summary: 'Update a status' })
   async updateStatus(
-    @Param('guuid', ParseUUIDPipe) guuid: string,
+    @Param('guuid', ParseUUIDPipe, ParseStatusPipe) status: Status,
     @Body() dto: UpdateStatusDto,
     @CurrentUser() user: SessionUser,
   ): Promise<StatusResponse> {
-    return this.statusService.updateStatus(guuid, dto, user.userId);
+    return this.statusService.updateStatus(status, dto, user.userId);
   }
 
   @Delete(':guuid')
-  @RequireEntityPermission({
-    action: PermissionActions.DELETE,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.DELETE, scope: 'PLATFORM' })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a status (system statuses protected)' })
   async deleteStatus(
-    @Param('guuid', ParseUUIDPipe) guuid: string,
+    @Param('guuid', ParseUUIDPipe, ParseStatusPipe) status: Status,
     @CurrentUser() user: SessionUser,
   ): Promise<void> {
-    await this.statusService.deleteStatus(guuid, user.userId);
+    await this.statusService.deleteStatus(status, user.userId);
   }
 }

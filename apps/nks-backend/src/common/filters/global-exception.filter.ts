@@ -241,8 +241,16 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       statusCode = HttpStatus.CONFLICT;
     } else if (exception.code === PG_FOREIGN_KEY_VIOLATION) {
       errorCode = ErrorCode.DB_FOREIGN_KEY_VIOLATION;
-      message = 'Referenced record does not exist';
-      statusCode = HttpStatus.UNPROCESSABLE_ENTITY;
+      // PostgreSQL detail for delete-restriction: "Key (id)=(X) is still referenced from table Y"
+      // PostgreSQL detail for insert/update FK miss: "Key (field)=(X) is not present in table Y"
+      const isDeleteRestriction = exception.detail?.includes('still referenced from table');
+      if (isDeleteRestriction) {
+        message = 'Cannot delete: this record is referenced by other data';
+        statusCode = HttpStatus.CONFLICT;
+      } else {
+        message = 'Referenced record does not exist';
+        statusCode = HttpStatus.UNPROCESSABLE_ENTITY;
+      }
     } else if (exception.code === PG_NOT_NULL_VIOLATION) {
       // NOT NULL violation is always a service-layer bug (a required field was not set),
       // never a user error. Log at error level to surface it immediately.

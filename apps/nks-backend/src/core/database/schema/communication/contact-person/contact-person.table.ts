@@ -3,6 +3,7 @@ import {
   bigint,
   varchar,
   boolean,
+  check,
   uniqueIndex,
   index,
 } from 'drizzle-orm/pg-core';
@@ -84,6 +85,10 @@ export const contactPerson = pgTable(
     uniqueIndex('contact_person_one_primary_idx')
       .on(table.entityFk, table.recordId)
       .where(sql`is_primary = true AND deleted_at IS NULL`),
+    check(
+      'contact_person_designation_required',
+      sql`designation_fk IS NOT NULL OR designation_free_text IS NOT NULL`,
+    ),
   ],
 );
 

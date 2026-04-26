@@ -6,8 +6,6 @@ import {
   Res,
   HttpCode,
   HttpStatus,
-  UseGuards,
-  Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
@@ -23,7 +21,6 @@ import {
   SendOtpResponseDto,
   ResendOtpResponseDto,
 } from '../dto/otp-response.dto';
-import { RateLimitingGuard } from '../../../../common/guards/rate-limiting.guard';
 import { Public } from '../../../../common/decorators/public.decorator';
 import { RateLimit } from '../../../../common/decorators/rate-limit.decorator';
 import type { AuthResponseEnvelope } from '../dto';
@@ -31,8 +28,6 @@ import type { AuthResponseEnvelope } from '../dto';
 @ApiTags('Auth')
 @Controller('auth/otp')
 export class OtpController {
-  private readonly logger = new Logger(OtpController.name);
-
   constructor(
     private readonly otpService: OtpService,
     private readonly otpAuthOrchestrator: OtpAuthOrchestrator,
@@ -41,7 +36,6 @@ export class OtpController {
   @Post('send')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @UseGuards(RateLimitingGuard)
   @RateLimit(3)
   @ResponseMessage('OTP sent successfully')
   @ApiOperation({ summary: 'Send OTP via MSG91' })
@@ -52,7 +46,6 @@ export class OtpController {
   @Post('verify')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @UseGuards(RateLimitingGuard)
   @RateLimit(5)
   @ResponseMessage('Login successful')
   @ApiOperation({ summary: 'Verify OTP and login' })
@@ -64,22 +57,13 @@ export class OtpController {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
     const result = await this.otpAuthOrchestrator.verifyOtpAndBuildAuthResponse(dto, deviceInfo);
 
-    if (!deviceInfo.deviceType || deviceInfo.deviceType === 'WEB') {
-      AuthControllerHelpers.applySessionCookie(res, result);
-      this.logger.debug('[OTP] Session cookie set for WEB client');
-    } else {
-      this.logger.debug(
-        `[OTP] Skipped session cookie for ${deviceInfo.deviceType} client (uses JWT)`,
-      );
-    }
-
-    return result;
+    AuthControllerHelpers.applySessionCookie(res, result);
+    return AuthControllerHelpers.forClient(result, deviceInfo.deviceType);
   }
 
   @Post('resend')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @UseGuards(RateLimitingGuard)
   @RateLimit(3)
   @ResponseMessage('OTP resent successfully')
   @ApiOperation({ summary: 'Resend OTP using original request ID' })
@@ -90,7 +74,6 @@ export class OtpController {
   @Post('email/send')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
-  @UseGuards(RateLimitingGuard)
   @RateLimit(3)
   @ResponseMessage('OTP sent to email')
   @ApiOperation({
@@ -104,7 +87,6 @@ export class OtpController {
   @Post('email/verify')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
-  @UseGuards(RateLimitingGuard)
   @RateLimit(5)
   @ResponseMessage('Email verified successfully')
   @ApiOperation({

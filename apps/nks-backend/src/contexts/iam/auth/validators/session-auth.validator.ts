@@ -2,11 +2,11 @@ import { UnauthorizedException, ForbiddenException, NotFoundException } from '..
 import { ErrorCode, errPayload } from '../../../../common/constants/error-codes.constants';
 
 export class SessionAuthValidator {
-  static assertSessionOwnership<T extends { userId: number | string }>(
+  static assertSessionOwnership<T extends { userFk: number | string }>(
     session: T | null | undefined,
     userId: number,
   ): asserts session is T {
-    if (!session || session.userId !== userId) {
+    if (!session || session.userFk !== userId) {
       throw new UnauthorizedException(errPayload(ErrorCode.AUTH_INVALID_SESSION_TOKEN));
     }
   }
@@ -25,11 +25,11 @@ export class SessionAuthValidator {
     if (!session) throw new NotFoundException(errPayload(ErrorCode.AUTH_SESSION_NOT_FOUND));
   }
 
-  static assertSessionBelongsToUser<T extends { userId: number | string }>(
+  static assertSessionBelongsToUser<T extends { userFk: number | string }>(
     session: T,
     userId: number,
   ): void {
-    if (session.userId !== userId) {
+    if (session.userFk !== userId) {
       throw new ForbiddenException(errPayload(ErrorCode.AUTH_FORBIDDEN_SESSION));
     }
   }

@@ -2,22 +2,14 @@ import { ForbiddenException } from '@nestjs/common';
 import { ErrorCode, ErrorMessages } from '../constants/error-codes.constants';
 import { SystemRoleCodes } from '../constants/system-role-codes.constant';
 
-/**
- * Authorization Validator
- * Validates authorization and permission checks for business logic
- */
 export class AuthorizationValidator {
   /**
-   * Validate user can perform action on their own resource
-   * Allows SUPER_ADMIN to bypass check
+   * Validate user can perform action on their own resource.
    */
   static validateOwnResource(
     resourceOwnerId: number,
     requestingUserId: number,
-    isSuperAdmin: boolean = false,
   ): void {
-    if (isSuperAdmin) return; // SUPER_ADMIN can do anything
-
     if (resourceOwnerId !== requestingUserId) {
       throw new ForbiddenException({
         errorCode: ErrorCode.FORBIDDEN,
@@ -27,20 +19,16 @@ export class AuthorizationValidator {
   }
 
   /**
-   * Validate user has specific role
+   * Validate user has specific role.
    */
   static validateUserRole(
     userRole: string | string[],
     requiredRole: string | string[],
   ): void {
     const userRoles = Array.isArray(userRole) ? userRole : [userRole];
-    const required = Array.isArray(requiredRole)
-      ? requiredRole
-      : [requiredRole];
+    const required = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
 
-    const hasRole = userRoles.some((r) => required.includes(r));
-
-    if (!hasRole) {
+    if (!userRoles.some((r) => required.includes(r))) {
       throw new ForbiddenException({
         errorCode: ErrorCode.FORBIDDEN,
         message: ErrorMessages[ErrorCode.FORBIDDEN],
@@ -48,38 +36,14 @@ export class AuthorizationValidator {
     }
   }
 
-  /**
-   * Validate user is not trying to escalate privileges
-   */
-  static validateNoPrivilegeEscalation(
-    requestingUserRole: string,
-    targetRole: string,
-    isSuperAdmin: boolean = false,
-  ): void {
-    if (isSuperAdmin) return; // SUPER_ADMIN can assign any role
-
-    const roleHierarchy = ['USER', 'STAFF', SystemRoleCodes.STORE_OWNER, SystemRoleCodes.SUPER_ADMIN];
-    const requestingLevel = roleHierarchy.indexOf(requestingUserRole);
-    const targetLevel = roleHierarchy.indexOf(targetRole);
-
-    if (targetLevel >= requestingLevel) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.FORBIDDEN,
-        message: 'Cannot assign role equal to or higher than your own',
-      });
-    }
-  }
 
   /**
-   * Validate user has access to store
+   * Validate user has a role in the target store.
    */
   static validateStoreAccess(
     userStores: number[],
     targetStoreId: number,
-    isSuperAdmin: boolean = false,
   ): void {
-    if (isSuperAdmin) return; // SUPER_ADMIN has access to all stores
-
     if (!userStores.includes(targetStoreId)) {
       throw new ForbiddenException({
         errorCode: ErrorCode.FORBIDDEN,
@@ -89,7 +53,7 @@ export class AuthorizationValidator {
   }
 
   /**
-   * Validate email verification status if required
+   * Validate email verification status if required.
    */
   static validateEmailVerified(
     isEmailVerified: boolean,
@@ -104,7 +68,7 @@ export class AuthorizationValidator {
   }
 
   /**
-   * Validate account status is active
+   * Validate account status is active.
    */
   static validateAccountStatus(
     status: string,
@@ -119,7 +83,7 @@ export class AuthorizationValidator {
   }
 
   /**
-   * Validate user is not deleted/deactivated
+   * Validate user is not deleted/deactivated.
    */
   static validateUserActive(deletedAt: Date | null): void {
     if (deletedAt) {
@@ -131,17 +95,12 @@ export class AuthorizationValidator {
   }
 
   /**
-   * Validate user cannot perform action on superadmin
+   * Validate non-SUPER_ADMIN users cannot modify SUPER_ADMIN users.
    */
   static validateCannotModifySuperAdmin(
     targetUserRole: string | string[],
-    isSuperAdmin: boolean = false,
   ): void {
-    if (isSuperAdmin) return; // SUPER_ADMIN can modify other SUPER_ADMIN
-
-    const roles = Array.isArray(targetUserRole)
-      ? targetUserRole
-      : [targetUserRole];
+    const roles = Array.isArray(targetUserRole) ? targetUserRole : [targetUserRole];
     if (roles.includes(SystemRoleCodes.SUPER_ADMIN)) {
       throw new ForbiddenException({
         errorCode: ErrorCode.FORBIDDEN,

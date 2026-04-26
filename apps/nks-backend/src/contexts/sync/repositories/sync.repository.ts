@@ -195,32 +195,46 @@ export class SyncRepository extends BaseRepository {
   }
 
   /**
-   * Look up a previously processed idempotency key.
-   * Returns the stored request hash if found, null if not seen before.
-   * Used to detect both duplicates and payload-mismatch replays.
+   * Atomically claim an idempotency key.
+   *
+   * Uses INSERT ... ON CONFLICT DO NOTHING RETURNING to avoid the TOCTOU window
+   * that exists in a separate SELECT + INSERT pattern: at READ COMMITTED isolation,
+   * two concurrent transactions can both SELECT "not found" and then race to INSERT,
+   * causing the second to fail with a PK violation and roll back the entire batch.
+   *
+   * PostgreSQL row-level locking during INSERT ensures only one transaction
+   * proceeds per key — the second blocks until the first commits or rolls back,
+   * then detects the conflict cleanly via ON CONFLICT rather than a crash.
+   *
+   * Returns true  → this transaction owns the key; proceed with the operation.
+   * Returns false → key already exists (committed by an earlier transaction);
+   *                 caller should SELECT the stored hash to distinguish a
+   *                 legitimate duplicate from a tampered replay.
+   *
+   * Must be called inside the same transaction as the mutation so that a failed
+   * operation rolls back the claim — leaving the key available for a clean retry.
    */
-  async findProcessedEntry(key: string, tx?: Db): Promise<string | null> {
-    const conn = tx ?? this.db;
-    const rows = await conn
+  async claimIdempotencyKey(key: string, requestHash: string, tx: Db): Promise<boolean> {
+    const rows = await tx
+      .insert(schema.idempotencyLog)
+      .values({ key, requestHash, processedAt: new Date() })
+      .onConflictDoNothing()
+      .returning({ key: schema.idempotencyLog.key });
+    return rows.length > 0;
+  }
+
+  /**
+   * Fetch the stored request hash for an already-processed idempotency key.
+   * Used after claimIdempotencyKey() returns false to distinguish a legitimate
+   * duplicate (same hash) from a payload-mismatch replay (different hash).
+   */
+  async getStoredHash(key: string, tx: Db): Promise<string | null> {
+    const rows = await tx
       .select({ requestHash: schema.idempotencyLog.requestHash })
       .from(schema.idempotencyLog)
       .where(eq(schema.idempotencyLog.key, key))
       .limit(1);
-
     return rows.length > 0 ? rows[0].requestHash : null;
-  }
-
-  /**
-   * Record an idempotency key as processed with its request hash.
-   * Must be called inside the same transaction as the mutation.
-   */
-  async logIdempotencyKey(key: string, requestHash: string, tx?: Db): Promise<void> {
-    const conn = tx ?? this.db;
-    await conn.insert(schema.idempotencyLog).values({
-      key,
-      requestHash,
-      processedAt: new Date(),
-    });
   }
 
   /**

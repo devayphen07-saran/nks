@@ -51,8 +51,8 @@ export const store = pgTable(
       .references(() => storeCategory.id, { onDelete: 'restrict' }),
 
     // ── KYC / Legal ──────────────────────────────────────────────────────────
+    // tax_number removed — tax registrations (GST/PAN/VAT) live in tax_registrations table
     registrationNumber: varchar('registration_number', { length: 100 }),
-    taxNumber: varchar('tax_number', { length: 100 }), // GST/VAT
     kycLevel: smallint('kyc_level').notNull().default(0),
     isVerified: boolean('is_verified').notNull().default(false),
 

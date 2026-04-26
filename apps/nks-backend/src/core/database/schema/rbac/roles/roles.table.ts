@@ -62,11 +62,3 @@ export type Role = typeof roles.$inferSelect;
 export type NewRole = typeof roles.$inferInsert;
 export type UpdateRole = Partial<Omit<NewRole, 'id'>>;
 
-// System role codes that are reserved and cannot be used for custom roles
-// These are seeded as rows in the roles table with storeFk=NULL and isEditable=false
-export type SystemRoleCode = 'SUPER_ADMIN' | 'USER' | 'STORE_OWNER';
-export const SYSTEM_ROLE_CODES = [
-  'SUPER_ADMIN',
-  'USER',
-  'STORE_OWNER',
-] as const;

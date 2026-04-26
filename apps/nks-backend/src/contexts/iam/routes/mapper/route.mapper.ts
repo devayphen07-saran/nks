@@ -17,6 +17,7 @@ export class RouteMapper {
       parentRouteGuuid: parentGuuid,
       fullPath: route.fullPath,
       sortOrder: route.sortOrder ?? 0,
+      hasAccess: route.hasAccess ?? true,
       canView: route.canView ?? false,
       canCreate: route.canCreate ?? false,
       canEdit: route.canEdit ?? false,
@@ -43,9 +44,14 @@ export class RouteMapper {
 
     for (const route of routes) {
       const node = nodeMap.get(route.id)!;
-      const parent = route.parentRouteFk ? nodeMap.get(route.parentRouteFk) : undefined;
-      if (parent) {
-        parent.children.push(node);
+      if (route.parentRouteFk) {
+        const parent = nodeMap.get(route.parentRouteFk);
+        if (parent) {
+          parent.children.push(node);
+        }
+        // Parent absent from result set (filtered out by role mapping or deleted).
+        // Drop the child rather than promoting it to root — a dangling child at
+        // root level would leak a route into the wrong scope/hierarchy position.
       } else {
         roots.push(node);
       }

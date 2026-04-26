@@ -43,6 +43,14 @@ export const EntityCodes = {
   ROLE:   'ROLE',
   ROUTE:  'ROUTE',
 
+  // Platform management
+  STORE:        'STORE',
+  SUBSCRIPTION: 'SUBSCRIPTION',
+  BILLING:      'BILLING',
+
+  // Business domain
+  ORDER: 'ORDER',
+
   // Sync
   SYNC: 'SYNC',
 } as const;

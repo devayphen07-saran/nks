@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, index, smallint } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uniqueIndex, smallint, index } from 'drizzle-orm/pg-core';
 import { betterAuthEntity } from '../../base.entity';
 
 // Track OTP requests per identifier to enforce rate limits.
@@ -32,11 +32,15 @@ export const otpRequestLog = pgTable(
     // consecutiveFailures — count of failed OTP verifications (for exponential backoff)
     // Resets to 0 on successful verification or window expiry
     consecutiveFailures: smallint('consecutive_failures').notNull().default(0),
+
+    // expiresAt — row-level TTL for hard-delete cleanup (24h from last window reset)
+    // Distinct from windowExpiresAt (which tracks the 1h rate-limit window).
+    // A cron job deletes rows WHERE expires_at < NOW().
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   },
   (table) => [
-    // Fast lookup: find rate limit record by identifier hash
-    // Used at every OTP send request to check if limit exceeded
-    index('otp_request_log_identifier_hash_idx').on(table.identifierHash),
+    uniqueIndex('otp_request_log_identifier_hash_idx').on(table.identifierHash),
+    index('otp_request_log_expires_at_idx').on(table.expiresAt),
   ],
 );
 

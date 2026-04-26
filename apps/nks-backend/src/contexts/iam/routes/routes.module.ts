@@ -2,14 +2,13 @@ import { Module } from '@nestjs/common';
 import { RoutesService } from './routes.service';
 import { RoutesController } from './routes.controller';
 import { AdminRoutesController } from './admin-routes.controller';
-import { RoutesRepository } from './repositories/routes.repository';
 import { RolesModule } from '../roles/roles.module';
 import { GuardsModule } from '../../../common/guards/guards.module';
 
 @Module({
   imports: [GuardsModule, RolesModule],
   controllers: [RoutesController, AdminRoutesController],
-  providers: [RoutesService, RoutesRepository],
-  exports: [RoutesService, RoutesRepository],
+  providers: [RoutesService],
+  exports: [RoutesService],
 })
 export class RoutesModule {}

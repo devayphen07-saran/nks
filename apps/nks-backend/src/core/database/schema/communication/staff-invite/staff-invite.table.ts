@@ -1,6 +1,7 @@
 import {
   pgTable,
   bigint,
+  boolean,
   varchar,
   timestamp,
   uniqueIndex,
@@ -59,16 +60,22 @@ export const staffInvite = pgTable(
       { onDelete: 'set null' },
     ),
 
+    // Mirrors staff_invite_status.isPending for the current status row.
+    // Set to true on creation (all invites start pending).
+    // Set to false on any status transition (accept, reject, revoke, expire).
+    // Used in the partial unique index so the constraint is ID-independent —
+    // PostgreSQL partial index predicates cannot reference other tables.
+    isPending: boolean('is_pending').notNull().default(true),
+
     ...auditFields(() => users.id),
   },
   (table) => [
     // Prevent duplicate pending invites for the same store + email.
-    // ACCEPTED / REVOKED / EXPIRED rows are excluded so a re-invite after
-    // a previous invite was accepted or revoked is allowed.
-    // NOTE: status_fk must be matched against staff_invite_status lookup table
+    // is_pending = false on all terminal statuses (ACCEPTED, REJECTED, REVOKED, EXPIRED)
+    // so re-inviting after a previous invite was resolved is allowed.
     uniqueIndex('staff_invite_pending_unique_idx')
       .on(table.storeFk, table.inviteeEmail)
-      .where(sql`status_fk = 1 AND deleted_at IS NULL`), // 1 = PENDING status ID (seeded first in staff_invite_status)
+      .where(sql`is_pending = true AND deleted_at IS NULL`),
   ],
 );
 

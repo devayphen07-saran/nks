@@ -17,6 +17,7 @@ const RouteBaseSchema = z.object({
   parentRouteGuuid: z.string().nullable().describe('Parent route guuid for nesting'),
   fullPath: z.string().describe('Full path including parent paths'),
   sortOrder: z.number().describe('Display order'),
+  hasAccess: z.boolean().describe('Entity-level permission check passed for this route'),
   canView: z.boolean().describe('Can view this route'),
   canCreate: z.boolean().describe('Can create within this route'),
   canEdit: z.boolean().describe('Can edit within this route'),

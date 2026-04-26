@@ -21,7 +21,7 @@ export class AuthProviderRepository extends BaseRepository {
       .from(schema.userAuthProvider)
       .where(
         and(
-          eq(schema.userAuthProvider.userId, userId),
+          eq(schema.userAuthProvider.userFk, userId),
           eq(schema.userAuthProvider.providerId, providerId),
         ),
       )
@@ -41,7 +41,7 @@ export class AuthProviderRepository extends BaseRepository {
       .from(schema.userAuthProvider)
       .where(
         and(
-          eq(schema.userAuthProvider.userId, userId),
+          eq(schema.userAuthProvider.userFk, userId),
           eq(schema.userAuthProvider.providerId, providerId),
         ),
       )

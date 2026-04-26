@@ -6,6 +6,7 @@ import {
   jsonb,
   inet,
   bigint,
+  uuid,
   index,
 } from 'drizzle-orm/pg-core';
 import { auditActionTypeEnum, sessionDeviceTypeEnum } from '../enums/enums';
@@ -20,7 +21,7 @@ export const auditLogs = pgTable(
     // appendOnlyEntity — rows are immutable; no soft-delete, no update timestamps, no UI flags.
     ...appendOnlyEntity(),
     // guuid — public stable identifier for external lookup without exposing sequential numeric id.
-    guuid: varchar('guuid', { length: 255 })
+    guuid: uuid('guuid')
       .notNull()
       .unique()
       .$defaultFn(() => crypto.randomUUID()),
@@ -63,6 +64,8 @@ export const auditLogs = pgTable(
     index('audit_logs_action_idx').on(table.action),
     // Composite for common audit lookups
     index('audit_logs_store_action_idx').on(table.storeFk, table.action),
+    // User activity timeline: WHERE user_fk = ? ORDER BY created_at DESC
+    index('audit_logs_user_created_at_idx').on(table.userFk, table.createdAt),
   ],
 );
 

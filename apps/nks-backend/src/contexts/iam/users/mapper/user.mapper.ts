@@ -14,11 +14,6 @@ export class UserMapper {
       image: userRow.image,
       isBlocked: userRow.isBlocked,
       blockedReason: userRow.blockedReason,
-      primaryLoginMethod: userRow.primaryLoginMethod,
-      loginCount: userRow.loginCount,
-      lastLoginAt: userRow.lastLoginAt?.toISOString() ?? null,
-      profileCompleted: userRow.profileCompleted,
-      isActive: userRow.isActive,
       createdAt: userRow.createdAt.toISOString(),
       primaryRole: userRow.primaryRole,
     };

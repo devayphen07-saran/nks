@@ -1,4 +1,4 @@
-import { pgTable, varchar, bigint, integer, boolean, text, index, check } from 'drizzle-orm/pg-core';
+import { pgTable, varchar, bigint, integer, boolean, text, index, uniqueIndex, check } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { baseEntity, auditFields } from '../../base.entity';
@@ -46,9 +46,14 @@ export const plans = pgTable('plans', {
   // Audit Fields
   ...auditFields(() => users.id),
 }, (table) => [
+  // At most one plan can carry the "most popular" badge at a time.
+  uniqueIndex('plans_is_more_popular_unique_idx')
+    .on(table.isMorePopular)
+    .where(sql`is_more_popular = true AND deleted_at IS NULL`),
+
   index('plans_plan_type_idx').on(table.planTypeFk),
-  index('plans_allow_to_upgrade_idx').on(table.allowToUpgradeFk), // ← ADDED: for upgrade path queries
-  index('plans_allow_to_downgrade_idx').on(table.allowToDowngradeFk), // ← ADDED: for downgrade path queries
+  index('plans_allow_to_upgrade_idx').on(table.allowToUpgradeFk),
+  index('plans_allow_to_downgrade_idx').on(table.allowToDowngradeFk),
 
   // Prevent a plan from referencing itself as an upgrade/downgrade target
   check('plans_no_self_upgrade_chk', sql`allow_to_upgrade_fk IS NULL OR allow_to_upgrade_fk != id`),

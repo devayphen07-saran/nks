@@ -104,14 +104,10 @@ export const notifications = pgTable(
       .on(table.userFk)
       .where(sql`read_at IS NULL`),
 
-    // Cron index — find PENDING or FAILED rows eligible for retry.
-    // expires_at check is intentionally omitted here: now() is STABLE not IMMUTABLE,
-    // so PostgreSQL forbids it in partial index WHERE clauses.
-    // The cron query must filter expires_at at runtime.
-    // NOTE: status_fk must be matched against notification_status lookup table
-    index('notifications_retry_idx')
-      .on(table.statusFk, table.retryCount)
-      .where(sql`status_fk IN (1, 5)`), // 1 = PENDING, 5 = FAILED status IDs (seeded in notification_status)
+    // Cron index — find rows eligible for retry, filtered by (statusFk, retryCount).
+    // Non-partial: the cron query supplies the status code list at runtime via a
+    // subquery or IN clause, so no ID is hardcoded here.
+    index('notifications_retry_idx').on(table.statusFk, table.retryCount),
 
     // Unique — one ticket per notification; used for O(1) receipt lookup.
     // PostgreSQL UNIQUE allows multiple NULL values — this is intentional:

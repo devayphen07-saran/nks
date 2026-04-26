@@ -9,7 +9,6 @@ import { SessionValidator, DeviceTypeEnum } from '../../../../../common/validato
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { PermissionsService } from '../permissions/permissions.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
-import { JtiBlocklistService } from '../token/jti-blocklist.service';
 import { RevokedDevicesRepository } from '../../repositories/revoked-devices.repository';
 import type { UserRoleEntry } from '../../mapper/auth-mapper';
 import type {
@@ -61,7 +60,6 @@ export class SessionService {
     private readonly permissionsService: PermissionsService,
     private readonly configService: ConfigService,
     private readonly authUtils: AuthUtilsService,
-    private readonly jtiBlocklist: JtiBlocklistService,
     private readonly revokedDevicesRepository: RevokedDevicesRepository,
   ) {
     this.ipHmacSecret = this.configService.getOrThrow<string>('IP_HMAC_SECRET');
@@ -91,7 +89,7 @@ export class SessionService {
       input.userId,
       AUTH_CONSTANTS.SESSION.MAX_PER_USER,
       {
-        userId: input.userId,
+        userFk: input.userId,
         token: input.token,
         expiresAt: input.expiresAt,
         ipAddress: input.ipAddress,
@@ -145,20 +143,15 @@ export class SessionService {
   }
 
   /**
-   * Invalidate session by token
+   * Invalidate session by token — atomically in one transaction:
+   *   1. JTI inserted into jti_blocklist → access token immediately invalid
+   *   2. Refresh token marked revoked
+   *   3. Session row deleted
    */
   async invalidateSessionByToken(token: string): Promise<void> {
     const session = await this.sessionsRepository.findByToken(token);
-    if (session) {
-      // Blocklist the JWT before deleting the session row so the 15-min
-      // access token window is closed immediately.
-      if (session.jti) {
-        this.jtiBlocklist.block(session.jti).catch((err: unknown) => {
-          this.logger.error(`Failed to blocklist JTI on logout: ${err instanceof Error ? err.message : String(err)}`);
-        });
-      }
-      await this.invalidateSession(session.id);
-    }
+    if (!session) return;
+    await this.sessionsRepository.revokeAndDeleteSession(session.id, 'LOGOUT', session.jti ?? undefined);
   }
 
   /**
@@ -172,17 +165,13 @@ export class SessionService {
 
     SessionAuthValidator.assertSessionBelongsToUser(session, userId);
 
-    if (session.jti) {
-      this.jtiBlocklist.block(session.jti).catch((err: unknown) => {
-        this.logger.error(`Failed to blocklist JTI on terminate: ${err instanceof Error ? err.message : String(err)}`);
-      });
-    }
+    await this.sessionsRepository.revokeAndDeleteSession(session.id, 'TERMINATED', session.jti ?? undefined);
 
-    // If the session had a deviceId, revoke it so offline pushes from that device
-    // are rejected even while the 3-day offline HMAC signature is still valid.
+    // Device revocation is best-effort — it prevents future offline sync pushes
+    // from this device but is not on the critical auth path.
     if (session.deviceId) {
       this.revokedDevicesRepository
-        .revoke(session.userId, session.deviceId, userId)
+        .revoke(session.userFk, session.deviceId, userId)
         .catch((err: unknown) => {
           this.logger.error(
             `Failed to record device revocation for session ${session.id}: ${err instanceof Error ? err.message : String(err)}`,
@@ -190,17 +179,19 @@ export class SessionService {
         });
     }
 
-    await this.invalidateSession(session.id);
     this.logger.debug(`Session terminated by user: ${session.id}`);
   }
 
   /**
-   * Terminate all sessions for a user (logout everywhere)
+   * Terminate all sessions for a user (logout everywhere).
+   * Blocklists every outstanding JTI before deleting the session rows so
+   * existing access tokens cannot survive the full 15-min TTL window.
    */
   async terminateAllSessions(userId: number): Promise<number> {
-    const count = await this.sessionsRepository.deleteAllForUser(userId);
-    this.logger.debug(`All sessions terminated for user ${userId}: ${count}`);
-    return count;
+    const jtis = await this.sessionsRepository.findJtisByUserId(userId);
+    await this.sessionsRepository.revokeAndDeleteAllForUser(userId, 'TERMINATED', jtis);
+    this.logger.debug(`All sessions terminated for user ${userId} (${jtis.length} JTIs blocklisted)`);
+    return jtis.length;
   }
 
   /**

@@ -118,12 +118,6 @@ export const OTP_CONSTANTS = {
 // ============================================================================
 
 export const STORE_CONSTANTS = {
-  // Staff Roles (custom roles available for assignment to STAFF members)
-  STAFF_ROLES: ['MANAGER', 'CASHIER', 'DELIVERY'] as const,
-
-  // Customer Role (non-authenticated access)
-  CUSTOMER_ROLE: 'CUSTOMER' as const,
-
   // Staff Invite
   STAFF_INVITE: {
     TOKEN_LENGTH: 32,
@@ -208,4 +202,3 @@ export const VALIDATION_PATTERNS = {
 } as const;
 
 export type DeviceType = (typeof AUTH_CONSTANTS.SUPPORTED_DEVICE_TYPES)[number];
-export type StaffRole = (typeof STORE_CONSTANTS.STAFF_ROLES)[number];

@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '../../../common/exceptions';
-import { CodesRepository } from './repositories/codes.repository';
+import { LookupsRepository } from '../lookups/repositories/lookups.repository';
 import { AuditService } from '../../compliance/audit/audit.service';
 import {
   ErrorCode,
@@ -23,7 +23,7 @@ import type { SessionUser } from '../../iam/auth/interfaces/session-user.interfa
 @Injectable()
 export class CodesService {
   constructor(
-    private readonly repo: CodesRepository,
+    private readonly repo: LookupsRepository,
     private readonly auditService: AuditService,
   ) {}
 

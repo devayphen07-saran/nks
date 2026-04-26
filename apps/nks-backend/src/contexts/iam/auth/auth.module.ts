@@ -13,7 +13,6 @@ import { AuthUsersRepository } from './repositories/auth-users.repository';
 import { OtpRepository } from './repositories/otp.repository';
 import { OtpRateLimitRepository } from './repositories/otp-rate-limit.repository';
 import { AuthProviderRepository } from './repositories/auth-provider.repository';
-import { SessionCleanupRepository } from './repositories/session-cleanup.repository';
 import { PermissionsChangelogRepository } from './repositories/permissions-changelog.repository';
 import { RevokedDevicesRepository } from './repositories/revoked-devices.repository';
 import { JtiBlocklistRepository } from './repositories/jti-blocklist.repository';
@@ -84,7 +83,6 @@ import { UserCreationService } from './services/flows/user-creation.service';
     OtpRepository,
     OtpRateLimitRepository,
     AuthProviderRepository,
-    SessionCleanupRepository,
     PermissionsChangelogRepository,
     RevokedDevicesRepository,
     JtiBlocklistRepository,
@@ -146,6 +144,8 @@ import { UserCreationService } from './services/flows/user-creation.service';
     // SyncModule injects this instead of RevokedDevicesRepository directly,
     // so the repository layer stays inside iam/auth.
     DeviceRevocationQueryService,
+    // UsersModule injects this for admin user management queries.
+    AuthUsersRepository,
   ],
 })
 export class AuthModule {}

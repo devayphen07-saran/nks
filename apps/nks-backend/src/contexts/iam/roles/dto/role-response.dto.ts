@@ -9,7 +9,26 @@ export interface EntityPermission {
   canCreate: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  canExport: boolean;
+  canApprove: boolean;
+  canArchive: boolean;
   deny?: boolean;
+}
+
+/**
+ * One node in the hierarchical entity permission tree returned by getRoleWithPermissions.
+ * Leaf nodes have children = [].
+ * Groups (parent nodes) may themselves have permissions if they are also permissioned entities.
+ */
+export interface EntityPermissionNode {
+  code: string;
+  label: string;
+  description: string | null;
+  defaultAllow: boolean;
+  sortOrder: number | null;
+  isHidden: boolean;
+  permissions: EntityPermission | null;
+  children: EntityPermissionNode[];
 }
 
 /** Legacy map keyed by entity code — used by RoleEntityPermissionRepository and auth snapshot. */
@@ -109,7 +128,7 @@ export interface RoleDetailResponse {
   isActive: boolean;
   createdAt: string;
   updatedAt: string | null;
-  entityPermissions: RoleEntityPermissions;
+  entityPermissions: EntityPermissionNode[];
   routePermissions: RoutePermission[];
 }
 

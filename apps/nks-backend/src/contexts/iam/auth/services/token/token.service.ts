@@ -8,7 +8,6 @@ import { RoleQueryService } from '../../../roles/role-query.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
 import { AuthMapper, type TokenPair } from '../../mapper/auth-mapper';
-import type { SessionUserRole } from '../../interfaces/session-user.interface';
 import type { AuthResponseEnvelope } from '../../dto';
 import {
   JWT_AUDIENCE,
@@ -72,7 +71,7 @@ export class TokenService {
   async createTokenPair(
     userGuuid: string,
     sessionToken: string,
-    userRoles: SessionUserRole[],
+    userRoles: Array<{ roleCode: string }>,
     userEmail: string,
     sessionGuuid: string,
     jti: string,

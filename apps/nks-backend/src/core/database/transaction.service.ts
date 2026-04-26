@@ -86,8 +86,14 @@ export class TransactionService {
       // transactions fail fast rather than holding locks indefinitely.
       const { timeout } = options;
       const result = await this.db.transaction(async (tx) => {
-        if (timeout) {
-          await tx.execute(sql.raw(`SET LOCAL statement_timeout = ${Number(timeout)}`));
+        if (timeout !== undefined) {
+          // PostgreSQL SET LOCAL does not support $1 parameters — interpolation is
+          // unavoidable. Guard with isSafeInteger (rejects NaN, Infinity, floats,
+          // strings) + an upper bound so only a plain positive ms value reaches SQL.
+          if (!Number.isSafeInteger(timeout) || timeout <= 0 || timeout > 3_600_000) {
+            throw new Error(`Invalid transaction timeout: ${String(timeout)}`);
+          }
+          await tx.execute(sql.raw(`SET LOCAL statement_timeout = ${timeout}`));
         }
         return fn(tx);
       });

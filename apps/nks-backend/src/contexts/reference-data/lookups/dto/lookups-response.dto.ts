@@ -1,15 +1,13 @@
 // ── Code-value–backed lookups (salutations, address types, etc.) ─────────────
 // All five share the same shape from the code_value table.
+// Internal flags (isActive, isHidden, isSystem) and audit timestamps are
+// intentionally omitted — repositories already filter to active, visible
+// records and clients have no use for DB internals in dropdown data.
 export interface CodeValueResponse {
   guuid: string;
   code: string;
   title: string;
   description?: string | null;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: Date | string;
-  updatedAt: Date | string | null;
 }
 
 // ── Dedicated-table lookups (own shape) ───────────────────────────────────────
@@ -20,11 +18,6 @@ export interface CountryResponse {
   countryName: string;
   dialingCode?: string;
   description?: string | null;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: Date | string;
-  updatedAt: Date | string | null;
 }
 
 export interface CommunicationTypeResponse {
@@ -32,11 +25,8 @@ export interface CommunicationTypeResponse {
   code: string;
   title: string;
   description?: string | null;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: Date | string;
-  updatedAt: Date | string | null;
+  icon?: string | null;
+  validationRegex?: string | null;
 }
 
 export interface CurrencyResponse {
@@ -45,11 +35,6 @@ export interface CurrencyResponse {
   symbol?: string;
   title: string;
   description?: string | null;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: Date | string;
-  updatedAt: Date | string | null;
 }
 
 export interface VolumeResponse {
@@ -58,11 +43,6 @@ export interface VolumeResponse {
   title: string;
   unit?: string;
   description?: string | null;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: Date | string;
-  updatedAt: Date | string | null;
 }
 
 export type PublicLookupItem =

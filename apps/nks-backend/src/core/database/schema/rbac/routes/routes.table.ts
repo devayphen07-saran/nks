@@ -3,6 +3,7 @@ import {
   varchar,
   bigint,
   boolean,
+  check,
   uniqueIndex,
   index,
 } from 'drizzle-orm/pg-core';
@@ -45,6 +46,10 @@ export const routes = pgTable(
     // Without this flag the guard must maintain a hardcoded whitelist.
     isPublic: boolean('is_public').notNull().default(false),
 
+    // Admin-controlled soft-disable: hides the route from navigation without
+    // deleting it (is_active = false is a soft delete; enable = false is a toggle).
+    enable: boolean('enable').notNull().default(true),
+
     // Dynamic permission binding — links this route to an entity type so the
     // RoutesService can filter the navigation tree by the user's permissions
     // without hardcoding entity codes in service logic.
@@ -68,6 +73,16 @@ export const routes = pgTable(
     index('routes_entity_type_idx')
       .on(table.entityTypeFk)
       .where(sql`entity_type_fk IS NOT NULL AND deleted_at IS NULL`),
+    // Tree traversal — find children of a given parent route.
+    index('routes_parent_route_fk_idx')
+      .on(table.parentRouteFk)
+      .where(sql`parent_route_fk IS NOT NULL`),
+    // A deleted route must be disabled. Prevents a soft-deleted route from
+    // remaining "enabled" and leaking into navigation queries.
+    check(
+      'routes_deleted_must_be_disabled',
+      sql`NOT (deleted_at IS NOT NULL AND enable = true)`,
+    ),
   ],
 );
 

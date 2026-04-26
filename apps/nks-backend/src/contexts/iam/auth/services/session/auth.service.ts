@@ -62,7 +62,7 @@ export class AuthService {
 
     // Check if user is blocked → wipe device
     const user = await this.authUsersRepository.findById(
-      Number(session.userId),
+      Number(session.userFk),
     );
     if (user?.isBlocked) {
       return { active: false, revoked: true, wipe: true };

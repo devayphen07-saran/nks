@@ -26,4 +26,28 @@ export class StoreQueryService {
       .findActiveById(storeId)
       .then((row) => row !== null);
   }
+
+  /**
+   * True iff the user is the ownerUserFk of the given active store.
+   * Used by RBACGuard to bypass role-row membership check for store owners.
+   */
+  isStoreOwner(userId: number, storeId: number): Promise<boolean> {
+    return this.storesRepository.isOwner(userId, storeId);
+  }
+
+  /**
+   * Single-query active + ownership check.
+   * Returns null if the store is not found, inactive, or soft-deleted.
+   * Returns { isOwner } if the store is active — isOwner is true iff the
+   * user is the store's ownerUserFk.
+   *
+   * Use this instead of isActive() + isStoreOwner() to eliminate the TOCTOU
+   * window where the store could be deactivated between the two separate queries.
+   */
+  findActiveWithOwnership(
+    userId: number,
+    storeId: number,
+  ): Promise<{ isOwner: boolean } | null> {
+    return this.storesRepository.findActiveWithOwnership(userId, storeId);
+  }
 }

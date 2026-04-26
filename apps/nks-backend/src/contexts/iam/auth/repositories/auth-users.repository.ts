@@ -1,16 +1,39 @@
 import { Injectable } from '@nestjs/common';
 import { PG_UNIQUE_VIOLATION } from '../../../../common/constants/pg-error-codes';
-import { eq, and, isNull, isNotNull, lte, ne, sql } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, lte, ne, sql, or, count, asc, desc } from 'drizzle-orm';
+import type { AnyColumn } from 'drizzle-orm/column';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
 import { TransactionService } from '../../../../core/database/transaction.service';
 import type { DbTransaction } from '../../../../core/database/transaction.service';
 import * as schema from '../../../../core/database/schema';
+import { userRoleMapping } from '../../../../core/database/schema/auth/user-role-mapping';
+import {
+  ilikeAny,
+  ilikeFullName,
+} from '../../../../core/database/query-helpers';
 import type {
   User as DbUser,
   NewUser,
 } from '../../../../core/database/schema/auth/users';
+
+/** Shape returned by admin user-management queries. */
+export interface AdminUserRow {
+  guuid: string;
+  iamUserId: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  emailVerified: boolean;
+  phoneNumber: string | null;
+  phoneNumberVerified: boolean;
+  image: string | null;
+  isBlocked: boolean;
+  blockedReason: string | null;
+  createdAt: Date;
+  primaryRole: string | null;
+}
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -61,7 +84,7 @@ export class AuthUsersRepository extends BaseRepository {
       .innerJoin(
         schema.userAuthProvider,
         and(
-          eq(schema.userAuthProvider.userId, schema.users.id),
+          eq(schema.userAuthProvider.userFk, schema.users.id),
           eq(schema.userAuthProvider.providerId, 'email'),
         ),
       )
@@ -82,7 +105,6 @@ export class AuthUsersRepository extends BaseRepository {
       .set({
         failedLoginAttempts: 0,
         accountLockedUntil: null,
-        lastActiveAt: new Date(),
         lastLoginAt: new Date(),
         loginCount: sql`${schema.users.loginCount} + 1`,
       })
@@ -264,29 +286,29 @@ export class AuthUsersRepository extends BaseRepository {
   }
 
   /**
-   * Update lastActiveAt for a user. Called by AuthGuard on every authenticated request,
-   * throttled externally (once per 5 minutes) to limit write frequency.
-   */
-  async touchLastActiveAt(userId: number): Promise<void> {
-    await this.db
-      .update(schema.users)
-      .set({ lastActiveAt: new Date() })
-      .where(eq(schema.users.id, userId));
-  }
-
-  /**
-   * Fetch only email + guuid for a user by ID.
-   * Used for JWT signing — avoids loading full user row.
+   * Fetch the minimal user fields required to build an auth response envelope.
+   * Used by token rotation (refresh) and session creation flows.
    */
   async findEmailAndGuuid(
     userId: number,
-  ): Promise<{ email: string | null; guuid: string; iamUserId: string; defaultStoreFk: number | null } | null> {
+  ): Promise<{
+    email: string | null;
+    guuid: string;
+    iamUserId: string;
+    defaultStoreFk: number | null;
+    firstName: string | null;
+    lastName: string | null;
+    phoneNumber: string | null;
+  } | null> {
     const [user] = await this.db
       .select({
         email: schema.users.email,
         guuid: schema.users.guuid,
         iamUserId: schema.users.iamUserId,
         defaultStoreFk: schema.users.defaultStoreFk,
+        firstName: schema.users.firstName,
+        lastName: schema.users.lastName,
+        phoneNumber: schema.users.phoneNumber,
       })
       .from(schema.users)
       .where(
@@ -347,7 +369,7 @@ export class AuthUsersRepository extends BaseRepository {
   }
 
   /**
-   * Increment loginCount and set lastLoginAt + lastActiveAt atomically.
+   * Increment loginCount and set lastLoginAt atomically.
    * Called from OTP and OAuth paths that don't go through login().
    */
   async recordSuccessfulLogin(userId: number): Promise<void> {
@@ -356,7 +378,6 @@ export class AuthUsersRepository extends BaseRepository {
       .set({
         loginCount: sql`${schema.users.loginCount} + 1`,
         lastLoginAt: new Date(),
-        lastActiveAt: new Date(),
       })
       .where(eq(schema.users.id, userId));
   }
@@ -365,31 +386,26 @@ export class AuthUsersRepository extends BaseRepository {
    * Get the permissions version string for a user.
    * Used for mobile offline sync delta calculation.
    */
-  async getPermissionsVersion(userId: number): Promise<string> {
+  async getPermissionsVersion(userId: number): Promise<number> {
     const [user] = await this.db
       .select({ permissionsVersion: schema.users.permissionsVersion })
       .from(schema.users)
       .where(eq(schema.users.id, userId))
       .limit(1);
 
-    return user?.permissionsVersion ?? 'v1';
+    return user?.permissionsVersion ?? 1;
   }
 
-  /**
-   * Increment the permissions version for a user atomically.
-   * Called when roles or permissions change.
-   * Uses SQL-level SUBSTRING + CAST to avoid read-compute-write races.
-   */
-  async incrementPermissionsVersion(userId: number): Promise<string> {
+  async incrementPermissionsVersion(userId: number): Promise<number> {
     const [updated] = await this.db
       .update(schema.users)
       .set({
-        permissionsVersion: sql`'v' || (COALESCE(CAST(SUBSTRING(${schema.users.permissionsVersion} FROM 2) AS INTEGER), 0) + 1)`,
+        permissionsVersion: sql`${schema.users.permissionsVersion} + 1`,
       })
       .where(eq(schema.users.id, userId))
       .returning({ permissionsVersion: schema.users.permissionsVersion });
 
-    return updated?.permissionsVersion ?? 'v1';
+    return updated?.permissionsVersion ?? 1;
   }
 
   /**
@@ -471,7 +487,7 @@ export class AuthUsersRepository extends BaseRepository {
         // Step 2: Create auth provider (only if provider data supplied)
         if (authProviderData) {
           await tx.insert(schema.userAuthProvider).values({
-            userId: created.id,
+            userFk: created.id,
             providerId: authProviderData.providerId,
             accountId: authProviderData.accountId,
             password: authProviderData.password,
@@ -494,5 +510,115 @@ export class AuthUsersRepository extends BaseRepository {
       }
       throw err;
     }
+  }
+
+  // ─── Admin user-management queries ───────────────────────────────────────────
+
+  private getUserOrderColumn(sortBy: string = 'createdAt'): AnyColumn {
+    switch (sortBy) {
+      case 'firstName': return schema.users.firstName;
+      case 'email':     return schema.users.email;
+      default:          return schema.users.createdAt;
+    }
+  }
+
+  /** Fetch a single user by iamUserId for the admin/self-service profile endpoint. */
+  async findAdminUserByIamUserId(iamUserId: string): Promise<AdminUserRow | null> {
+    const [row] = await this.db
+      .select({
+        guuid:               schema.users.guuid,
+        iamUserId:           schema.users.iamUserId,
+        firstName:           schema.users.firstName,
+        lastName:            schema.users.lastName,
+        email:               schema.users.email,
+        emailVerified:       schema.users.emailVerified,
+        phoneNumber:         schema.users.phoneNumber,
+        phoneNumberVerified: schema.users.phoneNumberVerified,
+        image:               schema.users.image,
+        isBlocked:           schema.users.isBlocked,
+        blockedReason:       schema.users.blockedReason,
+        createdAt:           schema.users.createdAt,
+        primaryRole:         schema.roles.code,
+      })
+      .from(schema.users)
+      .leftJoin(
+        userRoleMapping,
+        and(
+          eq(userRoleMapping.userFk, schema.users.id),
+          eq(userRoleMapping.isPrimary, true),
+          eq(userRoleMapping.isActive, true),
+          isNull(userRoleMapping.deletedAt),
+        ),
+      )
+      .leftJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
+      .where(and(eq(schema.users.iamUserId, iamUserId), isNull(schema.users.deletedAt)))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  /** Paginated admin list of users with optional search, sort, and active filter. */
+  async findAdminUserPage(opts: {
+    page:      number;
+    pageSize:  number;
+    search?:   string;
+    sortBy?:   string;
+    sortOrder?: string;
+    isActive?: boolean;
+  }): Promise<{ rows: AdminUserRow[]; total: number }> {
+    const { page, pageSize, search, sortBy = 'createdAt', sortOrder = 'desc', isActive } = opts;
+    const offset = AuthUsersRepository.toOffset(page, pageSize);
+
+    const searchFilter = or(
+      ilikeAny(search, schema.users.firstName, schema.users.lastName, schema.users.email, schema.users.phoneNumber),
+      ilikeFullName(search, schema.users.firstName, schema.users.lastName),
+    );
+
+    const where = and(
+      isNull(schema.users.deletedAt),
+      isActive !== undefined ? eq(schema.users.isActive, isActive) : undefined,
+      searchFilter,
+    );
+
+    return this.paginate(
+      this.db
+        .select({
+          guuid:               schema.users.guuid,
+          iamUserId:           schema.users.iamUserId,
+          firstName:           schema.users.firstName,
+          lastName:            schema.users.lastName,
+          email:               schema.users.email,
+          emailVerified:       schema.users.emailVerified,
+          phoneNumber:         schema.users.phoneNumber,
+          phoneNumberVerified: schema.users.phoneNumberVerified,
+          image:               schema.users.image,
+          isBlocked:           schema.users.isBlocked,
+          blockedReason:       schema.users.blockedReason,
+          createdAt:           schema.users.createdAt,
+          primaryRole:         schema.roles.code,
+        })
+        .from(schema.users)
+        .leftJoin(
+          userRoleMapping,
+          and(
+            eq(userRoleMapping.userFk, schema.users.id),
+            eq(userRoleMapping.isPrimary, true),
+            eq(userRoleMapping.isActive, true),
+            isNull(userRoleMapping.deletedAt),
+          ),
+        )
+        .leftJoin(schema.roles, eq(userRoleMapping.roleFk, schema.roles.id))
+        .where(where)
+        .orderBy(
+          sortOrder === 'desc'
+            ? desc(this.getUserOrderColumn(sortBy))
+            : asc(this.getUserOrderColumn(sortBy)),
+        )
+        .limit(pageSize)
+        .offset(offset),
+      () => this.db.select({ total: count() }).from(schema.users).where(where),
+      page,
+      pageSize,
+    );
   }
 }

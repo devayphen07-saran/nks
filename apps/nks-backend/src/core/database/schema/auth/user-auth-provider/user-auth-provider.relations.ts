@@ -8,7 +8,7 @@ export const userAuthProviderRelations = relations(
   userAuthProvider,
   ({ one }) => ({
     user: one(users, {
-      fields: [userAuthProvider.userId], // user_fk → users.guuid
+      fields: [userAuthProvider.userFk], // user_fk → users.guuid
       references: [users.guuid],
     }),
   }),

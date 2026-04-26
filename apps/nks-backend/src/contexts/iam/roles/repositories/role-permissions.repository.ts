@@ -6,13 +6,53 @@ import * as schema from '../../../../core/database/schema';
 import { entityType } from '../../../../core/database/schema/lookups/entity-type/entity-type.table';
 import { permissionAction } from '../../../../core/database/schema/rbac/permission-action/permission-action.table';
 import { rolePermissions } from '../../../../core/database/schema/rbac/role-permissions/role-permissions.table';
-import { eq, and, inArray, isNull, sql, or, gt } from 'drizzle-orm';
+import { eq, and, inArray, isNull, sql, or, gt, asc } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type {
   DynamicEntityPermissions,
-  DynamicEntityPermissionEntry,
   RoleEntityPermissions,
 } from '../dto/role-response.dto';
 import type { NewRolePermission } from '../../../../core/database/schema/rbac/role-permissions/role-permissions.table';
+
+// ─── Row types ────────────────────────────────────────────────────────────────
+
+export interface EntityTypeRow {
+  id: number;
+  code: string;
+  label: string;
+  description: string | null;
+  parentCode: string | null;
+  defaultAllow: boolean;
+  sortOrder: number | null;
+  isHidden: boolean;
+}
+
+/** Minimal route row used to build navigation trees. Mirrors PartialRoute in the routes context. */
+export type RouteRow = {
+  id: number;
+  guuid: string;
+  routePath: string;
+  routeName: string;
+  description: string | null;
+  iconName: string | null;
+  routeType: 'sidebar' | 'tab' | 'screen' | 'modal';
+  routeScope: 'admin' | 'store';
+  isPublic: boolean;
+  isHidden: boolean;
+  enable: boolean;
+  parentRouteFk: number | null;
+  fullPath: string;
+  sortOrder: number | null;
+  entityTypeFk: number | null;
+  defaultAction: string | null;
+  defaultAllow: boolean | null;
+  hasAccess?: boolean;
+  canView?: boolean;
+  canCreate?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canExport?: boolean;
+};
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -22,13 +62,16 @@ export interface BulkUpsertEntry {
   canCreate?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
+  canExport?: boolean;
+  canApprove?: boolean;
+  canArchive?: boolean;
   deny?: boolean;
 }
 
 // ─── Repository ──────────────────────────────────────────────────────────────
 
 /**
- * RolePermissionsRepository
+ * PermissionsRepository
  *
  * Read/write layer for the `role_permissions` table — the row-per-action
  * permission store. One row per (role, entity, action) triple.
@@ -39,8 +82,8 @@ export interface BulkUpsertEntry {
  *   after inserting new rows into `permission_action` at runtime.
  */
 @Injectable()
-export class RolePermissionsRepository extends BaseRepository implements OnModuleInit {
-  private readonly logger = new Logger(RolePermissionsRepository.name);
+export class PermissionsRepository extends BaseRepository implements OnModuleInit {
+  private readonly logger = new Logger(PermissionsRepository.name);
 
   // Uppercase action code ('VIEW', 'CREATE', …) → PK in permission_action.
   private actionCodeToId = new Map<string, number>();
@@ -141,10 +184,13 @@ export class RolePermissionsRepository extends BaseRepository implements OnModul
 
     // Expand each entry into one row per system action.
     const ACTION_FIELDS: Array<[string, keyof BulkUpsertEntry]> = [
-      ['VIEW',   'canView'],
-      ['CREATE', 'canCreate'],
-      ['EDIT',   'canEdit'],
-      ['DELETE', 'canDelete'],
+      ['VIEW',    'canView'],
+      ['CREATE',  'canCreate'],
+      ['EDIT',    'canEdit'],
+      ['DELETE',  'canDelete'],
+      ['EXPORT',  'canExport'],
+      ['APPROVE', 'canApprove'],
+      ['ARCHIVE', 'canArchive'],
     ];
 
     const rows: NewRolePermission[] = [];
@@ -285,8 +331,60 @@ export class RolePermissionsRepository extends BaseRepository implements OnModul
     return this.mergePermissions(rows);
   }
 
+  // ─── Entity Hierarchy ────────────────────────────────────────────────────────
+
+  /**
+   * Fetch all active entity types with their parent code resolved.
+   * One self-join — parent alias is LEFT JOIN so root nodes (NULL parent) are included.
+   * Excludes hidden entities so the UI editor only shows user-facing entities.
+   */
+  async getEntityTypeHierarchy(): Promise<EntityTypeRow[]> {
+    const parent = alias(entityType, 'parent');
+
+    const rows = await this.db
+      .select({
+        id:          entityType.id,
+        code:        entityType.code,
+        label:       entityType.label,
+        description: entityType.description,
+        parentCode:  parent.code,
+        defaultAllow: entityType.defaultAllow,
+        sortOrder:   entityType.sortOrder,
+        isHidden:    entityType.isHidden,
+      })
+      .from(entityType)
+      .leftJoin(parent, eq(entityType.parentEntityTypeFk, parent.id))
+      .where(
+        and(
+          eq(entityType.isActive, true),
+          isNull(entityType.deletedAt),
+          eq(entityType.isHidden, false),
+        ),
+      );
+
+    return rows.map((r) => ({
+      id:          r.id,
+      code:        r.code,
+      label:       r.label,
+      description: r.description,
+      parentCode:  r.parentCode ?? null,
+      defaultAllow: r.defaultAllow,
+      sortOrder:   r.sortOrder,
+      isHidden:    r.isHidden,
+    }));
+  }
+
   // ─── Private helpers ────────────────────────────────────────────────────────
 
+  /**
+   * DENY > ALLOW — two explicit passes so the result is order-invariant:
+   *
+   * Pass 1: scan all rows to collect entities where ANY role has deny=true.
+   * Pass 2: build action maps only for non-denied entities; OR across roles.
+   *
+   * A single-pass approach that clears actions when a deny row arrives works
+   * but is harder to reason about (implicit order dependency in appearance).
+   */
   private mergePermissions(
     rows: Array<{
       entityCode: string;
@@ -295,23 +393,23 @@ export class RolePermissionsRepository extends BaseRepository implements OnModul
       deny: boolean;
     }>,
   ): DynamicEntityPermissions {
-    const result: DynamicEntityPermissions = {};
-
+    // Pass 1: entity-level deny wins regardless of which role or row order
+    const deniedEntities = new Set<string>();
     for (const row of rows) {
-      if (!result[row.entityCode]) {
-        result[row.entityCode] = { actions: {}, deny: false };
-      }
-      const entry: DynamicEntityPermissionEntry = result[row.entityCode];
-
-      if (row.deny) {
-        entry.deny = true;
-        entry.actions = {};
-      } else if (!entry.deny) {
-        entry.actions[row.actionCode] =
-          (entry.actions[row.actionCode] ?? false) || row.allowed;
-      }
+      if (row.deny) deniedEntities.add(row.entityCode);
     }
 
+    // Pass 2: grant actions for non-denied entities; OR across all roles
+    const result: DynamicEntityPermissions = {};
+    for (const row of rows) {
+      const isDenied = deniedEntities.has(row.entityCode);
+      if (!result[row.entityCode]) {
+        result[row.entityCode] = { actions: {}, deny: isDenied };
+      }
+      if (isDenied) continue;
+      result[row.entityCode].actions[row.actionCode] =
+        (result[row.entityCode].actions[row.actionCode] ?? false) || row.allowed;
+    }
     return result;
   }
 
@@ -359,19 +457,40 @@ export class RolePermissionsRepository extends BaseRepository implements OnModul
   }
 
   /**
-   * Batched merged permissions across multiple stores.
-   * Resolves all role assignments in one query then merges in a second query —
-   * N+1 safe regardless of store count.
+   * Per-store permission map for a user — one round-trip regardless of store count.
+   *
+   * Isolation: DENY in Store B never bleeds into Store A's permission set because
+   * each store's roles are merged independently. A merged snapshot would let a
+   * deny in one store suppress an allow the user legitimately holds in another.
+   *
+   * Returns a Map keyed by store guuid so callers never have to resolve IDs.
    */
-  async getUserEntityPermissionsForAllStores(
+  async getUserEntityPermissionsPerStore(
     userId: number,
     storeIds: number[],
-  ): Promise<RoleEntityPermissions> {
+  ): Promise<Record<string, RoleEntityPermissions>> {
     if (storeIds.length === 0) return {};
 
-    const storeRoles = await this.db
-      .select({ roleId: schema.userRoleMapping.roleFk })
+    const rows = await this.db
+      .select({
+        storeGuuid: schema.store.guuid,
+        entityCode: entityType.code,
+        actionCode: permissionAction.code,
+        allowed: rolePermissions.allowed,
+        deny: rolePermissions.deny,
+      })
       .from(schema.userRoleMapping)
+      .innerJoin(schema.store, eq(schema.userRoleMapping.storeFk, schema.store.id))
+      .innerJoin(
+        rolePermissions,
+        and(
+          eq(rolePermissions.roleFk, schema.userRoleMapping.roleFk),
+          eq(rolePermissions.isActive, true),
+          isNull(rolePermissions.deletedAt),
+        ),
+      )
+      .innerJoin(entityType, eq(rolePermissions.entityTypeFk, entityType.id))
+      .innerJoin(permissionAction, eq(rolePermissions.actionFk, permissionAction.id))
       .where(
         and(
           eq(schema.userRoleMapping.userFk, userId),
@@ -385,11 +504,114 @@ export class RolePermissionsRepository extends BaseRepository implements OnModul
         ),
       );
 
-    if (storeRoles.length === 0) return {};
+    // Partition rows by store then merge with DENY > ALLOW per store
+    const storeToRows: Record<string, typeof rows> = {};
+    for (const row of rows) {
+      if (!row.storeGuuid) continue;
+      (storeToRows[row.storeGuuid] ??= []).push(row);
+    }
 
-    const roleIds = [...new Set(storeRoles.map((r) => r.roleId))];
-    const dynamic = await this.getEntityPermissionsForRoleIds(roleIds);
-    return this.dynamicToLegacy(dynamic);
+    const result: Record<string, RoleEntityPermissions> = {};
+    for (const [storeGuuid, storeRows] of Object.entries(storeToRows)) {
+      result[storeGuuid] = this.dynamicToLegacy(this.mergePermissions(storeRows));
+    }
+    return result;
+  }
+
+  // ─── Route queries (merged from RoutesRepository) ────────────────────────────
+
+  /** Minimal route row returned by route queries — used to build navigation trees. */
+  // (Kept local to avoid importing from the routes bounded context.)
+
+  async findStoreByGuuid(guuid: string): Promise<{ id: number } | null> {
+    const [store] = await this.db
+      .select({ id: schema.store.id })
+      .from(schema.store)
+      .where(and(eq(schema.store.guuid, guuid), eq(schema.store.isActive, true), isNull(schema.store.deletedAt)))
+      .limit(1);
+    return store ?? null;
+  }
+
+  async findAdminRoutesByRoleIds(roleIds: number[]): Promise<RouteRow[]> {
+    return this.findRoutesByScope(roleIds, 'admin');
+  }
+
+  async findCustomRoleRoutes(roleIds: number[]): Promise<RouteRow[]> {
+    return this.findRoutesByScope(roleIds, 'store');
+  }
+
+  /**
+   * Shared query for admin and store route trees.
+   * Uses GROUP BY + bool_or() so multiple roles mapping to the same route
+   * merge flags with "most-permissive wins" semantics.
+   */
+  private findRoutesByScope(roleIds: number[], scope: 'admin' | 'store'): Promise<RouteRow[]> {
+    return this.db
+      .select({
+        id:           schema.routes.id,
+        guuid:        schema.routes.guuid,
+        routePath:    schema.routes.routePath,
+        routeName:    schema.routes.routeName,
+        description:  schema.routes.description,
+        iconName:     schema.routes.iconName,
+        routeType:    schema.routes.routeType,
+        routeScope:   schema.routes.routeScope,
+        isPublic:     schema.routes.isPublic,
+        isHidden:     schema.routes.isHidden,
+        enable:       schema.routes.enable,
+        parentRouteFk: schema.routes.parentRouteFk,
+        fullPath:     schema.routes.fullPath,
+        sortOrder:    schema.routes.sortOrder,
+        entityTypeFk: schema.routes.entityTypeFk,
+        defaultAction: schema.routes.defaultAction,
+        defaultAllow: entityType.defaultAllow,
+      })
+      .from(schema.routes)
+      .innerJoin(
+        schema.roleRouteMapping,
+        and(
+          eq(schema.roleRouteMapping.routeFk, schema.routes.id),
+          inArray(schema.roleRouteMapping.roleFk, roleIds),
+          eq(schema.roleRouteMapping.allow, true),
+        ),
+      )
+      .leftJoin(entityType, eq(schema.routes.entityTypeFk, entityType.id))
+      .where(and(
+        isNull(schema.routes.deletedAt),
+        eq(schema.routes.routeScope, scope),
+        eq(schema.routes.enable, true),
+        eq(schema.routes.isHidden, false),
+      ))
+      .groupBy(
+        schema.routes.id, schema.routes.guuid, schema.routes.routePath,
+        schema.routes.routeName, schema.routes.description, schema.routes.iconName,
+        schema.routes.routeType, schema.routes.routeScope, schema.routes.isPublic,
+        schema.routes.isHidden, schema.routes.enable, schema.routes.parentRouteFk,
+        schema.routes.fullPath, schema.routes.sortOrder, schema.routes.entityTypeFk,
+        schema.routes.defaultAction, entityType.defaultAllow,
+      )
+      .orderBy(asc(schema.routes.sortOrder), asc(schema.routes.id)) as Promise<RouteRow[]>;
+  }
+
+  async findUserEntityPermissions(roleIds: number[]): Promise<Map<number, Set<string>>> {
+    if (roleIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({ entityTypeFk: rolePermissions.entityTypeFk, actionCode: permissionAction.code })
+      .from(rolePermissions)
+      .innerJoin(permissionAction, eq(permissionAction.id, rolePermissions.actionFk))
+      .where(and(
+        inArray(rolePermissions.roleFk, roleIds),
+        eq(rolePermissions.allowed, true),
+        eq(rolePermissions.deny, false),
+        isNull(rolePermissions.deletedAt),
+      ));
+    const map = new Map<number, Set<string>>();
+    for (const { entityTypeFk, actionCode } of rows) {
+      let actions = map.get(entityTypeFk);
+      if (!actions) { actions = new Set(); map.set(entityTypeFk, actions); }
+      actions.add(actionCode.toUpperCase());
+    }
+    return map;
   }
 
   // ─── Private helpers ────────────────────────────────────────────────────────
@@ -399,11 +621,14 @@ export class RolePermissionsRepository extends BaseRepository implements OnModul
     const result: RoleEntityPermissions = {};
     for (const [code, entry] of Object.entries(dynamic)) {
       result[code] = {
-        canView:   entry.actions['VIEW']   === true,
-        canCreate: entry.actions['CREATE'] === true,
-        canEdit:   entry.actions['EDIT']   === true,
-        canDelete: entry.actions['DELETE'] === true,
-        deny:      entry.deny,
+        canView:    entry.actions['VIEW']    === true,
+        canCreate:  entry.actions['CREATE']  === true,
+        canEdit:    entry.actions['EDIT']    === true,
+        canDelete:  entry.actions['DELETE']  === true,
+        canExport:  entry.actions['EXPORT']  === true,
+        canApprove: entry.actions['APPROVE'] === true,
+        canArchive: entry.actions['ARCHIVE'] === true,
+        deny:       entry.deny,
       };
     }
     return result;

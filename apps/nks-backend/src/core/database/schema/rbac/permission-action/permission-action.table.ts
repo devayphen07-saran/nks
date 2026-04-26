@@ -10,9 +10,7 @@ import { users } from '../../auth/users';
  * marked isSystem = true — they cannot be removed via the admin UI.
  *
  * New actions (EXPORT, APPROVE, ARCHIVE, PUBLISH, …) require only an INSERT
- * into this table, no schema migration. The old role_entity_permission columns
- * (can_view, can_create, …) are replaced by rows in role_permissions that
- * reference this table via action_fk.
+ * into this table, no schema migration needed.
  *
  * Code convention: SCREAMING_SNAKE_CASE ('VIEW', 'CREATE', 'EXPORT', …).
  * Callers use the lowercase PermissionActions constants from

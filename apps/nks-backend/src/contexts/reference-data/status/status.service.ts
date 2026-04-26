@@ -8,6 +8,7 @@ import type { PaginatedResult } from '../../../common/utils/paginated-result';
 import type {
   CreateStatusDto,
   UpdateStatusDto,
+  GetAllStatusesQueryDto,
   StatusResponse,
 } from './dto/status.dto';
 import type { Status } from '../../../core/database/schema/entity-system/status/status.table';
@@ -24,7 +25,7 @@ export class StatusService {
     return rows.map(StatusMapper.buildStatusDto);
   }
 
-  async listStatuses(opts: { page: number; pageSize: number; search?: string }): Promise<PaginatedResult<StatusResponse>> {
+  async listStatuses(opts: GetAllStatusesQueryDto): Promise<PaginatedResult<StatusResponse>> {
     const { rows, total } = await this.repository.findPage(opts);
     return paginated({ items: rows.map(StatusMapper.buildStatusDto), page: opts.page, pageSize: opts.pageSize, total });
   }
@@ -54,12 +55,10 @@ export class StatusService {
   }
 
   async updateStatus(
-    guuid: string,
+    existing: Status,
     dto: UpdateStatusDto,
     modifiedBy: number,
   ): Promise<StatusResponse> {
-    const existing = await this.repository.findByGuuid(guuid);
-    if (!existing) throw new NotFoundException(errPayload(ErrorCode.STA_STATUS_NOT_FOUND));
     if (existing.isSystem) throw new ForbiddenException(errPayload(ErrorCode.STA_SYSTEM_IMMUTABLE));
 
     const row = await this.repository.update(existing.id, {
@@ -80,9 +79,7 @@ export class StatusService {
     return response;
   }
 
-  async deleteStatus(guuid: string, deletedBy: number): Promise<void> {
-    const existing = await this.repository.findByGuuid(guuid);
-    if (!existing) throw new NotFoundException(errPayload(ErrorCode.STA_STATUS_NOT_FOUND));
+  async deleteStatus(existing: Status, deletedBy: number): Promise<void> {
     if (existing.isSystem) throw new ForbiddenException(errPayload(ErrorCode.STA_SYSTEM_IMMUTABLE));
 
     await this.repository.softDelete(existing.id, deletedBy);

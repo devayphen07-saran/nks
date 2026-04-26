@@ -25,13 +25,17 @@ export class RoleMutationService {
    * Assign a system role (by code) to a user inside the caller's transaction.
    * Idempotent — silently no-ops if the assignment already exists.
    * Returns false when the role code does not resolve to a system role row.
+   *
+   * Pass isPrimary=false when assigning a secondary platform role so the
+   * partial unique index on (user_fk) WHERE is_primary=true is not violated.
    */
   assignRoleWithinTransaction(
     tx: Db,
     userId: number,
     roleCode: string,
+    isPrimary: boolean = true,
   ): Promise<boolean> {
-    return this.rolesRepository.assignRoleWithinTransaction(tx, userId, roleCode);
+    return this.rolesRepository.assignRoleWithinTransaction(tx, userId, roleCode, isPrimary);
   }
 
   /**

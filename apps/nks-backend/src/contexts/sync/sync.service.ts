@@ -192,13 +192,24 @@ export class SyncService {
           const idempotencyKey = `${op.clientId}-${op.id}`;
           const requestHash = this.hashOperation(op);
 
-          const existingHash = await this.syncRepository.findProcessedEntry(
+          // Atomic claim: INSERT ... ON CONFLICT DO NOTHING RETURNING.
+          // Only one concurrent transaction can claim the key — the other blocks
+          // on PostgreSQL's row lock, then detects the conflict via ON CONFLICT
+          // instead of crashing with a PK violation.
+          const claimed = await this.syncRepository.claimIdempotencyKey(
             idempotencyKey,
+            requestHash,
             tx,
           );
 
-          if (existingHash !== null) {
-            if (existingHash !== requestHash) {
+          if (!claimed) {
+            // Key already committed by a previous transaction — check hash to
+            // distinguish a legitimate retry from a tampered payload replay.
+            const storedHash = await this.syncRepository.getStoredHash(
+              idempotencyKey,
+              tx,
+            );
+            if (storedHash !== requestHash) {
               this.logger.warn(
                 `Idempotency key ${idempotencyKey} reused with different payload — rejected`,
               );
@@ -209,12 +220,10 @@ export class SyncService {
             continue;
           }
 
+          // Key claimed — run the operation inside the same transaction.
+          // If processOperation throws, the tx rolls back, including the claim,
+          // so the key remains available for a clean retry.
           await this.processOperation(op, userId, activeStoreId, tx);
-          await this.syncRepository.logIdempotencyKey(
-            idempotencyKey,
-            requestHash,
-            tx,
-          );
           processed++;
         }
       });

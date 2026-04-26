@@ -5,10 +5,12 @@ import {
   text,
   date,
   boolean,
+  check,
   timestamp,
   pgEnum,
   index,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { users } from '../../auth/users';
 import { store } from '../../store/store';
 import { baseEntity, auditFields } from '../../base.entity';
@@ -65,6 +67,10 @@ export const storeDocuments = pgTable(
     index('store_documents_type_idx').on(table.documentType),
     // Index for expiry date tracking (upcoming renewals)
     index('store_documents_expiry_idx').on(table.expiryDate),
+    check(
+      'store_documents_verified_requires_url',
+      sql`NOT (is_verified = true AND document_url IS NULL)`,
+    ),
   ],
 );
 

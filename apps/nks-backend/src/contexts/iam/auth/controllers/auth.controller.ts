@@ -10,7 +10,6 @@ import {
   Query,
   HttpCode,
   HttpStatus,
-  UseGuards,
   UnauthorizedException,
   ParseUUIDPipe,
 } from '@nestjs/common';
@@ -22,7 +21,7 @@ import { SessionService } from '../services/session/session.service';
 import { PasswordAuthService } from '../services/flows/password-auth.service';
 import { TokenLifecycleService } from '../services/token/token-lifecycle.service';
 import { OnboardingService } from '../services/flows/onboarding.service';
-import { PermissionsService, type PermissionsSnapshot } from '../services/permissions/permissions.service';
+import { PermissionsService, type PermissionsSnapshot, type PermissionsSnapshotResponse } from '../services/permissions/permissions.service';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthControllerHelpers } from '../../../../common/utils/auth-helpers';
 import { extractCookieValue } from '../../../../common/utils/cookie.utils';
@@ -37,11 +36,11 @@ import {
 } from '../dto';
 import { OnboardingCompleteDto, OnboardingCompleteResponseDto } from '../dto/onboarding.dto';
 import { SessionListDto } from '../dto/permissions.dto';
-import { RateLimitingGuard } from '../../../../common/guards/rate-limiting.guard';
 import { Public } from '../../../../common/decorators/public.decorator';
 import { CurrentUser } from '../../../../common/decorators/current-user.decorator';
 import { RateLimit } from '../../../../common/decorators/rate-limit.decorator';
 import { NoEntityPermissionRequired } from '../../../../common/decorators/no-entity-permission-required.decorator';
+import { SkipTransform } from '../../../../common/decorators/skip-transform.decorator';
 import { JWTConfigService } from '../../../../config/jwt.config';
 import type { SessionUser } from '../interfaces/session-user.interface';
 
@@ -62,7 +61,6 @@ export class AuthController {
   @Post('login')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @UseGuards(RateLimitingGuard)
   @RateLimit(10)
   @ResponseMessage('Login successful')
   @ApiOperation({ summary: 'Login with email + password' })
@@ -74,13 +72,12 @@ export class AuthController {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
     const result = await this.passwordAuthService.login(dto, deviceInfo);
     AuthControllerHelpers.applySessionCookie(res, result);
-    return result;
+    return AuthControllerHelpers.forClient(result, deviceInfo.deviceType);
   }
 
   @Post('register')
   @Public()
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(RateLimitingGuard)
   @RateLimit(10)
   @ResponseMessage('Registration successful')
   @ApiOperation({
@@ -94,13 +91,12 @@ export class AuthController {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
     const result = await this.passwordAuthService.register(dto, deviceInfo);
     AuthControllerHelpers.applySessionCookie(res, result);
-    return result;
+    return AuthControllerHelpers.forClient(result, deviceInfo.deviceType);
   }
 
   @Post('refresh-token')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @UseGuards(RateLimitingGuard)
   @RateLimit(30)
   @ResponseMessage('Token refreshed successfully')
   @ApiOperation({
@@ -112,16 +108,7 @@ export class AuthController {
     @Body() dto: RefreshTokenDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<{
-    sessionId: string;
-    sessionToken: string;
-    jwtToken: string;
-    expiresAt: string;
-    refreshToken: string;
-    refreshExpiresAt: string;
-    defaultStore: { guuid: string } | null;
-    offlineToken: string;
-  }> {
+  ): Promise<AuthResponseEnvelope & { permissionsChanged: boolean }> {
     const cookieToken = this.parseSessionCookie(req);
     const providedRefreshToken = dto.refreshToken ?? cookieToken;
 
@@ -137,8 +124,10 @@ export class AuthController {
       deviceId,
     );
 
-    AuthControllerHelpers.setSessionCookie(res, result.sessionToken);
-    return result;
+    const deviceType =
+      (req.headers as Record<string, string | undefined>)['x-device-type'];
+    AuthControllerHelpers.applySessionCookie(res, result);
+    return AuthControllerHelpers.forClient(result, deviceType);
   }
 
   @Get('me')
@@ -185,16 +174,17 @@ export class AuthController {
   @Get('mobile-jwks')
   @Public()
   @HttpCode(HttpStatus.OK)
+  @SkipTransform()
   @ApiOperation({
     summary: 'Get RS256 JWKS for mobile offline verification',
     description:
       'Returns the RS256 public key in JWKS format for verifying access and offline JWTs on device.',
   })
-  getMobileJwks(@Res() res: Response): void {
+  getMobileJwks(@Res({ passthrough: true }) res: Response): object {
     const jwks = this.jwtConfigService.getPublicKeyAsJWKS();
     res.set('Cache-Control', 'public, max-age=3600');
     res.set('Content-Type', 'application/jwk-set+json');
-    res.json(jwks);
+    return jwks;
   }
 
   @Get('sessions')
@@ -244,7 +234,6 @@ export class AuthController {
 
   @Get('session-status')
   @Public()
-  @UseGuards(RateLimitingGuard)
   @RateLimit(5)
   @HttpCode(HttpStatus.OK)
   @ResponseMessage('Session status checked')
@@ -294,7 +283,7 @@ export class AuthController {
   })
   async getPermissionsSnapshot(
     @CurrentUser() user: SessionUser,
-  ): Promise<PermissionsSnapshot> {
+  ): Promise<PermissionsSnapshotResponse> {
     return this.permissionsService.buildPermissionsSnapshot(user.userId);
   }
 
@@ -310,7 +299,7 @@ export class AuthController {
   async getPermissionsDelta(
     @CurrentUser() user: SessionUser,
     @Query('version') sinceVersion: string,
-  ): Promise<{ version: string; added: PermissionsSnapshot; removed: PermissionsSnapshot; modified: PermissionsSnapshot }> {
+  ): Promise<{ version: number; added: PermissionsSnapshot; removed: PermissionsSnapshot; modified: PermissionsSnapshot }> {
     return this.permissionsService.calculateDelta(user.userId, sinceVersion ?? '');
   }
 

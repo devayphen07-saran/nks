@@ -81,10 +81,7 @@ export const users = pgTable(
     // Consecutive failed logins since the last successful one.
     // Reset to 0 on success; used with isBlocked for brute-force lockout.
     failedLoginAttempts: integer('failed_login_attempts').notNull().default(0),
-    // Denormalized for fast "last seen" queries without joining user_session.
-    // Updated on every successful login / token refresh.
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
-    lastActiveAt: timestamp('last_active_at', { withTimezone: true }),
 
     // Default store — user's preferred store, auto-populated into session on login.
     // NULL for new users with no store. Set on first store creation.
@@ -99,13 +96,12 @@ export const users = pgTable(
       withTimezone: true,
     }),
 
-    // RBAC: Permissions version for cache-busting & delta sync
-    // Monotonic version (v1, v2, ...) incremented on any role/permission change.
-    // Used to detect permission changes without full re-download.
-    // Mobile apps check this version on reconnect to fetch delta.
-    permissionsVersion: varchar('permissions_version', { length: 20 })
-      .notNull()
-      .default('v1'),
+    // Monotonic counter incremented on any role/permission change.
+    // Mobile apps send their last-known version; the server returns only the delta.
+    permissionsVersion: integer('permissions_version').notNull().default(1),
+
+    // Security flag: lives here (not user_preferences) so auth reads it without a join.
+    twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
 
     ...auditFields(selfRef),
   },

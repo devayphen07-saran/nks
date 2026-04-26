@@ -46,6 +46,10 @@ import {
   seedEntityTypes,
   seedPermissionActions,
   seedSuperAdminPermissions,
+  seedStoreOwnerPermissions,
+  // Entity System
+  seedBusinessStatuses,
+  seedEntityStatusMappings,
 } from './seeds';
 
 const INIT = process.env.INIT === 'true';
@@ -141,9 +145,10 @@ const seeds = [
   { name: 'volumes', fn: seedVolumes },
   { name: 'entity', fn: seedEntities },
   { name: 'system_roles', fn: seedSystemRoles },
-  { name: 'entity_type',            fn: seedEntityTypes },          // ← Must run before super_admin_permissions
-  { name: 'permission_actions',     fn: seedPermissionActions },     // ← Must run before super_admin_permissions
-  { name: 'super_admin_permissions', fn: seedSuperAdminPermissions }, // ← Depends on system_roles + entity_type + permission_actions
+  { name: 'entity_type',             fn: seedEntityTypes },             // ← Must run before permissions
+  { name: 'permission_actions',      fn: seedPermissionActions },        // ← Must run before permissions
+  { name: 'super_admin_permissions', fn: seedSuperAdminPermissions },    // ← Depends on system_roles + entity_type + permission_actions
+  { name: 'store_owner_permissions', fn: seedStoreOwnerPermissions },    // ← Depends on system_roles + entity_type + permission_actions
   { name: 'routes', fn: seedRoutes },
   { name: 'role_route_mapping', fn: seedRoleRouteMappings },
   // Lookup Tables
@@ -159,9 +164,13 @@ const seeds = [
   { name: 'tax_filing_frequency', fn: seedTaxFilingFrequencies },
   { name: 'plan_type', fn: seedPlanTypes },
   { name: 'tax_line_status', fn: seedTaxLineStatuses },
+  // Statuses (business first so ACTIVE/CANCELED get canonical colors; subscription adds its own codes)
+  { name: 'business_statuses',     fn: seedBusinessStatuses },        // ← Must run before entity_status_mappings
   // Subscription System
   { name: 'currencies', fn: seedCurrencies },
   { name: 'subscription_status', fn: seedSubscriptionStatus },
+  // Entity status mappings — runs after all status seeds
+  { name: 'entity_status_mappings', fn: seedEntityStatusMappings },   // ← Depends on business_statuses + subscription_status
   // Tax Engine (runs after country — tax_agencies references country)
   { name: 'tax_agencies', fn: seedTaxAgencies },
   { name: 'tax_names', fn: seedTaxNames },

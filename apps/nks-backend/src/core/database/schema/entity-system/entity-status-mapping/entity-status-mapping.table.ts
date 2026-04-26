@@ -1,25 +1,23 @@
 import { pgTable, bigint, varchar, boolean, unique, index } from 'drizzle-orm/pg-core';
 import { junctionEntity } from '../../base.entity';
 import { status } from '../../entity-system/status';
+import { entityType } from '../../lookups/entity-type/entity-type.table';
 
 /**
  * entity_status_mapping
  *
  * Defines which statuses are valid for a given entity type.
- * entityCode is a plain string (e.g. 'orders', 'invoices') — consistent
- * with how role_entity_permission.entity_code works in this codebase.
- *
- * Examples:
- *   orders    → DFT, APRV, CMPL, CNL, DECL
- *   invoices  → DFT, APRV, CMPL, EXP
- *   stores    → DFT, APRV, DECL, ARCH
+ * entityCode is a FK to entity_type.code (SCREAMING_SNAKE_CASE, e.g. 'STORE', 'INVOICE').
+ * API callers may pass lowercase — EntityCodeValidator.normalize() uppercases before lookup.
  */
 export const entityStatusMapping = pgTable(
   'entity_status_mapping',
   {
     ...junctionEntity(),
 
-    entityCode: varchar('entity_code', { length: 50 }).notNull(),
+    entityCode: varchar('entity_code', { length: 50 })
+      .notNull()
+      .references(() => entityType.code, { onDelete: 'restrict' }),
 
     statusFk: bigint('status_fk', { mode: 'number' })
       .notNull()

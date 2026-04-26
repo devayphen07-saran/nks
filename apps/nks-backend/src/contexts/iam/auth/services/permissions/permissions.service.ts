@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { RoleQueryService } from '../../../roles/role-query.service';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { PermissionsChangelogRepository } from '../../repositories/permissions-changelog.repository';
-import { AuthMapper, type UserRoleEntry, type PermissionContext } from '../../mapper/auth-mapper';
+import { AuthMapper, type PermissionContext } from '../../mapper/auth-mapper';
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
 
 export interface PermissionsSnapshot {
@@ -12,6 +12,20 @@ export interface PermissionsSnapshot {
     canEdit: boolean;
     canDelete: boolean;
     deny?: boolean;
+  };
+}
+
+export interface PermissionsSnapshotResponse {
+  /** Current permissions version — use as cursor for GET /auth/permissions-delta?version= */
+  version: number;
+  /**
+   * Per-store permission map keyed by store guuid.
+   * Isolated: a deny in Store B does not suppress an allow the user holds in Store A.
+   * The flat merged snapshot (all stores merged) is intentionally removed — it allowed
+   * a deny in one store to silently revoke access the user legitimately holds elsewhere.
+   */
+  storePermissions: {
+    [storeGuuid: string]: PermissionsSnapshot;
   };
 }
 
@@ -41,11 +55,10 @@ export class PermissionsService {
    * It is read from session.activeStoreFk at auth time, not derived here.
    */
   async getUserPermissions(userId: number): Promise<PermissionContext> {
-    const userRoles = await this.roleQuery.findUserRoles(userId);
+    const userRoles = await this.roleQuery.findUserRolesForAuth(userId);
 
     const roleCodes = userRoles.map((r) => r.roleCode);
-    const assignedAt = new Date().toISOString();
-    const roles = AuthMapper.buildRoleEntries(userRoles, undefined, assignedAt);
+    const roles = AuthMapper.buildRoleEntries(userRoles);
 
     return {
       roles,
@@ -76,60 +89,42 @@ export class PermissionsService {
    * IMPORTANT: This is a TRUST optimization, not a SECURITY enforcement.
    * Security is enforced by RBACGuard checking user's activeStoreId (line 80-93 in rbac.guard.ts).
    */
-  async buildPermissionsSnapshot(userId: number): Promise<PermissionsSnapshot> {
-    const storeIds = await this.authUsersRepository.findActiveStoreIds(userId);
+  async buildPermissionsSnapshot(userId: number): Promise<PermissionsSnapshotResponse> {
+    const [storeIds, version] = await Promise.all([
+      this.authUsersRepository.findActiveStoreIds(userId),
+      this.getPermissionsVersion(userId),
+    ]);
 
-    // Single batched query: fetches all role assignments + permissions in 2 DB round-trips
-    return this.roleQuery.getUserEntityPermissionsForAllStores(
-      userId,
-      storeIds,
-    );
+    const storePermissions = await this.roleQuery.getUserEntityPermissionsPerStore(userId, storeIds);
+    return { version, storePermissions };
   }
 
   /**
    * Get current permissions version for a user
    */
-  async getPermissionsVersion(userId: number): Promise<string> {
+  async getPermissionsVersion(userId: number): Promise<number> {
     return this.authUsersRepository.getPermissionsVersion(userId);
   }
 
-  /**
-   * Calculate delta changes between `sinceVersion` and the user's current version.
-   *
-   * Uses the `permissions_changelog` table which is written to whenever a role's
-   * entity permissions change and is fanned-out to all users holding that role.
-   * Multiple changelog entries for the same `entityCode` are collapsed server-side —
-   * only the most recent operation (ADDED | MODIFIED | REMOVED) per entity is returned.
-   *
-   * Early-exit: if `sinceVersion` already matches the current version, all three
-   * buckets are empty and no DB query is needed.
-   *
-   * Malformed `sinceVersion` (e.g. empty string, non-vN format) is treated as v0,
-   * causing the full changelog to be returned — this is the safe fallback.
-   *
-   * @param userId      - The authenticated user requesting the delta
-   * @param sinceVersion - Client's last known version string ("v3", "v12", …)
-   * @returns Bucketed diff: `added`, `removed`, `modified` each keyed by entityCode
-   */
   async calculateDelta(
     userId: number,
     sinceVersion: string,
   ): Promise<{
-    version: string;
+    version: number;
     added: PermissionsSnapshot;
     removed: PermissionsSnapshot;
     modified: PermissionsSnapshot;
   }> {
     const currentVersion = await this.getPermissionsVersion(userId);
+    const sinceVersionNumber = this.parseVersionNumber(sinceVersion);
 
-    if (sinceVersion === currentVersion) {
+    if (sinceVersionNumber === currentVersion) {
       this.logger.debug(`Permissions delta for user ${userId}: already at version ${currentVersion}`);
       return { version: currentVersion, added: {}, removed: {}, modified: {} };
     }
 
-    const sinceVersionNumber = this.parseVersionNumber(sinceVersion);
     this.logger.debug(
-      `Permissions delta for user ${userId}: since=${sinceVersion} (${sinceVersionNumber}), current=${currentVersion}`,
+      `Permissions delta for user ${userId}: since=${sinceVersionNumber}, current=${currentVersion}`,
     );
 
     const changes = await this.changelogRepository.getChangesSince(userId, sinceVersionNumber);
@@ -145,7 +140,6 @@ export class PermissionsService {
           if (perms) added[change.entityCode] = perms;
           break;
         case 'REMOVED':
-          // Tombstone: all flags false so the client can clear the cached entry.
           removed[change.entityCode] = {
             canView: false,
             canCreate: false,
@@ -168,15 +162,13 @@ export class PermissionsService {
     return { version: currentVersion, added, removed, modified };
   }
 
-  // ─── Private Helpers ───────────────────────────────────────────────────────
-
-  /**
-   * Parse the numeric part of a version string ("v3" → 3).
-   * Returns 0 for malformed or missing values — causes the full changelog to be returned.
-   */
+  // Accepts plain integer ("3") or legacy "v3" format for backward compatibility.
+  // Returns 0 for malformed input — triggers a full changelog download.
   private parseVersionNumber(version: string): number {
     if (!version) return 0;
-    const match = /^v(\d+)$/.exec(version);
-    return match ? parseInt(match[1], 10) : 0;
+    const plain = /^\d+$/.exec(version);
+    if (plain) return parseInt(version, 10);
+    const prefixed = /^v(\d+)$/.exec(version);
+    return prefixed ? parseInt(prefixed[1], 10) : 0;
   }
 }

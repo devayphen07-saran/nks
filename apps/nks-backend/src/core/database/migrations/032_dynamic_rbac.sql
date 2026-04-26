@@ -78,7 +78,7 @@ CREATE INDEX IF NOT EXISTS role_permissions_role_entity_idx
 INSERT INTO role_permissions (role_fk, entity_type_fk, action_fk, allowed, deny, is_active)
 SELECT
   rep.role_fk,
-  et.id   AS entity_type_fk,
+  rep.entity_type_fk,
   pa.id   AS action_fk,
   CASE pa.code
     WHEN 'VIEW'   THEN rep.can_view
@@ -90,7 +90,6 @@ SELECT
   COALESCE(rep.deny, false) AS deny,
   true    AS is_active
 FROM role_entity_permission rep
-JOIN entity_type et ON et.code = rep.entity_code
 CROSS JOIN permission_action pa
 WHERE pa.code IN ('VIEW', 'CREATE', 'EDIT', 'DELETE')
   AND rep.deleted_at IS NULL

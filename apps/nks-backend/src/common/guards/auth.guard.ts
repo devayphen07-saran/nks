@@ -13,9 +13,7 @@ import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import type { Request } from 'express';
 import { SessionMapper } from '../../contexts/iam/auth/mapper/session.mapper';
 import type { SessionUser } from '../../contexts/iam/auth/interfaces/session-user.interface';
-import { fireAndForgetWithRetry } from '../utils/retry';
 import { extractCookieValue } from '../utils/cookie.utils';
-import { LAST_ACTIVE_THROTTLE_MS } from '../../contexts/iam/auth/auth.constants';
 import { AuthContextService } from '../../contexts/iam/auth/services/session/auth-context.service';
 import { RoleQueryService } from '../../contexts/iam/roles/role-query.service';
 
@@ -58,10 +56,12 @@ export class AuthGuard implements CanActivate {
     }
 
 
-    // ✅ SECURITY: Support both Authorization header and httpOnly cookies
-    // Web: Uses httpOnly cookies (nks_session) — must extract and convert to Bearer
-    // Mobile: Uses Authorization: Bearer <token> header directly
-    // BetterAuth validates the Bearer token via getSession()
+    // ── Token authority ──────────────────────────────────────────────────────
+    // This guard reads ONLY the opaque sessionToken (BetterAuth).
+    //   jwtToken  — RS256, 15 min — for downstream/cross-service calls; never sent to this guard.
+    //   offlineToken — RS256, 3 days — mobile sync-push only; verified in SyncService.
+    // Web:    httpOnly cookie nks_session → sessionToken → DB lookup
+    // Mobile: Authorization: Bearer <sessionToken> → DB lookup
 
     // 1. Extract session token from:
     //    - Authorization header (mobile): Bearer <token>
@@ -124,10 +124,10 @@ export class AuthGuard implements CanActivate {
       });
     }
 
-    // 4. Fetch user and roles in parallel — both depend only on dbSession.userId
+    // 4. Fetch user and roles in parallel — both depend only on dbSession.userFk
     const [dbUser, roleRows] = await Promise.all([
-      this.authContext.findUserById(dbSession.userId),
-      this.roleQuery.findUserRolesForAuth(dbSession.userId),
+      this.authContext.findUserById(dbSession.userFk),
+      this.roleQuery.findUserRolesForAuth(dbSession.userFk),
     ]);
 
     if (!dbUser) {
@@ -138,40 +138,40 @@ export class AuthGuard implements CanActivate {
     }
 
     // 5. Map DB rows to SessionUser — derives roles, isSuperAdmin, isBlocked, etc.
-    // SECURITY: do this before attaching to request so a blocked user's data is
-    // never visible to exception filters or logging interceptors on the error path.
+    // SECURITY: do this before attaching to request so a blocked/inactive user's data
+    // is never visible to exception filters or logging interceptors on the error path.
     const sessionUser = SessionMapper.buildSessionUser(
       dbUser,
       roleRows,
       dbSession.activeStoreFk ?? null,
     );
 
-    if (sessionUser.isBlocked) {
-      // CRITICAL: delete sessions synchronously before throwing — fire-and-forget
-      // would let a race window keep the session alive if the process crashes.
+    if (!dbUser.isActive || sessionUser.isBlocked) {
+      // CRITICAL: blocklist JTIs + revoke + delete sessions synchronously before
+      // throwing — fire-and-forget would let outstanding access tokens survive their
+      // 15-min TTL. revokeAndDeleteAllSessionsForUser handles all three atomically.
+      const reason = sessionUser.isBlocked ? 'BLOCKED' : 'INACTIVE';
       try {
-        await this.authContext.deleteAllSessionsForUser(sessionUser.userId);
-        this.logger.warn(`Deleted all sessions for blocked user ${sessionUser.userId}`);
+        await this.authContext.revokeAndDeleteAllSessionsForUser(sessionUser.userId, reason);
+        this.logger.warn(`Revoked all sessions for ${reason.toLowerCase()} user ${sessionUser.userId}`);
       } catch (err) {
         this.logger.error(
-          `Failed to delete sessions for blocked user ${sessionUser.userId}: ${err instanceof Error ? err.message : String(err)}`,
+          `Failed to revoke sessions for ${reason.toLowerCase()} user ${sessionUser.userId}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
 
       throw new UnauthorizedException({
-        errorCode: ErrorCode.USER_BLOCKED,
-        message: 'Account is blocked',
+        errorCode: sessionUser.isBlocked ? ErrorCode.USER_BLOCKED : ErrorCode.USER_INACTIVE,
+        message: sessionUser.isBlocked ? 'Account is blocked' : 'Account is inactive',
       });
     }
 
     // ── Stale activeStoreId defence ──────────────────────────────────────────
     // The session persists activeStoreId in the DB. If the user's role in that
     // store was revoked after the session was created, the stored FK is stale.
-    // Null it out in memory so STORE-scope guards see no store context, and
-    // persist the fix asynchronously so the next request is already clean.
-    // SUPER_ADMIN is exempt — they have access to all stores regardless of
-    // role assignments.
-    if (sessionUser.activeStoreId !== null && !sessionUser.isSuperAdmin) {
+    // Null it out in memory and persist synchronously so DB and session state
+    // are consistent before the request continues.
+    if (sessionUser.activeStoreId !== null) {
       const hasRoleInActiveStore = sessionUser.roles.some(
         (r) => r.storeId === sessionUser.activeStoreId,
       );
@@ -180,15 +180,7 @@ export class AuthGuard implements CanActivate {
           `Cleared stale activeStoreId ${sessionUser.activeStoreId} for user ${sessionUser.userId} — no current role assignment.`,
         );
         sessionUser.activeStoreId = null;
-        fireAndForgetWithRetry(
-          () => this.authContext.clearActiveStore(dbSession.id),
-          {
-            maxRetries: 2,
-            initialDelayMs: 500,
-            logger: this.logger,
-            logLabel: `ClearStaleActiveStore user=${sessionUser.userId}`,
-          },
-        );
+        await this.authContext.clearActiveStore(dbSession.id);
       }
     }
 
@@ -217,25 +209,10 @@ export class AuthGuard implements CanActivate {
           .digest('hex');
         if (currentIpHash !== dbSession.ipHash) {
           this.logger.warn(
-            `IP change detected: session=${dbSession.id} user=${dbSession.userId} — network switch or proxy change.`,
+            `IP change detected: session=${dbSession.id} user=${dbSession.userFk} — network switch or proxy change.`,
           );
         }
       }
-    }
-
-    // 7. Update lastActiveAt — throttled to once every 5 minutes to avoid
-    //    a DB write on every single authenticated request.
-    const lastActive = dbUser.lastActiveAt ? new Date(dbUser.lastActiveAt).getTime() : 0;
-    if (Date.now() - lastActive > LAST_ACTIVE_THROTTLE_MS) {
-      fireAndForgetWithRetry(
-        () => this.authContext.touchUserLastActive(sessionUser.userId),
-        {
-          maxRetries: 3,
-          initialDelayMs: 500,
-          logger: this.logger,
-          logLabel: `Update lastActiveAt for user ${sessionUser.userId}`,
-        },
-      );
     }
 
     return true;

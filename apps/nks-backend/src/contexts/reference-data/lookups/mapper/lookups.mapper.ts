@@ -123,25 +123,17 @@ export class LookupMapper {
       countryName: countryRow.countryName,
       dialingCode: countryRow.dialCode    ?? undefined,
       description: countryRow.description ?? undefined,
-      isActive:    countryRow.isActive,
-      isHidden:    countryRow.isHidden,
-      isSystem:    countryRow.isSystem,
-      createdAt:   countryRow.createdAt.toISOString(),
-      updatedAt:   countryRow.updatedAt?.toISOString() ?? null,
     };
   }
 
   static buildCommunicationTypeDto(communicationTypeRow: CommunicationTypeRow): CommunicationTypeResponse {
     return {
-      guuid:       communicationTypeRow.guuid,
-      code:        communicationTypeRow.code,
-      title:       communicationTypeRow.label,
-      description: communicationTypeRow.description ?? undefined,
-      isActive:    communicationTypeRow.isActive,
-      isHidden:    communicationTypeRow.isHidden,
-      isSystem:    communicationTypeRow.isSystem,
-      createdAt:   communicationTypeRow.createdAt.toISOString(),
-      updatedAt:   communicationTypeRow.updatedAt?.toISOString() ?? null,
+      guuid:           communicationTypeRow.guuid,
+      code:            communicationTypeRow.code,
+      title:           communicationTypeRow.label,
+      description:     communicationTypeRow.description     ?? undefined,
+      icon:            communicationTypeRow.icon             ?? undefined,
+      validationRegex: communicationTypeRow.validationRegex ?? undefined,
     };
   }
 
@@ -152,11 +144,6 @@ export class LookupMapper {
       symbol:      currencyRow.symbol      ?? undefined,
       title:       currencyRow.symbol      ?? currencyRow.code,
       description: currencyRow.description ?? undefined,
-      isActive:    currencyRow.isActive,
-      isHidden:    currencyRow.isHidden,
-      isSystem:    currencyRow.isSystem,
-      createdAt:   currencyRow.createdAt.toISOString(),
-      updatedAt:   currencyRow.updatedAt?.toISOString() ?? null,
     };
   }
 
@@ -165,13 +152,7 @@ export class LookupMapper {
       guuid:       volumeRow.guuid,
       code:        volumeRow.volumeCode,
       title:       volumeRow.volumeName,
-      unit:        volumeRow.volumeType  ?? undefined,
-      description: undefined,
-      isActive:    volumeRow.isActive,
-      isHidden:    volumeRow.isHidden,
-      isSystem:    volumeRow.isSystem,
-      createdAt:   volumeRow.createdAt.toISOString(),
-      updatedAt:   volumeRow.updatedAt?.toISOString() ?? null,
+      unit:        volumeRow.volumeType ?? undefined,
     };
   }
 }

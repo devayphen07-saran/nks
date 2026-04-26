@@ -37,20 +37,13 @@ export class AuthContextService {
   }
 
   /**
-   * Invalidate every session for a user — called when AuthGuard detects a
-   * blocked account. Returns the number of rows deleted (unused by the
-   * guard, but surfaced for callers that want to log/audit).
+   * Revoke + blocklist + delete every session for a user.
+   * Called when AuthGuard detects a blocked or inactive account.
+   * JTIs are blocklisted so outstanding access tokens cannot survive their 15-min TTL.
    */
-  deleteAllSessionsForUser(userId: number): Promise<number> {
-    return this.sessionsRepository.deleteAllForUser(userId);
-  }
-
-  /**
-   * Throttled heartbeat write. Callers should decide when to invoke it
-   * (AuthGuard gates it to once every LAST_ACTIVE_THROTTLE_MS).
-   */
-  touchUserLastActive(userId: number): Promise<void> {
-    return this.authUsersRepository.touchLastActiveAt(userId);
+  async revokeAndDeleteAllSessionsForUser(userId: number, reason: string): Promise<void> {
+    const jtis = await this.sessionsRepository.findJtisByUserId(userId);
+    await this.sessionsRepository.revokeAndDeleteAllForUser(userId, reason, jtis);
   }
 
   /**

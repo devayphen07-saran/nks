@@ -9,7 +9,7 @@ import type { AuthenticatedRequest } from './auth.guard';
 
 /**
  * OwnershipGuard — ensures the authenticated user owns the resource whose
- * identifier is passed in the URL path. SUPER_ADMIN bypasses the check.
+ * identifier is passed in the URL path.
  *
  * Accepted path parameters (in resolution order):
  *   - `:iamUserId`  → matched against req.user.iamUserId
@@ -32,8 +32,6 @@ export class OwnershipGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user;
-
-    if (user.isSuperAdmin) return true;
 
     const params = request.params ?? {};
 

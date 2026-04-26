@@ -20,7 +20,7 @@ export const userAuthProvider = pgTable(
 
     accountId: text('account_id').notNull(),
     providerId: text('provider_id').notNull(),
-    userId: bigint('user_fk', { mode: 'number' })
+    userFk: bigint('user_fk', { mode: 'number' })
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
 
@@ -42,9 +42,9 @@ export const userAuthProvider = pgTable(
     verifiedAt: timestamp('verified_at', { withTimezone: true }),
   },
   (table) => [
-    index('user_auth_provider_user_idx').on(table.userId),
+    index('user_auth_provider_user_idx').on(table.userFk),
     uniqueIndex('user_auth_provider_user_provider_unique').on(
-      table.userId,
+      table.userFk,
       table.providerId,
     ),
   ],

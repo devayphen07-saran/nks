@@ -44,6 +44,55 @@ export class StoresRepository extends BaseRepository {
   }
 
   /**
+   * True iff the user is the ownerUserFk of the given active store.
+   * Used by RBACGuard to bypass the role-row membership check for store owners.
+   */
+  async isOwner(userId: number, storeId: number): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: schema.store.id })
+      .from(schema.store)
+      .where(
+        and(
+          eq(schema.store.id, storeId),
+          eq(schema.store.ownerUserFk, userId),
+          eq(schema.store.isActive, true),
+          isNull(schema.store.deletedAt),
+        ),
+      )
+      .limit(1);
+    return !!row;
+  }
+
+  /**
+   * Single-query active + ownership check for RBACGuard.
+   * Returns null when the store does not exist, is inactive, or is soft-deleted.
+   * Returns { isOwner } when the store is active — isOwner is true iff
+   * ownerUserFk matches userId.
+   *
+   * Replaces the two-query pattern (findActiveById then isOwner) that had a
+   * TOCTOU window where the store could be deactivated between the two calls.
+   */
+  async findActiveWithOwnership(
+    userId: number,
+    storeId: number,
+  ): Promise<{ isOwner: boolean } | null> {
+    const [row] = await this.db
+      .select({
+        isOwner: sql<boolean>`(${schema.store.ownerUserFk} = ${userId})`,
+      })
+      .from(schema.store)
+      .where(
+        and(
+          eq(schema.store.id, storeId),
+          eq(schema.store.isActive, true),
+          isNull(schema.store.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  /**
    * Set the user's default store. Pass null to clear (admin path — no membership check).
    */
   async setDefaultStore(userId: number, storeId: number | null): Promise<void> {

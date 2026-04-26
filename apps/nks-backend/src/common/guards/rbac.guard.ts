@@ -94,10 +94,28 @@ export class RBACGuard implements CanActivate {
 
     const scope = requirement.scope ?? 'STORE';
 
-    if (scope === 'STORE' && !user.isSuperAdmin) {
+    if (scope === 'STORE') {
       this.assertStoreContext(user);
-      await this.assertStoreActive(user.activeStoreId as number);
-      assertHasRoleInStore(user.roles ?? [], user.activeStoreId as number);
+      const storeId = user.activeStoreId as number;
+
+      // Single query: active check + ownership in one round-trip.
+      // Eliminates the TOCTOU window that existed when isActive() and
+      // isStoreOwner() were two separate queries (store could be deactivated
+      // between them).
+      const storeCtx = await this.storeQuery.findActiveWithOwnership(user.userId, storeId);
+      if (!storeCtx) {
+        throw new ForbiddenException({
+          errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
+          message: 'Store not found or inactive',
+        });
+      }
+      // Store owners (ownerUserFk) bypass the role-row membership check.
+      // The ownership model migrated from a STORE_OWNER role entry to
+      // store.ownerUserFk — a pure owner with no role assignment must still
+      // pass STORE-scope guards on their own store.
+      if (!storeCtx.isOwner) {
+        assertHasRoleInStore(user.roles ?? [], storeId);
+      }
     }
 
     const permitted = await this.permissionEvaluator.evaluate(
@@ -176,13 +194,4 @@ export class RBACGuard implements CanActivate {
     }
   }
 
-  private async assertStoreActive(storeId: number): Promise<void> {
-    const active = await this.storeQuery.isActive(storeId);
-    if (!active) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.INSUFFICIENT_PERMISSIONS,
-        message: 'Store not found',
-      });
-    }
-  }
 }

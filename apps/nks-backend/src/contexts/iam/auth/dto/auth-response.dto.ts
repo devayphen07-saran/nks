@@ -37,7 +37,14 @@ const AuthMinimalUserSchema = z.object({
 
 const AuthSessionSchema = z.object({
   sessionId: z.string(),
-  sessionToken: z.string(),
+  /**
+   * Opaque session credential.
+   * Present ONLY for mobile clients (X-Device-Type: ANDROID | IOS).
+   * Web clients receive this in an httpOnly cookie instead — the body field
+   * is stripped at the controller layer so it never appears in browser devtools,
+   * CDN / API-gateway logs, or monitoring dashboards.
+   */
+  sessionToken: z.string().optional(),
   /**
    * Always 'Bearer' — included so clients can build the Authorization
    * header without relying on a hard-coded convention.

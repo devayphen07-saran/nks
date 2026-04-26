@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { RolePermissionsRepository } from './repositories/role-permissions.repository';
+import { PermissionsRepository } from './repositories/role-permissions.repository';
 import type {
   EntityPermissionAction,
   EntityPermissionScope,
@@ -133,15 +133,15 @@ class PermissionCache {
  * immediately; pods B and C serve stale results until TTL expires (≤ 5 min).
  * For sub-second propagation, replace with Redis + pub/sub.
  *
- * ── SUPER_ADMIN bypass ───────────────────────────────────────────────────────
- * The bypass lives here so callers can never forget it.
+ * Fully DB-driven — no hardcoded role bypasses. SUPER_ADMIN access is
+ * controlled entirely by rows in role_permissions seeded at startup.
  */
 @Injectable()
 export class PermissionEvaluatorService {
   private readonly cache: PermissionCache;
 
   constructor(
-    private readonly rolePermissionsRepository: RolePermissionsRepository,
+    private readonly rolePermissionsRepository: PermissionsRepository,
     configService: ConfigService,
   ) {
     const ttlMs = configService.get<number>('PERMISSION_CACHE_TTL_MS', 5 * 60_000);
@@ -212,12 +212,7 @@ export class PermissionEvaluatorService {
     const filtered =
       scope === 'PLATFORM'
         ? sessionRoles.filter((r) => r.storeId === null)
-        : sessionRoles.filter(
-            // Platform-scoped roles (storeId = null) are included for every STORE
-            // scope evaluation — this is how SUPER_ADMIN's seeded permissions are
-            // picked up without a hardcoded bypass.
-            (r) => r.storeId === null || r.storeId === activeStoreId,
-          );
+        : sessionRoles.filter((r) => r.storeId === activeStoreId);
 
     return filtered.map((r) => r.roleId).sort((a, b) => a - b);
   }

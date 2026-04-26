@@ -77,6 +77,7 @@ export class OtpRateLimitRepository extends BaseRepository {
     newRequestCount: number,
     lastAttemptAt: Date,
     newWindowExpiresAt: Date,
+    newExpiresAt: Date,
   ): Promise<void> {
     await this.db
       .update(schema.otpRequestLog)
@@ -85,6 +86,7 @@ export class OtpRateLimitRepository extends BaseRepository {
         lastAttemptAt,
         windowExpiresAt: newWindowExpiresAt,
         consecutiveFailures: 0,
+        expiresAt: newExpiresAt,
       })
       .where(eq(schema.otpRequestLog.id, id));
   }

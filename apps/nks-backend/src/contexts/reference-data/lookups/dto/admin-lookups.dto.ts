@@ -22,7 +22,7 @@ export const CreateLookupValueSchema = z.object({
   sortOrder:   z.number().int().optional(),
 });
 
-export const UpdateLookupValueSchema = CreateLookupValueSchema.partial();
+export const UpdateLookupValueSchema = CreateLookupValueSchema.omit({ code: true }).partial();
 
 export class CreateLookupValueDto extends createZodDto(CreateLookupValueSchema) {}
 export class UpdateLookupValueDto extends createZodDto(UpdateLookupValueSchema) {}

@@ -44,6 +44,7 @@ export class RolesController {
       page: query.page,
       pageSize: query.pageSize,
       storeId: user.activeStoreId,
+      isSuperAdmin: user.isSuperAdmin,
       search: query.search,
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,

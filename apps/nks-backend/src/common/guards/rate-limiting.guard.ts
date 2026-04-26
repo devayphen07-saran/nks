@@ -8,12 +8,16 @@ import { TooManyRequestsException } from '../exceptions';
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
+import type { AuthenticatedRequest } from './auth.guard';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { lt, sql } from 'drizzle-orm';
 import { InjectDb } from '../../core/database/inject-db.decorator';
 import * as schema from '../../core/database/schema';
 import { rateLimitEntries } from '../../core/database/schema';
-import { RATE_LIMIT_KEY } from '../decorators/rate-limit.decorator';
+import {
+  RATE_LIMIT_KEY,
+  SKIP_RATE_LIMIT_KEY,
+} from '../decorators/rate-limit.decorator';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -43,7 +47,6 @@ export class RateLimitingGuard implements CanActivate {
   private readonly EXEMPT_IPS: string[];
   private readonly WINDOW_MS = 15 * 60 * 1000; // 15 minutes
   private readonly DEFAULT_MAX_REQUESTS = 100;
-  private readonly CLEANUP_TTL_MS = 60 * 60 * 1000; // delete after 1 hour
 
   constructor(
     @InjectDb() private readonly db: Db,
@@ -51,11 +54,21 @@ export class RateLimitingGuard implements CanActivate {
     private readonly configService: ConfigService,
   ) {
     // Comma-separated IPs in RATE_LIMIT_EXEMPT_IPS env var, e.g. "10.0.0.1,10.0.0.2"
-    const exemptIpsConfig = this.configService.get<string>('RATE_LIMIT_EXEMPT_IPS') ?? '';
-    this.EXEMPT_IPS = exemptIpsConfig.split(',').map((ip) => ip.trim()).filter(Boolean);
+    const exemptIpsConfig =
+      this.configService.get<string>('RATE_LIMIT_EXEMPT_IPS') ?? '';
+    this.EXEMPT_IPS = exemptIpsConfig
+      .split(',')
+      .map((ip) => ip.trim())
+      .filter(Boolean);
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const skip = this.reflector.getAllAndOverride<boolean>(
+      SKIP_RATE_LIMIT_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (skip) return true;
+
     const request = context.switchToHttp().getRequest<Request>();
     const clientIp = this.getClientIp(request);
 
@@ -70,17 +83,25 @@ export class RateLimitingGuard implements CanActivate {
         context.getClass(),
       ]) ?? this.DEFAULT_MAX_REQUESTS;
 
-    // Key includes method + path so POST /auth/login and GET /auth/login have separate counters
-    const key = `${clientIp}:${request.method}:${request.path}`;
+    // Composite key: IP + authenticated userId (if present) + deviceId + path.
+    // Prevents VPN rotation bypass: switching IPs while authenticated still shares
+    // the same counter. Anonymous requests (pre-auth endpoints) key on IP alone.
+    const authedRequest = request as Partial<AuthenticatedRequest>;
+    const userId = authedRequest.user?.userId;
+    const deviceId = (
+      request.headers['x-device-id'] as string | undefined
+    )?.slice(0, 64);
+    const key = `${clientIp}:${userId ?? 'anon'}:${deviceId ?? 'web'}:${request.path}`;
 
     const now = new Date();
     const windowCutoff = new Date(now.getTime() - this.WINDOW_MS);
-    const cleanupCutoff = new Date(now.getTime() - this.CLEANUP_TTL_MS);
+
+    const windowExpiresAt = new Date(now.getTime() + this.WINDOW_MS);
 
     // Fire-and-forget: delete expired rows without blocking the request
     void this.db
       .delete(rateLimitEntries)
-      .where(lt(rateLimitEntries.windowStart, cleanupCutoff))
+      .where(lt(rateLimitEntries.expiresAt, now))
       .catch((err: unknown) => {
         this.logger.error(
           `Rate-limit cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -91,11 +112,10 @@ export class RateLimitingGuard implements CanActivate {
     // or reset the window if the stored windowStart has expired.
     const rows = await this.db
       .insert(rateLimitEntries)
-      .values({ key, hits: 1, windowStart: now })
+      .values({ key, hits: 1, windowStart: now, expiresAt: windowExpiresAt })
       .onConflictDoUpdate({
         target: rateLimitEntries.key,
         set: {
-          // Reset window if expired; otherwise increment
           hits: sql`CASE
             WHEN ${rateLimitEntries.windowStart} < ${windowCutoff}
             THEN 1
@@ -106,6 +126,11 @@ export class RateLimitingGuard implements CanActivate {
             THEN ${now}
             ELSE ${rateLimitEntries.windowStart}
           END`,
+          expiresAt: sql`CASE
+            WHEN ${rateLimitEntries.windowStart} < ${windowCutoff}
+            THEN ${windowExpiresAt}
+            ELSE ${rateLimitEntries.expiresAt}
+          END`,
         },
       })
       .returning({ hits: rateLimitEntries.hits });
@@ -114,7 +139,7 @@ export class RateLimitingGuard implements CanActivate {
 
     if (hits > maxRequests) {
       this.logger.warn(
-        `Rate limit exceeded: ${clientIp} → ${request.method} ${request.path} (${hits}/${maxRequests} hits)`,
+        `Rate limit exceeded: key=${key} (${hits}/${maxRequests} hits)`,
       );
       // Pass retryAfter (in seconds) so the global exception filter can set
       // the Retry-After header dynamically instead of hardcoding 60s.

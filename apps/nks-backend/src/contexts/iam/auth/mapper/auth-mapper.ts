@@ -1,6 +1,5 @@
-import { BadRequestException } from '../../../../common/exceptions';
+import { BadRequestException, InternalServerException } from '../../../../common/exceptions';
 import type { AuthResponseEnvelope } from '../dto/auth-response.dto';
-import { STORE_CONSTANTS } from '../../../../common/constants/app-constants';
 import { INITIAL_SYNC_CURSOR } from '../../../sync/sync.constants';
 // crypto import removed - UUID generation is business logic, not transformation
 
@@ -36,11 +35,7 @@ interface AuthResult {
 }
 
 export type UserRoleEntry = {
-  roleId: number;
-  roleCode:
-    | (typeof STORE_CONSTANTS.STAFF_ROLES)[number]
-    | typeof STORE_CONSTANTS.CUSTOMER_ROLE
-    | string;
+  roleCode: string;
   storeId: number | null;
   storeGuuid: string | null;
   storeName: string | null;
@@ -77,6 +72,7 @@ export class AuthMapper {
     offlineToken?: string, // 3-day offline JWT for mobile offline verification
     offlineSessionSignature?: string, // HMAC-SHA256 of the offline session payload (server-side signed)
     deviceId?: string, // Echoed in sync.deviceId; null for web clients that don't send X-Device-Id
+    syncOpts?: { lastSyncedAt?: Date | null }, // null = full sync needed (fresh login); Date = last known server sync time
   ): AuthResponseEnvelope {
     const user = authResult.user;
     const sessionToken = authResult.token ?? authResult.session?.token ?? '';
@@ -100,6 +96,10 @@ export class AuthMapper {
       refreshExpiresAt instanceof Date
         ? refreshExpiresAt.toISOString()
         : String(refreshExpiresAt ?? '');
+    const lastSyncedAtStr =
+      syncOpts?.lastSyncedAt instanceof Date
+        ? syncOpts.lastSyncedAt.toISOString()
+        : null;
 
     return {
       user: this.buildPublicUserDto(user),
@@ -115,7 +115,7 @@ export class AuthMapper {
       },
       sync: {
         cursor: INITIAL_SYNC_CURSOR,
-        lastSyncedAt: null,
+        lastSyncedAt: lastSyncedAtStr,
         deviceId: deviceId ?? null,
       },
       ...(offlineToken ? { offlineToken } : {}),
@@ -136,7 +136,7 @@ export class AuthMapper {
     }
 
     if (!user.iamUserId) {
-      throw new BadRequestException('AuthMapper.toPublicUserDto: user.iamUserId is required');
+      throw new InternalServerException('AuthMapper.toPublicUserDto: user row is missing iamUserId — data integrity violation');
     }
 
     return {
@@ -155,23 +155,16 @@ export class AuthMapper {
    */
   static buildRoleEntries(
     roleRows: Array<{
-      roleId?: number | null;
       roleCode?: string;
       code?: string;
       storeFk?: number | null;
       storeGuuid?: string | null;
       storeName?: string | null;
       isPrimary?: boolean | null;
+      assignedAt: Date | string;
     }>,
     storeIdOverride?: number,
-    assignedAt?: string, // Business logic: timestamp must be generated in service
   ): UserRoleEntry[] {
-    if (!assignedAt) {
-      throw new BadRequestException(
-        'AuthMapper.mapToRoleEntries: assignedAt is required',
-      );
-    }
-
     return roleRows.map((roleRow, index) => {
       const resolvedRoleCode = roleRow.roleCode ?? roleRow.code;
 
@@ -181,8 +174,12 @@ export class AuthMapper {
         );
       }
 
+      const assignedAt =
+        roleRow.assignedAt instanceof Date
+          ? roleRow.assignedAt.toISOString()
+          : roleRow.assignedAt;
+
       return {
-        roleId: roleRow.roleId ?? 0,
         roleCode: resolvedRoleCode as UserRoleEntry['roleCode'],
         storeId: storeIdOverride ?? roleRow.storeFk ?? null,
         storeGuuid: roleRow.storeGuuid ?? null,

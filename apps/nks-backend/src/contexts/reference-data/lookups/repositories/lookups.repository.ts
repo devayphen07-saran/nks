@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, and, isNull, count, asc, desc } from 'drizzle-orm';
+import { eq, and, isNull, or, count, asc, desc } from 'drizzle-orm';
 import type { AnyColumn } from 'drizzle-orm/column';
 import { ilikeAny } from '../../../../core/database/query-helpers';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
@@ -82,6 +82,7 @@ export class LookupsRepository extends BaseRepository {
           eq(codeCategory.code, categoryCode),
           isNull(codeValue.storeFk),
           eq(codeValue.isActive, true),
+          eq(codeValue.isHidden, false),
           isNull(codeValue.deletedAt),
         ),
       )
@@ -116,6 +117,7 @@ export class LookupsRepository extends BaseRepository {
       .where(
         and(
           eq(schema.country.isActive, true),
+          eq(schema.country.isHidden, false),
           isNull(schema.country.deletedAt),
         ),
       )
@@ -129,6 +131,7 @@ export class LookupsRepository extends BaseRepository {
       .where(
         and(
           eq(schema.communicationType.isActive, true),
+          eq(schema.communicationType.isHidden, false),
           isNull(schema.communicationType.deletedAt),
         ),
       )
@@ -139,7 +142,13 @@ export class LookupsRepository extends BaseRepository {
     return this.db
       .select()
       .from(currency)
-      .where(and(eq(currency.isActive, true), isNull(currency.deletedAt)))
+      .where(
+        and(
+          eq(currency.isActive, true),
+          eq(currency.isHidden, false),
+          isNull(currency.deletedAt),
+        ),
+      )
       .orderBy(currency.sortOrder);
   }
 
@@ -150,6 +159,7 @@ export class LookupsRepository extends BaseRepository {
       .where(
         and(
           eq(schema.volumes.isActive, true),
+          eq(schema.volumes.isHidden, false),
           isNull(schema.volumes.deletedAt),
         ),
       )
@@ -293,10 +303,9 @@ export class LookupsRepository extends BaseRepository {
     return row;
   }
 
-  /** Update label / description / sortOrder / isActive on a code_value */
+  /** Update label / description / sortOrder on a code_value (code is immutable after creation) */
   async updateCodeValue(id: number, dto: UpdateLookupValueDto): Promise<typeof codeValue.$inferSelect | null> {
     const set: Partial<typeof codeValue.$inferInsert> = {};
-    if (dto.code !== undefined) set.code = dto.code;
     if (dto.label !== undefined) set.label = dto.label;
     if (dto.description !== undefined)
       set.description = dto.description ?? null;
@@ -318,5 +327,150 @@ export class LookupsRepository extends BaseRepository {
       .where(and(eq(codeValue.id, id), isNull(codeValue.deletedAt)))
       .returning();
     return row ?? null;
+  }
+
+  // ─── Codes (admin CRUD on code_category + code_value) ────────────────────
+
+  private getCategoryOrderColumn(sortBy: string = 'name') {
+    switch (sortBy) {
+      case 'code':      return codeCategory.code;
+      case 'createdAt': return codeCategory.createdAt;
+      default:          return codeCategory.name;
+    }
+  }
+
+  private getCodeValueOrderColumn(sortBy: string = 'sortOrder') {
+    switch (sortBy) {
+      case 'code':      return codeValue.code;
+      case 'label':     return codeValue.label;
+      case 'createdAt': return codeValue.createdAt;
+      default:          return codeValue.sortOrder;
+    }
+  }
+
+  async findCategory(categoryCode: string): Promise<typeof codeCategory.$inferSelect | null> {
+    const [row] = await this.db
+      .select()
+      .from(codeCategory)
+      .where(and(eq(codeCategory.code, categoryCode), eq(codeCategory.isActive, true), isNull(codeCategory.deletedAt)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findAllCategories(opts: {
+    page: number; pageSize: number; search?: string; sortBy?: string; sortOrder?: string; isActive?: boolean;
+  }): Promise<{ rows: typeof codeCategory.$inferSelect[]; total: number }> {
+    const { page, pageSize, search, sortBy = 'name', sortOrder = 'asc', isActive } = opts;
+    const offset = LookupsRepository.toOffset(page, pageSize);
+    const activeFilter = isActive === undefined ? true : isActive;
+    const where = and(
+      eq(codeCategory.isActive, activeFilter),
+      isNull(codeCategory.deletedAt),
+      ilikeAny(search, codeCategory.name, codeCategory.code),
+    );
+    return this.paginate(
+      this.db.select().from(codeCategory).where(where)
+        .orderBy(this.applySortDirection(this.getCategoryOrderColumn(sortBy), sortOrder))
+        .limit(pageSize).offset(offset),
+      () => this.db.select({ total: count() }).from(codeCategory).where(where),
+      page, pageSize,
+    );
+  }
+
+  async findValueById(id: number): Promise<typeof codeValue.$inferSelect | null> {
+    const [row] = await this.db
+      .select().from(codeValue)
+      .where(and(eq(codeValue.id, id), isNull(codeValue.deletedAt)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findValueByIdWithStore(id: number): Promise<{ id: number; guuid: string; code: string; label: string; description: string | null; sortOrder: number | null; isSystem: boolean; storeGuuid: string | null } | null> {
+    const [row] = await this.db
+      .select({
+        id: codeValue.id, guuid: codeValue.guuid, code: codeValue.code,
+        label: codeValue.label, description: codeValue.description,
+        sortOrder: codeValue.sortOrder, isSystem: codeValue.isSystem,
+        storeGuuid: schema.store.guuid,
+      })
+      .from(codeValue)
+      .leftJoin(schema.store, eq(codeValue.storeFk, schema.store.id))
+      .where(and(eq(codeValue.id, id), isNull(codeValue.deletedAt)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findStoreIdByGuuid(guuid: string): Promise<number | null> {
+    const [row] = await this.db
+      .select({ id: schema.store.id })
+      .from(schema.store)
+      .where(eq(schema.store.guuid, guuid))
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  async findValueByGuuid(guuid: string): Promise<typeof codeValue.$inferSelect | null> {
+    const [row] = await this.db
+      .select().from(codeValue)
+      .where(and(eq(codeValue.guuid, guuid), isNull(codeValue.deletedAt)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findValuesByCategory(
+    categoryId: number,
+    opts: { page: number; pageSize: number; storeId?: number; search?: string; sortBy?: string; sortOrder?: string; isActive?: boolean },
+  ): Promise<{ rows: { id: number; guuid: string; code: string; label: string; description: string | null; sortOrder: number | null; isSystem: boolean; storeGuuid: string | null }[]; total: number }> {
+    const { page, pageSize, storeId, search, sortBy = 'sortOrder', sortOrder = 'asc', isActive } = opts;
+    const offset = LookupsRepository.toOffset(page, pageSize);
+    const activeFilter = isActive === undefined ? true : isActive;
+    const storeFilter = storeId
+      ? or(isNull(codeValue.storeFk), eq(codeValue.storeFk, storeId))
+      : isNull(codeValue.storeFk);
+    const where = and(
+      eq(codeValue.categoryFk, categoryId),
+      eq(codeValue.isActive, activeFilter),
+      eq(codeValue.isHidden, false),
+      storeFilter,
+      ilikeAny(search, codeValue.label, codeValue.code),
+    );
+    return this.paginate(
+      this.db
+        .select({ id: codeValue.id, guuid: codeValue.guuid, code: codeValue.code, label: codeValue.label, description: codeValue.description, sortOrder: codeValue.sortOrder, isSystem: codeValue.isSystem, storeGuuid: schema.store.guuid })
+        .from(codeValue)
+        .leftJoin(schema.store, eq(codeValue.storeFk, schema.store.id))
+        .where(where)
+        .orderBy(this.applySortDirection(this.getCodeValueOrderColumn(sortBy), sortOrder))
+        .limit(pageSize).offset(offset),
+      () => this.db.select({ total: count() }).from(codeValue).where(where),
+      page, pageSize,
+    );
+  }
+
+  async createCategory(data: typeof codeCategory.$inferInsert): Promise<typeof codeCategory.$inferSelect> {
+    const [created] = await this.db.insert(codeCategory).values(data).returning();
+    return created;
+  }
+
+  async createValue(data: typeof codeValue.$inferInsert): Promise<typeof codeValue.$inferSelect> {
+    const [created] = await this.db.insert(codeValue).values(data).returning();
+    return created;
+  }
+
+  async updateValue(id: number, data: Partial<typeof codeValue.$inferInsert>): Promise<typeof codeValue.$inferSelect | null> {
+    const [updated] = await this.db
+      .update(codeValue).set(data)
+      .where(and(eq(codeValue.id, id), eq(codeValue.isActive, true), eq(codeValue.isSystem, false)))
+      .returning();
+    return updated ?? null;
+  }
+
+  async softDeleteValue(id: number, deletedBy: number): Promise<boolean> {
+    const [row] = await this.db
+      .update(codeValue)
+      .set({ isActive: false, deletedAt: new Date(), deletedBy })
+      .where(and(eq(codeValue.id, id), eq(codeValue.isActive, true), eq(codeValue.isSystem, false), isNull(codeValue.deletedAt)))
+      .returning({ id: codeValue.id });
+    return !!row;
   }
 }
