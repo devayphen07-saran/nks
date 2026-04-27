@@ -16,12 +16,6 @@ import {
 import type { AuthenticatedRequest } from '../../../../common/guards/auth.guard';
 import type { Request, Response } from 'express';
 import { ErrorCode, errPayload } from '../../../../common/constants/error-codes.constants';
-import { AuthService } from '../services/session/auth.service';
-import { SessionService } from '../services/session/session.service';
-import { PasswordAuthService } from '../services/flows/password-auth.service';
-import { TokenLifecycleService } from '../services/token/token-lifecycle.service';
-import { OnboardingService } from '../services/flows/onboarding.service';
-import { PermissionsService, type PermissionsSnapshot, type PermissionsSnapshotResponse } from '../services/permissions/permissions.service';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthControllerHelpers } from '../../../../common/utils/auth-helpers';
 import { extractCookieValue } from '../../../../common/utils/cookie.utils';
@@ -40,22 +34,28 @@ import { Public } from '../../../../common/decorators/public.decorator';
 import { CurrentUser } from '../../../../common/decorators/current-user.decorator';
 import { RateLimit } from '../../../../common/decorators/rate-limit.decorator';
 import { NoEntityPermissionRequired } from '../../../../common/decorators/no-entity-permission-required.decorator';
-import { SkipTransform } from '../../../../common/decorators/skip-transform.decorator';
+import { RawResponse } from '../../../../common/decorators/raw-response.decorator';
 import { JWTConfigService } from '../../../../config/jwt.config';
 import type { SessionUser } from '../interfaces/session-user.interface';
+import {
+  AuthFlowUseCase,
+  TokenRefreshUseCase,
+  SessionManagementUseCase,
+  UserOnboardingUseCase,
+  PermissionsQueryUseCase,
+} from '../use-cases';
 
 @ApiTags('Auth')
 @Controller('auth')
 @ApiBearerAuth()
 export class AuthController {
   constructor(
-    private readonly authService: AuthService,
-    private readonly sessionService: SessionService,
-    private readonly passwordAuthService: PasswordAuthService,
-    private readonly tokenLifecycleService: TokenLifecycleService,
-    private readonly jwtConfigService: JWTConfigService,
-    private readonly onboardingService: OnboardingService,
-    private readonly permissionsService: PermissionsService,
+    private readonly authFlow: AuthFlowUseCase,
+    private readonly tokenRefresh: TokenRefreshUseCase,
+    private readonly sessions: SessionManagementUseCase,
+    private readonly onboarding: UserOnboardingUseCase,
+    private readonly permissions: PermissionsQueryUseCase,
+    private readonly jwtConfig: JWTConfigService,
   ) {}
 
   @Post('login')
@@ -70,7 +70,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponseEnvelope> {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
-    const result = await this.passwordAuthService.login(dto, deviceInfo);
+    const result = await this.authFlow.login(dto, deviceInfo);
     AuthControllerHelpers.applySessionCookie(res, result);
     return AuthControllerHelpers.forClient(result, deviceInfo.deviceType);
   }
@@ -89,7 +89,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponseEnvelope> {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
-    const result = await this.passwordAuthService.register(dto, deviceInfo);
+    const result = await this.authFlow.register(dto, deviceInfo);
     AuthControllerHelpers.applySessionCookie(res, result);
     return AuthControllerHelpers.forClient(result, deviceInfo.deviceType);
   }
@@ -119,10 +119,7 @@ export class AuthController {
     const deviceId =
       (req.headers as Record<string, string | undefined>)['x-device-id'] ?? null;
 
-    const result = await this.tokenLifecycleService.refreshAccessToken(
-      providedRefreshToken,
-      deviceId,
-    );
+    const result = await this.tokenRefresh.refresh(providedRefreshToken, deviceId);
 
     const deviceType =
       (req.headers as Record<string, string | undefined>)['x-device-type'];
@@ -165,7 +162,7 @@ export class AuthController {
   ): Promise<null> {
     const token = this.parseSessionCookie(req);
     if (token) {
-      await this.authService.logout(token, req.user.userId);
+      await this.sessions.logout(token, req.user.userId);
     }
     AuthControllerHelpers.clearSessionCookie(res);
     return null;
@@ -174,14 +171,14 @@ export class AuthController {
   @Get('mobile-jwks')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @SkipTransform()
+  @RawResponse()
   @ApiOperation({
     summary: 'Get RS256 JWKS for mobile offline verification',
     description:
       'Returns the RS256 public key in JWKS format for verifying access and offline JWTs on device.',
   })
   getMobileJwks(@Res({ passthrough: true }) res: Response): object {
-    const jwks = this.jwtConfigService.getPublicKeyAsJWKS();
+    const jwks = this.jwtConfig.getPublicKeyAsJWKS();
     res.set('Cache-Control', 'public, max-age=3600');
     res.set('Content-Type', 'application/jwk-set+json');
     return jwks;
@@ -199,9 +196,9 @@ export class AuthController {
   async getSessions(
     @Req() req: AuthenticatedRequest,
   ): Promise<SessionListDto> {
-    const sessions = await this.sessionService.getUserSessions(req.user.userId);
+    const activeSessions = await this.sessions.getUserSessions(req.user.userId);
     const currentSessionId = (req.headers['x-session-id'] as string) ?? null;
-    return { sessions, currentSessionId, total: sessions.length };
+    return { sessions: activeSessions, currentSessionId, total: activeSessions.length };
   }
 
   @Delete('sessions/:sessionGuuid')
@@ -215,7 +212,7 @@ export class AuthController {
     @Param('sessionGuuid', ParseUUIDPipe) sessionGuuid: string,
     @Req() req: AuthenticatedRequest,
   ): Promise<void> {
-    await this.sessionService.terminateSession(req.user.userId, sessionGuuid);
+    await this.sessions.terminateSession(req.user.userId, sessionGuuid);
   }
 
   @Delete('sessions')
@@ -229,7 +226,7 @@ export class AuthController {
   async terminateAllSessions(
     @Req() req: AuthenticatedRequest,
   ): Promise<void> {
-    await this.sessionService.terminateAllSessions(req.user.userId);
+    await this.sessions.terminateAllSessions(req.user.userId);
   }
 
   @Get('session-status')
@@ -254,7 +251,7 @@ export class AuthController {
       return { active: false, revoked: true, wipe: false };
     }
 
-    return this.authService.checkSessionStatus(token);
+    return this.sessions.checkStatus(token);
   }
 
   @Post('profile-complete')
@@ -269,7 +266,7 @@ export class AuthController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: OnboardingCompleteDto,
   ): Promise<OnboardingCompleteResponseDto> {
-    return this.onboardingService.completeOnboarding(req.user.userId, dto);
+    return this.onboarding.completeProfile(req.user.userId, dto);
   }
 
   @Get('permissions-snapshot')
@@ -283,8 +280,8 @@ export class AuthController {
   })
   async getPermissionsSnapshot(
     @CurrentUser() user: SessionUser,
-  ): Promise<PermissionsSnapshotResponse> {
-    return this.permissionsService.buildPermissionsSnapshot(user.userId);
+  ) {
+    return this.permissions.getSnapshot(user.userId);
   }
 
   @Get('permissions-delta')
@@ -299,8 +296,8 @@ export class AuthController {
   async getPermissionsDelta(
     @CurrentUser() user: SessionUser,
     @Query('version') sinceVersion: string,
-  ): Promise<{ version: number; added: PermissionsSnapshot; removed: PermissionsSnapshot; modified: PermissionsSnapshot }> {
-    return this.permissionsService.calculateDelta(user.userId, sinceVersion ?? '');
+  ) {
+    return this.permissions.getDelta(user.userId, sinceVersion ?? '');
   }
 
   @Post('sync-time')

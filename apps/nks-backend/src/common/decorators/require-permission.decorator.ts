@@ -1,6 +1,5 @@
 import { applyDecorators, SetMetadata, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth } from '@nestjs/swagger';
-import { AuthGuard } from '../guards/auth.guard';
 import { RBACGuard } from '../guards/rbac.guard';
 import {
   REQUIRE_ENTITY_PERMISSION_KEY,
@@ -8,10 +7,13 @@ import {
 } from './require-entity-permission.decorator';
 
 /**
- * Composite decorator: auth + RBAC guard + entity permission metadata + Swagger auth.
+ * Composite decorator: RBAC guard + entity permission metadata + Swagger auth.
+ *
+ * AuthGuard is already registered as a global APP_GUARD — adding it here would
+ * cause it to run twice. Only RBACGuard needs to be listed explicitly.
  *
  * Replaces this boilerplate on every protected method:
- *   @UseGuards(AuthGuard, RBACGuard)
+ *   @UseGuards(RBACGuard)
  *   @ApiBearerAuth()
  *   @RequireEntityPermission({ entityCode: EntityCodes.INVOICE, action: 'create' })
  *
@@ -27,7 +29,7 @@ export function RequirePermission(
 ) {
   return applyDecorators(
     SetMetadata(REQUIRE_ENTITY_PERMISSION_KEY, { entityCode, action }),
-    UseGuards(AuthGuard, RBACGuard),
+    UseGuards(RBACGuard),
     ApiBearerAuth(),
   );
 }
@@ -36,7 +38,7 @@ export function RequirePermission(
  * Composite decorator for dynamic entity codes resolved from a URL route parameter.
  *
  * Replaces:
- *   @UseGuards(AuthGuard, RBACGuard)
+ *   @UseGuards(RBACGuard)
  *   @ApiBearerAuth()
  *   @RequireEntityPermission({ routeParam: 'entityCode', action: 'edit' })
  *
@@ -52,7 +54,7 @@ export function RequirePermissionForParam(
 ) {
   return applyDecorators(
     SetMetadata(REQUIRE_ENTITY_PERMISSION_KEY, { routeParam, action }),
-    UseGuards(AuthGuard, RBACGuard),
+    UseGuards(RBACGuard),
     ApiBearerAuth(),
   );
 }

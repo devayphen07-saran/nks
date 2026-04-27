@@ -1,16 +1,11 @@
 import * as crypto from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { SessionAuthValidator } from '../../validators';
-import { InternalServerException } from '../../../../../common/exceptions';
-import { ConfigService } from '@nestjs/config';
 import { SessionsRepository } from '../../repositories/sessions.repository';
 import { SessionMapper } from '../../mapper/session.mapper';
-import { SessionValidator, DeviceTypeEnum } from '../../../../../common/validators/session.validator';
-import { AuthUsersRepository } from '../../repositories/auth-users.repository';
-import { PermissionsService } from '../permissions/permissions.service';
-import { AuthUtilsService } from '../shared/auth-utils.service';
+import { SessionValidator } from '../../../../../common/validators/session.validator';
 import { RevokedDevicesRepository } from '../../repositories/revoked-devices.repository';
-import type { UserRoleEntry } from '../../mapper/auth-mapper';
+import { SessionBootstrapService } from './session-bootstrap.service';
 import type {
   UserSession,
   NewUserSession,
@@ -37,54 +32,30 @@ export interface PublicSession {
   createdAt: Date;
 }
 
-
 /**
- * SessionService
- * Responsible for session lifecycle management
- * Responsibilities:
- * - Create sessions with device tracking
- * - Retrieve active sessions
- * - Terminate sessions
- * - Enforce session limits
- * - Clean up expired sessions
- * - Mark sessions for token rotation
+ * SessionService — session CRUD and lifecycle.
+ *
+ * Owns: create, find, terminate, revoke.
+ * Does NOT own: session enrichment pipeline (roles, permissions, device fingerprint).
+ *   → that responsibility lives in SessionBootstrapService.
  */
 @Injectable()
 export class SessionService {
   private readonly logger = new Logger(SessionService.name);
-  private readonly ipHmacSecret: string;
 
   constructor(
     private readonly sessionsRepository: SessionsRepository,
-    private readonly authUsersRepository: AuthUsersRepository,
-    private readonly permissionsService: PermissionsService,
-    private readonly configService: ConfigService,
-    private readonly authUtils: AuthUtilsService,
     private readonly revokedDevicesRepository: RevokedDevicesRepository,
-  ) {
-    this.ipHmacSecret = this.configService.getOrThrow<string>('IP_HMAC_SECRET');
-  }
-
-  // Cleanup logic moved to SessionCleanupService (single cron entry point).
+    private readonly sessionBootstrap: SessionBootstrapService,
+  ) {}
 
   /**
    * Create a new session for a user, atomically enforcing the session limit.
-   *
-   * The limit check and insert execute inside a single DB transaction via
-   * `createWithinLimit`, eliminating the TOCTOU race condition where two
-   * concurrent logins both pass the pre-insert count check and both create
-   * a session — exceeding the cap.
    */
   async createSession(input: SessionCreateInput): Promise<UserSession> {
-    // Validate and normalize enum values
-    const validatedDeviceType = SessionValidator.validateDeviceType(
-      input.deviceType,
-    );
-    const validatedLoginMethod = SessionValidator.validateLoginMethod(
-      input.loginMethod,
-    );
+    const validatedDeviceType = SessionValidator.validateDeviceType(input.deviceType);
+    const validatedLoginMethod = SessionValidator.validateLoginMethod(input.loginMethod);
 
-    // Atomic: delete excess sessions + insert new session in one transaction
     const session = await this.sessionsRepository.createWithinLimit(
       input.userId,
       AUTH_CONSTANTS.SESSION.MAX_PER_USER,
@@ -100,53 +71,35 @@ export class SessionService {
         platform: input.platform,
         appVersion: input.appVersion,
         loginMethod: validatedLoginMethod,
+        csrfSecret: crypto.randomBytes(32).toString('hex'),
       } as NewUserSession,
     );
 
     SessionAuthValidator.assertSessionCreated(session);
-
-    this.logger.debug(
-      `Session created for user ${input.userId} (device: ${input.deviceName})`,
-    );
-
+    this.logger.debug(`Session created for user ${input.userId} (device: ${input.deviceName})`);
     return session;
   }
 
-  /**
-   * Get all active sessions for a user
-   */
   async getUserSessions(userId: number): Promise<SessionInfoDto[]> {
     const sessions = await this.sessionsRepository.findActiveByUserId(userId);
     return sessions.map(SessionMapper.buildSessionInfoDtoFromRow);
   }
 
-  /**
-   * Get session by ID
-   */
   async getSessionById(sessionId: number): Promise<UserSession | null> {
     return this.sessionsRepository.findById(sessionId);
   }
 
-  /**
-   * Get session by token
-   */
   async getSessionByToken(token: string): Promise<UserSession | null> {
     return this.sessionsRepository.findByToken(token);
   }
 
-  /**
-   * Invalidate a session (logout from specific device)
-   */
   async invalidateSession(sessionId: number): Promise<void> {
     await this.sessionsRepository.delete(sessionId);
     this.logger.debug(`Session invalidated: ${sessionId}`);
   }
 
   /**
-   * Invalidate session by token — atomically in one transaction:
-   *   1. JTI inserted into jti_blocklist → access token immediately invalid
-   *   2. Refresh token marked revoked
-   *   3. Session row deleted
+   * Atomically: JTI blocklisted → refresh token revoked → session row deleted.
    */
   async invalidateSessionByToken(token: string): Promise<void> {
     const session = await this.sessionsRepository.findByToken(token);
@@ -154,21 +107,13 @@ export class SessionService {
     await this.sessionsRepository.revokeAndDeleteSession(session.id, 'LOGOUT', session.jti ?? undefined);
   }
 
-  /**
-   * Terminate a specific session (admin/user action)
-   */
   async terminateSession(userId: number, sessionGuuid: string): Promise<void> {
     const session = await this.sessionsRepository.findByGuuid(sessionGuuid);
-
-    // Session already gone — treat as success (idempotent delete).
     if (!session) return;
 
     SessionAuthValidator.assertSessionBelongsToUser(session, userId);
-
     await this.sessionsRepository.revokeAndDeleteSession(session.id, 'TERMINATED', session.jti ?? undefined);
 
-    // Device revocation is best-effort — it prevents future offline sync pushes
-    // from this device but is not on the critical auth path.
     if (session.deviceId) {
       this.revokedDevicesRepository
         .revoke(session.userFk, session.deviceId, userId)
@@ -183,9 +128,8 @@ export class SessionService {
   }
 
   /**
-   * Terminate all sessions for a user (logout everywhere).
-   * Blocklists every outstanding JTI before deleting the session rows so
-   * existing access tokens cannot survive the full 15-min TTL window.
+   * Blocklists every outstanding JTI before deleting rows so access tokens
+   * cannot outlive the full 15-min TTL window.
    */
   async terminateAllSessions(userId: number): Promise<number> {
     const jtis = await this.sessionsRepository.findJtisByUserId(userId);
@@ -194,114 +138,17 @@ export class SessionService {
     return jtis.length;
   }
 
-  /**
-   * Revoke refresh token (theft detection)
-   */
   async revokeRefreshToken(sessionId: number): Promise<void> {
     await this.sessionsRepository.revokeRefreshToken(sessionId);
   }
 
-  // ─── BetterAuth Session Creation ──────────────────────────────────────────
+  // ─── BetterAuth Session Bootstrap ─────────────────────────────────────────
 
   /**
-   * Create a BetterAuth session for a user and embed roles + JWT into it.
-   * Called by AuthFlowOrchestrator and AuthService.rotateSession.
+   * Delegates to SessionBootstrapService — create BetterAuth session stub
+   * and enrich it with roles, permissions, device fingerprint, JTI.
    */
-  async createSessionForUser(
-    userId: number,
-    deviceInfo?: DeviceInfo,
-  ): Promise<{
-    token: string;
-    expiresAt: Date;
-    sessionGuuid: string;
-    jti: string;
-    userRoles: UserRoleEntry[];
-    userEmail: string;
-    permissions: Awaited<ReturnType<PermissionsService['getUserPermissions']>>;
-  }> {
-    // BREAKING: tied to better-auth@^1.6.2 internalAdapter API.
-    // internalAdapter is undocumented. If createSession changes on a BetterAuth
-    // upgrade, this will fail at runtime with no TS error.
-    const ctx = await this.authUtils.getBetterAuthContext();
-    const session = await ctx.internalAdapter.createSession(String(userId));
-    SessionAuthValidator.assertSessionCreated(session);
-
-    try {
-      const permissions = await this.permissionsService.getUserPermissions(userId);
-      const userRoles = permissions.roles ?? [];
-
-      const user = await this.authUsersRepository.findEmailAndGuuid(userId);
-      if (!user?.guuid) {
-        throw new InternalServerException(
-          'User record missing guuid — cannot sign JWT',
-        );
-      }
-
-      const roleHash = this.authUtils.hashRoles(userRoles);
-
-      const rawType = deviceInfo?.deviceType?.toUpperCase();
-      const validatedDeviceType =
-        rawType && Object.values(DeviceTypeEnum).includes(rawType as DeviceTypeEnum)
-          ? (rawType as DeviceTypeEnum)
-          : null;
-
-      const ipHash = deviceInfo?.ipAddress
-        ? crypto
-            .createHmac('sha256', this.ipHmacSecret)
-            .update(deviceInfo.ipAddress)
-            .digest('hex')
-        : null;
-
-      // Auto-populate activeStoreFk from user's defaultStoreFk.
-      // Validate the user still has a role in that store before trusting it.
-      const defaultStoreId = user.defaultStoreFk ?? null;
-      const activeStoreFk =
-        defaultStoreId !== null &&
-        userRoles.some((r) => r.storeId === defaultStoreId)
-          ? defaultStoreId
-          : null;
-
-      const jti = crypto.randomUUID();
-
-      const updatedSession = await this.sessionsRepository.updateByToken(session.token, {
-        roleHash,
-        activeStoreFk,
-        jti,
-        ...(deviceInfo
-          ? {
-              deviceId: deviceInfo.deviceId ?? null,
-              deviceName: deviceInfo.deviceName ?? null,
-              deviceType: validatedDeviceType,
-              appVersion: deviceInfo.appVersion ?? null,
-              ipAddress: deviceInfo.ipAddress ?? null,
-              userAgent: deviceInfo.userAgent ?? null,
-              ipHash,
-            }
-          : {}),
-      });
-
-      if (!updatedSession?.guuid) {
-        throw new InternalServerException(
-          'Session update failed — cannot proceed without session guuid',
-        );
-      }
-      const sessionGuuid = updatedSession.guuid;
-
-      this.logger.log(`Session created for user ${userId}.`);
-
-      return {
-        token: session.token,
-        expiresAt: session.expiresAt,
-        sessionGuuid,
-        jti,
-        userRoles,
-        userEmail: user.email ?? '',
-        permissions,
-      };
-    } catch (err) {
-      this.logger.error(`Failed to embed roles/JWT into session: ${err instanceof Error ? err.message : String(err)}`);
-      throw err;
-    }
+  createSessionForUser(userId: number, deviceInfo?: DeviceInfo) {
+    return this.sessionBootstrap.createForUser(userId, deviceInfo);
   }
-
 }

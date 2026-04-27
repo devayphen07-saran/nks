@@ -13,7 +13,8 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { StatusService } from './status.service';
+import { StatusQueryService } from './status-query.service';
+import { StatusCommandService } from './status-command.service';
 import { ParseStatusPipe } from './pipes/parse-status.pipe';
 import { CreateStatusDto, UpdateStatusDto, GetAllStatusesQueryDto } from './dto/status.dto';
 import type { StatusResponse } from './dto/status.dto';
@@ -33,14 +34,17 @@ import type { PaginatedResult } from '../../../common/utils/paginated-result';
 @EntityResource(EntityCodes.STATUS)
 @ApiBearerAuth()
 export class AdminStatusController {
-  constructor(private readonly statusService: StatusService) {}
+  constructor(
+    private readonly statusQuery: StatusQueryService,
+    private readonly statusCommand: StatusCommandService,
+  ) {}
 
   @Get()
   @RequireEntityPermission({ action: PermissionActions.VIEW, scope: 'PLATFORM' })
   @ResponseMessage('Statuses retrieved successfully')
   @ApiOperation({ summary: 'List all statuses including inactive' })
   async listStatuses(@Query() query: GetAllStatusesQueryDto): Promise<PaginatedResult<StatusResponse>> {
-    return this.statusService.listStatuses(query);
+    return this.statusQuery.listStatuses(query);
   }
 
   @Post()
@@ -52,7 +56,7 @@ export class AdminStatusController {
     @Body() dto: CreateStatusDto,
     @CurrentUser() user: SessionUser,
   ): Promise<StatusResponse> {
-    return this.statusService.createStatus(dto, user.userId);
+    return this.statusCommand.createStatus(dto, user.userId);
   }
 
   @Put(':guuid')
@@ -64,7 +68,7 @@ export class AdminStatusController {
     @Body() dto: UpdateStatusDto,
     @CurrentUser() user: SessionUser,
   ): Promise<StatusResponse> {
-    return this.statusService.updateStatus(status, dto, user.userId);
+    return this.statusCommand.updateStatus(status, dto, user.userId);
   }
 
   @Delete(':guuid')
@@ -75,6 +79,6 @@ export class AdminStatusController {
     @Param('guuid', ParseUUIDPipe, ParseStatusPipe) status: Status,
     @CurrentUser() user: SessionUser,
   ): Promise<void> {
-    await this.statusService.deleteStatus(status, user.userId);
+    await this.statusCommand.deleteStatus(status, user.userId);
   }
 }

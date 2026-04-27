@@ -1,123 +1,64 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Request, Response, NextFunction } from 'express';
-import * as crypto from 'crypto';
-import { parseCookieHeader } from '../utils/cookie.utils';
+import { AppConfigService } from '../../config/app-config.service';
+import { CsrfTokenService } from './csrf-token.service';
+import { AuthControllerHelpers } from '../utils/auth-helpers';
 
 /**
- * CSRF Protection Middleware
+ * CSRF Sync Middleware — manages the csrf_token cookie lifecycle only.
  *
- * Protects against Cross-Site Request Forgery by:
- * 1. Generating CSRF tokens and storing in httpOnly cookies
- * 2. Validating CSRF tokens from request headers/body on unsafe methods (POST, PUT, DELETE, PATCH)
- * 3. Requiring Same-Site cookie policy
+ * CSRF Sync Middleware — pre-auth CSRF cookie only.
  *
- * Safe methods (GET, HEAD, OPTIONS) bypass CSRF check.
- * The frontend automatically includes CSRF token via X-CSRF-Token header.
+ * Responsibility split:
+ *   Middleware: sets a random csrf_token cookie for UNAUTHENTICATED requests only.
+ *              (pre-login state; double-submit baseline so the web app has a token
+ *               available before the session exists)
+ *   AuthGuard:  for authenticated cookie sessions, computes csrf_token from
+ *              session.csrfSecret (per-session random secret stored in DB) and
+ *              refreshes the cookie after every auth check.
+ *
+ * Skip conditions:
+ *   - Bearer token requests — mobile clients; no CSRF concern.
+ *   - Requests that already have an nks_session cookie — AuthGuard handles those.
+ *
+ * Why non-httpOnly: the double-submit pattern requires JS to read csrf_token
+ * so it can echo the value in X-CSRF-Token on state-mutating requests.
+ * SameSite=strict (default) means a cross-origin attacker cannot make the
+ * browser send it automatically.
  */
 @Injectable()
 export class CsrfMiddleware implements NestMiddleware {
-  constructor(private readonly configService: ConfigService) {}
-
-  // Methods that require CSRF validation
-  private readonly UNSAFE_METHODS = ['POST', 'PUT', 'DELETE', 'PATCH'];
-
-  // Unauthenticated endpoints that bypass CSRF check.
-  // These are public routes that neither read cookies for auth nor change
-  // server-side state on behalf of a logged-in user — the classic CSRF threat.
-  //
-  // Authenticated cookie-using routes (token/verify, session DELETE) are
-  // intentionally excluded so they still require a valid CSRF token.
-  private readonly CSRF_EXEMPT_ROUTES = [
-    '/auth/login',
-    '/auth/register',
-    '/auth/refresh-token',
-    '/auth/logout',
-    '/auth/sync-time',
-    '/auth/session-status',
-    '/auth/otp/send',
-    '/auth/otp/verify',
-    '/auth/otp/resend',
-    '/auth/otp/email/send',
-    '/auth/otp/email/verify',
-    '/auth/.well-known/jwks.json',
-    '/auth/mobile-jwks',
-  ];
+  constructor(
+    private readonly appConfig: AppConfigService,
+    private readonly csrfToken: CsrfTokenService,
+  ) {}
 
   use(req: Request, res: Response, next: NextFunction) {
-    // Bearer token requests (mobile/API clients) are immune to CSRF by design —
-    // CSRF is a cookie-based attack. Skip validation for these clients entirely.
-    const authHeader = req.headers['authorization'];
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      return next();
-    }
+    // Safe methods cannot carry state-mutating side effects — nothing to protect.
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
 
-    // Generate or get existing CSRF token
-    const csrfToken = this.getOrCreateCsrfToken(req, res);
+    // Bearer clients don't use cookies — CSRF is irrelevant.
+    if (req.headers['authorization']?.startsWith('Bearer ')) return next();
 
-    // Store token in response headers for frontend to read
-    res.setHeader('X-CSRF-Token', csrfToken);
+    const cookies = req.cookies as Record<string, string | undefined>;
 
-    // Validate CSRF token for unsafe methods
-    if (this.UNSAFE_METHODS.includes(req.method)) {
-      // Check if route is exempt from CSRF check
-      if (!this.isExemptRoute(req.path)) {
-        const providedToken =
-          req.headers['x-csrf-token'] ||
-          req.body?.csrfToken;
+    // Authenticated sessions: AuthGuard loads the session row (which carries
+    // csrfSecret) and refreshes the CSRF cookie after auth. Skip here.
+    if (cookies[AuthControllerHelpers.SESSION_COOKIE_NAME]) return next();
 
-        const tokenMatch =
-          typeof providedToken === 'string' &&
-          providedToken.length === csrfToken.length &&
-          crypto.timingSafeEqual(
-            Buffer.from(providedToken),
-            Buffer.from(csrfToken),
-          );
-        if (!tokenMatch) {
-          return res.status(403).json({
-            success: false,
-            message: 'CSRF token missing or invalid',
-          });
-        }
-      }
-    }
-
-    next();
-  }
-
-  /**
-   * Get existing CSRF token from cookie or create new one
-   */
-  private getOrCreateCsrfToken(req: Request, res: Response): string {
-    const cookies = this.parseCookies(req);
-    let token = cookies['csrf_token'];
-
-    if (!token) {
-      token = crypto.randomBytes(32).toString('hex');
-      res.cookie('csrf_token', token, {
-        httpOnly: true, // JS cannot read — token delivered via X-CSRF-Token response header
-        secure: this.configService.get<string>('NODE_ENV') === 'production',
-        sameSite: 'strict',
-        maxAge: 3600 * 1000, // 1 hour
+    // Unauthenticated: set a random pre-auth CSRF cookie so the web app has
+    // a token value available before login completes.
+    if (!cookies['csrf_token']) {
+      const sameSite = this.appConfig.csrfSameSite;
+      res.cookie('csrf_token', this.csrfToken.generatePreAuth(), {
+        httpOnly: false,
+        secure: this.appConfig.isProduction || sameSite === 'none',
+        sameSite,
+        maxAge: 3600 * 1000,
         path: '/',
       });
     }
 
-    return token;
-  }
-
-  private parseCookies(req: Request): Record<string, string> {
-    return parseCookieHeader(req.headers.cookie ?? '');
-  }
-
-  /**
-   * Check if route is exempt from CSRF validation.
-   * Strips the global API prefix (e.g. /api/v1) before matching so that
-   * exempt routes can be listed without the prefix regardless of how main.ts
-   * registers the global prefix.
-   */
-  private isExemptRoute(path: string): boolean {
-    const normalized = path.replace(/^\/api\/v\d+/, '');
-    return this.CSRF_EXEMPT_ROUTES.includes(normalized);
+    next();
   }
 }

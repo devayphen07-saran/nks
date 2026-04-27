@@ -7,7 +7,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { AppConfigService } from '../../config/app-config.service';
 import { Request, Response } from 'express';
 import { ZodValidationException } from 'nestjs-zod';
 import { ZodError } from 'zod';
@@ -35,8 +35,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
   private readonly isDevelopment: boolean;
 
-  constructor(configService: ConfigService) {
-    this.isDevelopment = configService.get<string>('NODE_ENV') === 'development';
+  constructor(appConfig: AppConfigService) {
+    this.isDevelopment = appConfig.isDevelopment;
   }
 
   catch(exception: unknown, host: ArgumentsHost): void {
@@ -47,16 +47,38 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const rawRequestId = request.headers['x-request-id'];
     const requestId = Array.isArray(rawRequestId) ? rawRequestId[0] : rawRequestId;
 
-    const envelope = this.buildResponse(exception, request, requestId);
+    const envelope = this.buildResponse(exception, requestId);
 
+    // Structured log fields: aggregators (Datadog, ELK) can filter by any of
+    // these without regex-parsing the message string.
+    // 3-arg form: logger.error(fields, msg, context) — nestjs-pino merges
+    // `fields` into the JSON object and uses `msg` as the message string.
     if (envelope.statusCode >= 500) {
       this.logger.error(
-        `[${request.method}] ${request.url} → ${envelope.statusCode} | rid=${requestId ?? '-'}`,
-        exception instanceof Error ? exception.stack : String(exception),
+        {
+          method: request.method,
+          url: request.url,
+          statusCode: envelope.statusCode,
+          requestId,
+          errorCode: envelope.errorCode,
+          err: exception instanceof Error
+            ? { message: exception.message, stack: exception.stack, name: exception.name }
+            : String(exception),
+        },
+        'Unhandled exception',
+        GlobalExceptionFilter.name,
       );
     } else {
       this.logger.warn(
-        `[${request.method}] ${request.url} → ${envelope.statusCode} | ${envelope.message} | rid=${requestId ?? '-'}`,
+        {
+          method: request.method,
+          url: request.url,
+          statusCode: envelope.statusCode,
+          requestId,
+          errorCode: envelope.errorCode,
+        },
+        envelope.message,
+        GlobalExceptionFilter.name,
       );
     }
 
@@ -74,12 +96,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
   // ─────────────────────────────────────────────────────────────────────────
   private buildResponse(
     exception: unknown,
-    request: Request,
     requestId: string | undefined,
   ): ApiResponse<null> {
-    // originalUrl preserves the full path when mounted behind a sub-router or proxy
-    const path = request.originalUrl ?? request.url;
-
     // 1. Our custom AppException (carries errorCode, errors, details)
     if (exception instanceof AppException) {
       const res = exception.getResponse() as Record<string, unknown>;
@@ -95,7 +113,6 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         errorCode,
         errors: (res['errors'] as Record<string, string[]> | null) ?? null,
         details: (res['details'] as string[] | null) ?? null,
-        path,
         requestId,
       });
     }
@@ -115,7 +132,6 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message: 'Validation failed',
         errorCode: ErrorCode.VALIDATION_ERROR,
         errors,
-        path,
         requestId,
       });
     }
@@ -146,7 +162,6 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         errorCode,
         errors: (responseData['errors'] as Record<string, string[]> | null) ?? null,
         details: (responseData['details'] as string[] | null) ?? null,
-        path,
         requestId,
       });
     }
@@ -155,7 +170,6 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     if (this.isDbError(exception)) {
       return this.handleDbError(
         exception as { code: string; detail?: string; table?: string },
-        path,
         requestId,
       );
     }
@@ -170,7 +184,6 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       message,
       errorCode: ErrorCode.INTERNAL_SERVER_ERROR,
-      path,
       requestId,
     });
   }
@@ -228,7 +241,6 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
   private handleDbError(
     exception: { code: string; detail?: string; table?: string },
-    path: string,
     requestId: string | undefined,
   ): ApiResponse<null> {
     let errorCode: ErrorCodeType = ErrorCode.DB_QUERY_FAILED;
@@ -255,8 +267,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       // NOT NULL violation is always a service-layer bug (a required field was not set),
       // never a user error. Log at error level to surface it immediately.
       this.logger.error(
+        { dbCode: exception.code, detail: exception.detail, table: exception.table },
         'NOT NULL constraint violation — likely a service bug, not a user error',
-        JSON.stringify({ code: exception.code, detail: exception.detail, table: exception.table }),
+        GlobalExceptionFilter.name,
       );
       // statusCode stays INTERNAL_SERVER_ERROR (500), message stays generic
     }
@@ -273,7 +286,6 @@ export class GlobalExceptionFilter implements ExceptionFilter {
             exception.table ? `table: ${exception.table}` : '',
           ].filter(Boolean)
         : null,
-      path,
       requestId,
     });
   }

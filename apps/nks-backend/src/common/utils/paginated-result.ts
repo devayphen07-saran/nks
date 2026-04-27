@@ -1,19 +1,23 @@
 import type { PaginationMeta } from './api-response';
 
 /**
- * Discriminated wrapper for paginated controller responses.
+ * Typed wrapper for paginated controller responses.
  *
- * The `__paginated` brand field lets TransformInterceptor.isPaginatedResult()
- * use a single reliable discriminant instead of duck-typing `{data[], meta}`
- * shape — which would false-positive on any domain object that happens to carry
- * those field names (e.g. SyncDeltaResponse { data: ChangeSet[], meta: {...} }).
+ * Using a class (not an interface) means TransformInterceptor can identify
+ * paginated results via `instanceof` — an explicit, standard type check —
+ * rather than inspecting a magic `__paginated` flag. No domain object can
+ * accidentally satisfy `instanceof PaginatedResult`.
  *
- * Always construct via the `paginated()` factory, never by object literal.
+ * Always construct via the `paginated()` factory.
  */
-export interface PaginatedResult<T> {
-  readonly __paginated: true;
-  data: T[];
-  meta: PaginationMeta;
+export class PaginatedResult<T> {
+  readonly data: T[];
+  readonly meta: PaginationMeta;
+
+  constructor(data: T[], meta: PaginationMeta) {
+    this.data = data;
+    this.meta = meta;
+  }
 }
 
 export function paginated<T>(opts: {
@@ -24,15 +28,11 @@ export function paginated<T>(opts: {
 }): PaginatedResult<T> {
   const { items, page, pageSize, total } = opts;
   if (pageSize <= 0) throw new RangeError('pageSize must be a positive integer');
-  return {
-    __paginated: true,
-    data: items,
-    meta: {
-      page,
-      pageSize,
-      total,
-      totalPages: total === 0 ? 0 : Math.ceil(total / pageSize),
-      hasMore: page * pageSize < total,
-    },
-  };
+  return new PaginatedResult(items, {
+    page,
+    pageSize,
+    total,
+    totalPages: total === 0 ? 0 : Math.ceil(total / pageSize),
+    hasMore: page * pageSize < total,
+  });
 }

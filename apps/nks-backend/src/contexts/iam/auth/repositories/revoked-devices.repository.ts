@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { and, eq, lt } from 'drizzle-orm';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
@@ -8,8 +7,6 @@ import * as schema from '../../../../core/database/schema';
 
 type Db = NodePgDatabase<typeof schema>;
 
-/** 3 days — matches the offline session HMAC TTL */
-const OFFLINE_SESSION_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 
 /**
  * RevokedDevicesRepository
@@ -70,16 +67,10 @@ export class RevokedDevicesRepository extends BaseRepository {
     return row !== undefined;
   }
 
-  /**
-   * Purge revocation entries older than 3 days.
-   * Runs nightly — entries beyond the offline session TTL are unreachable anyway.
-   */
-  @Cron('0 4 * * *')
-  async cleanupExpiredRevocations(): Promise<void> {
-    const cutoff = new Date(Date.now() - OFFLINE_SESSION_TTL_MS);
+  /** Delete revocation entries older than `cutoff`. Called by SessionCleanupService. */
+  async deleteExpired(cutoff: Date): Promise<void> {
     await this.db
       .delete(schema.revokedDevices)
       .where(lt(schema.revokedDevices.revokedAt, cutoff));
-    this.logger.log('Revoked devices cleanup: expired entries removed');
   }
 }

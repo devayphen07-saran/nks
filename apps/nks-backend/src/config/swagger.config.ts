@@ -6,10 +6,11 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
  */
 export function setupSwagger(app: INestApplication) {
   const config = new DocumentBuilder()
-    .setTitle('Backend API')
-    .setDescription('The core backend API documentation')
-    .setVersion('1.0')
+    .setTitle('NKS Backend API')
+    .setDescription('API documentation. All responses include `X-API-Version: 1`. Deprecated routes additionally carry `Deprecation: true` and `Sunset` headers (RFC 8594).')
+    .setVersion('1')
     .addBearerAuth()
+    .addApiKey({ type: 'apiKey', in: 'header', name: 'X-API-Version' }, 'api-version')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

@@ -1,18 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { SessionsRepository } from '../../repositories/sessions.repository';
+import { RevokedDevicesRepository } from '../../repositories/revoked-devices.repository';
 import { REVOKED_SESSION_RETENTION_DAYS } from '../../auth.constants';
+
+/** 3 days — matches the offline session HMAC TTL */
+const REVOKED_DEVICE_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 
 /**
  * SessionCleanupService — sole owner of scheduled session maintenance.
  *
- * Two separate cleanup concerns, both scheduled here:
- *   1. Expired sessions   — sessions whose expiresAt has passed (1-day grace for clock skew)
- *   2. Old revoked sessions — sessions explicitly revoked (logout, theft detection) and past
- *      the retention window. Kept temporarily for theft-detection audit trail.
- *
- * Single cron entry point prevents duplicate cleanup runs and keeps the
- * schedule in one place to reason about.
+ * Three cleanup concerns, all scheduled here:
+ *   1. Expired sessions        — sessions whose expiresAt has passed
+ *   2. Old revoked sessions    — explicitly revoked sessions past retention window
+ *   3. Expired device revocations — device revocations past the 3-day offline TTL
  */
 @Injectable()
 export class SessionCleanupService {
@@ -20,6 +21,7 @@ export class SessionCleanupService {
 
   constructor(
     private readonly sessionsRepository: SessionsRepository,
+    private readonly revokedDevicesRepository: RevokedDevicesRepository,
   ) {}
 
   /** Daily at 00:30 UTC — stagger from midnight to spread DB load */
@@ -28,18 +30,14 @@ export class SessionCleanupService {
     await Promise.allSettled([
       this.cleanupExpiredSessions(),
       this.cleanupOldRevokedSessions(),
+      this.cleanupExpiredDeviceRevocations(),
     ]);
   }
 
-  /**
-   * Delete sessions whose expiresAt has passed (1-day grace for clock skew).
-   * Can also be called manually (admin endpoint, health check).
-   */
   async cleanupExpiredSessions(): Promise<number> {
     try {
       const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const deletedCount =
-        await this.sessionsRepository.deleteExpiredSessions(cutoffTime);
+      const deletedCount = await this.sessionsRepository.deleteExpiredSessions(cutoffTime);
       if (deletedCount > 0) {
         this.logger.log(`Expired session cleanup: deleted ${deletedCount} session(s)`);
       }
@@ -52,7 +50,6 @@ export class SessionCleanupService {
     }
   }
 
-  /** Delete revoked sessions past the retention window. */
   async cleanupOldRevokedSessions(): Promise<number> {
     try {
       const deleted = await this.sessionsRepository.deleteOldRevokedSessions(
@@ -67,6 +64,18 @@ export class SessionCleanupService {
         `Revoked session cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
       );
       return 0;
+    }
+  }
+
+  async cleanupExpiredDeviceRevocations(): Promise<void> {
+    try {
+      const cutoff = new Date(Date.now() - REVOKED_DEVICE_TTL_MS);
+      await this.revokedDevicesRepository.deleteExpired(cutoff);
+      this.logger.debug('Revoked devices cleanup: expired entries removed');
+    } catch (error) {
+      this.logger.error(
+        `Revoked devices cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 }

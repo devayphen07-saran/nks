@@ -10,7 +10,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { EntityStatusService } from './entity-status.service';
+import { EntityStatusCommandService } from './entity-status-command.service';
 import { AssignStatusDto } from './dto/entity-status.dto';
 import type { EntityStatusResponse } from './dto/entity-status.dto';
 import { RBACGuard } from '../../../common/guards/rbac.guard';
@@ -27,13 +27,10 @@ import type { SessionUser } from '../../iam/auth/interfaces/session-user.interfa
 @EntityResource(EntityCodes.ENTITY_STATUS)
 @ApiBearerAuth()
 export class AdminEntityStatusController {
-  constructor(private readonly entityStatusService: EntityStatusService) {}
+  constructor(private readonly entityStatusCommand: EntityStatusCommandService) {}
 
   @Post(':entityCode')
-  @RequireEntityPermission({
-    action: PermissionActions.CREATE,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.CREATE, scope: 'PLATFORM' })
   @HttpCode(HttpStatus.CREATED)
   @ResponseMessage('Status assigned successfully')
   @ApiOperation({ summary: 'Assign a status to an entity' })
@@ -42,14 +39,11 @@ export class AdminEntityStatusController {
     @Body() dto: AssignStatusDto,
     @CurrentUser() user: SessionUser,
   ): Promise<EntityStatusResponse> {
-    return this.entityStatusService.assignStatus(entityCode, dto, user.userId);
+    return this.entityStatusCommand.assignStatus(entityCode, dto, user.userId);
   }
 
   @Delete(':entityCode/:statusGuuid')
-  @RequireEntityPermission({
-    action: PermissionActions.DELETE,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.DELETE, scope: 'PLATFORM' })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Remove a status from an entity' })
   async removeStatus(
@@ -57,6 +51,6 @@ export class AdminEntityStatusController {
     @Param('statusGuuid', ParseUUIDPipe) statusGuuid: string,
     @CurrentUser() user: SessionUser,
   ): Promise<void> {
-    await this.entityStatusService.removeStatus(entityCode, statusGuuid, user.userId);
+    await this.entityStatusCommand.removeStatus(entityCode, statusGuuid, user.userId);
   }
 }

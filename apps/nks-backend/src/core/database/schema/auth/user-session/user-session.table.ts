@@ -102,6 +102,19 @@ export const userSession = pgTable(
     isRefreshTokenRotated: boolean('is_refresh_token_rotated')
       .notNull()
       .default(false),
+
+    // Rolling session: timestamp of the last opaque token rotation.
+    // NULL for sessions created before rolling-session feature was deployed —
+    // treated as createdAt for rotation threshold purposes.
+    lastRotatedAt: timestamp('last_rotated_at', { withTimezone: true }),
+
+    // Per-session CSRF secret — random 32-byte hex generated at session creation.
+    // CSRF token = HMAC-SHA256(csrfSecret, CSRF_HMAC_SECRET).
+    // Independent of the session token: even if the session token leaks, an
+    // attacker cannot forge a CSRF token without also knowing csrfSecret.
+    // Rotated on every rolling session rotation and on @RotateCsrf() routes.
+    // NULL for sessions created before this feature — falls back to HMAC(token, secret).
+    csrfSecret: varchar('csrf_secret', { length: 64 }),
   },
   (table) => [
     index('user_session_user_idx').on(table.userFk),

@@ -72,7 +72,8 @@ export class LookupsRepository extends BaseRepository {
     return sortOrder === 'desc' ? desc(column) : asc(column);
   }
 
-  private queryCodeValues(categoryCode: string, limit = DEFAULT_LOOKUP_PAGE_SIZE) {
+  /** Generic — replaces getSalutations / getAddressTypes / getDesignations / getStoreLegalTypes / getStoreCategories. */
+  async getValuesByCategory(categoryCode: string, limit = DEFAULT_LOOKUP_PAGE_SIZE): Promise<CodeValueRow[]> {
     return this.db
       .select(codeValueSelect)
       .from(codeValue)
@@ -88,26 +89,6 @@ export class LookupsRepository extends BaseRepository {
       )
       .orderBy(codeValue.sortOrder)
       .limit(limit);
-  }
-
-  async getSalutations(): Promise<CodeValueRow[]> {
-    return this.queryCodeValues('SALUTATION');
-  }
-
-  async getAddressTypes(): Promise<CodeValueRow[]> {
-    return this.queryCodeValues('ADDRESS_TYPE');
-  }
-
-  async getDesignations(): Promise<CodeValueRow[]> {
-    return this.queryCodeValues('DESIGNATION');
-  }
-
-  async getStoreLegalTypes(): Promise<CodeValueRow[]> {
-    return this.queryCodeValues('STORE_LEGAL_TYPE');
-  }
-
-  async getStoreCategories(): Promise<CodeValueRow[]> {
-    return this.queryCodeValues('STORE_CATEGORY');
   }
 
   async getCountries(): Promise<CountryRow[]> {

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AuditEvents } from '../../../common/events/audit.events';
 import { AuditRepository } from './repositories/audit.repository';
-import type { AuditLogEntry } from './audit.service';
+import type { AuditLogEntry } from './audit-command.service';
 
 /**
  * Handles audit.log events off the hot path.

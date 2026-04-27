@@ -21,7 +21,7 @@ import { AUTH_CONSTANTS } from '../constants/app-constants';
  *    MOBILE (deviceType ∈ {'ANDROID', 'IOS'}):
  *      - Server does NOT set the session cookie (controllers skip the call
  *        based on `deviceInfo.deviceType`).
- *      - Mobile stores `session.sessionToken` and `session.accessToken` from
+ *      - Mobile stores `auth.sessionToken` and `auth.accessToken` from
  *        the body and attaches `Authorization: Bearer <token>` on requests.
  *      - Mobile additionally consumes `offline.token` / `offline.sessionSignature`
  *        for offline-capable verification.
@@ -89,13 +89,13 @@ export class AuthControllerHelpers {
    * Used for WEB clients only (mobile ignores this)
    */
   static setSessionCookie(res: Response, token: string): void {
+    const sameSite = AUTH_CONSTANTS.SESSION.COOKIE_SAME_SITE;
     res.cookie(AuthControllerHelpers.SESSION_COOKIE_NAME, token, {
       httpOnly: true,
-      // 'strict' prevents CSRF but blocks the cookie on cross-site top-level navigations
-      // (e.g. OAuth callback, email deep links). Switch to 'lax' if those flows are added.
-      sameSite: 'strict',
-      secure: AUTH_CONSTANTS.SESSION.COOKIE_SECURE,
-      maxAge: 30 * 24 * 60 * 60 * 1000,
+      sameSite,
+      // SameSite=none requires Secure=true (browser enforced).
+      secure: AUTH_CONSTANTS.SESSION.COOKIE_SECURE || sameSite === 'none',
+      maxAge: AUTH_CONSTANTS.SESSION.EXPIRY_SECONDS * 1000,
       path: '/',
     });
   }
@@ -104,7 +104,7 @@ export class AuthControllerHelpers {
    * Apply session cookie from AuthResponseEnvelope.
    */
   static applySessionCookie(res: Response, result: AuthResponseEnvelope): void {
-    const token = result.session?.sessionToken;
+    const token = result.auth?.sessionToken;
     if (token) {
       this.setSessionCookie(res, token);
     }
@@ -119,30 +119,30 @@ export class AuthControllerHelpers {
   }
 
   /**
-   * Strip sessionToken from the response body for web clients.
+   * Null out sessionToken for web clients.
    *
    * The sessionToken is an opaque credential (functionally equivalent to a
-   * password). Web clients receive it via an httpOnly cookie — exposing it in
-   * the JSON body risks capture by CDN logs, API gateways, and browser devtools.
+   * password). Web clients receive it via an httpOnly cookie — the body field
+   * is set to null so the schema stays consistent across platforms while the
+   * actual credential never appears in CDN logs, API gateways, or JS scope.
    *
    * Mobile clients need it in the body because they cannot use httpOnly cookies.
-   * Call this AFTER applySessionCookie() so the cookie is set before the field
-   * is removed from the returned object.
+   * Call this AFTER applySessionCookie() so the cookie is set first.
    */
   static forClient<T extends AuthResponseEnvelope>(
     result: T,
     deviceType?: string,
   ): T {
     if (AuthControllerHelpers.isMobile(deviceType)) return result;
-    const { sessionToken: _omit, ...sessionWithoutToken } = result.session;
-    return { ...result, session: sessionWithoutToken };
+    return { ...result, auth: { ...result.auth, sessionToken: null } };
   }
 
   static clearSessionCookie(res: Response): void {
+    const sameSite = AUTH_CONSTANTS.SESSION.COOKIE_SAME_SITE;
     res.clearCookie(AuthControllerHelpers.SESSION_COOKIE_NAME, {
       httpOnly: true,
-      sameSite: 'strict',
-      secure: AUTH_CONSTANTS.SESSION.COOKIE_SECURE,
+      sameSite,
+      secure: AUTH_CONSTANTS.SESSION.COOKIE_SECURE || sameSite === 'none',
       path: '/',
     });
   }

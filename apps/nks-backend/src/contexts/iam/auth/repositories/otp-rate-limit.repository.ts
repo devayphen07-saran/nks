@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
@@ -18,7 +18,6 @@ export class OtpRateLimitRepository extends BaseRepository {
       .from(schema.otpRequestLog)
       .where(eq(schema.otpRequestLog.identifierHash, identifierHash))
       .limit(1);
-
     return record ?? null;
   }
 
@@ -27,81 +26,26 @@ export class OtpRateLimitRepository extends BaseRepository {
       .insert(schema.otpRequestLog)
       .values(data)
       .returning();
-
     return record ?? null;
   }
 
-  async incrementRequestCount(id: number, newCount: number): Promise<void> {
+  /** Generic patch — replaces 7 specialized setters. */
+  async update(id: number, patch: Partial<OtpRequestLog>): Promise<void> {
     await this.db
       .update(schema.otpRequestLog)
-      .set({ requestCount: newCount })
+      .set(patch)
       .where(eq(schema.otpRequestLog.id, id));
   }
 
-  async resetRequestCount(id: number, newWindowExpiresAt: Date): Promise<void> {
-    await this.db
-      .update(schema.otpRequestLog)
-      .set({
-        requestCount: 0,
-        windowExpiresAt: newWindowExpiresAt,
-      })
-      .where(eq(schema.otpRequestLog.id, id));
-  }
-
-  async updateWindow(id: number, newWindowExpiresAt: Date): Promise<void> {
-    await this.db
-      .update(schema.otpRequestLog)
-      .set({
-        requestCount: 1,
-        windowExpiresAt: newWindowExpiresAt,
-      })
-      .where(eq(schema.otpRequestLog.id, id));
-  }
-
-  async recordAttempt(
+  /** Atomic counter increment (race-safe). */
+  async incrementCounter(
     id: number,
-    newRequestCount: number,
-    lastAttemptAt: Date,
+    field: 'requestCount' | 'consecutiveFailures',
   ): Promise<void> {
+    const col = schema.otpRequestLog[field];
     await this.db
       .update(schema.otpRequestLog)
-      .set({
-        requestCount: newRequestCount,
-        lastAttemptAt,
-      })
-      .where(eq(schema.otpRequestLog.id, id));
-  }
-
-  async resetWindow(
-    id: number,
-    newRequestCount: number,
-    lastAttemptAt: Date,
-    newWindowExpiresAt: Date,
-    newExpiresAt: Date,
-  ): Promise<void> {
-    await this.db
-      .update(schema.otpRequestLog)
-      .set({
-        requestCount: newRequestCount,
-        lastAttemptAt,
-        windowExpiresAt: newWindowExpiresAt,
-        consecutiveFailures: 0,
-        expiresAt: newExpiresAt,
-      })
-      .where(eq(schema.otpRequestLog.id, id));
-  }
-
-  async incrementFailureCount(id: number, newFailureCount: number): Promise<void> {
-    await this.db
-      .update(schema.otpRequestLog)
-      .set({ consecutiveFailures: newFailureCount })
-      .where(eq(schema.otpRequestLog.id, id));
-  }
-
-  async resetFailureCount(id: number): Promise<void> {
-    await this.db
-      .update(schema.otpRequestLog)
-      .set({ consecutiveFailures: 0 })
+      .set({ [field]: sql`${col} + 1` })
       .where(eq(schema.otpRequestLog.id, id));
   }
 }

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RouteMapper } from './mapper/route.mapper';
-import { RolesService } from '../roles/roles.service';
+import { RoleQueryService } from '../roles/role-query.service';
 import { PermissionsRepository } from '../roles/repositories/role-permissions.repository';
 import { RoutesValidator } from './validators';
 import type { UserRoutesResponseDto, StoreRoutesResponseDto } from './dto/route-response.dto';
@@ -30,7 +30,7 @@ function annotateRoutePermissions(
     }
     // Entity is universally readable (defaultAllow = true) — grant VIEW without an explicit role_permissions row.
     // CRUD remains false: default-allow is blanket VIEW only, not write access.
-    if (r.defaultAllow === true) {
+    if (r.defaultAllow) {
       return { ...r, hasAccess: true, canView: true, canCreate: false, canEdit: false, canDelete: false, canExport: false };
     }
     const actions = permMap.get(r.entityTypeFk);
@@ -51,12 +51,12 @@ export class RoutesService {
   private readonly logger = new Logger(RoutesService.name);
 
   constructor(
-    private readonly rolesService: RolesService,
+    private readonly roleQuery: RoleQueryService,
     private readonly permissionsRepository: PermissionsRepository,
   ) {}
 
   async getAdminRoutes(caller: SessionUser): Promise<UserRoutesResponseDto> {
-    const userRoles = await this.rolesService.listUserRoles(caller.userId);
+    const userRoles = await this.roleQuery.listUserRoles(caller.userId);
     const roleIds = userRoles.map((r) => r.roleId);
 
     if (roleIds.length === 0) {
@@ -81,7 +81,7 @@ export class RoutesService {
       return { routes: [] };
     }
 
-    const storeRoles = await this.rolesService.getActiveRolesForStore(userId, storeId);
+    const storeRoles = await this.roleQuery.getActiveRolesForStore(userId, storeId);
     const roleIds = storeRoles.map((r) => r.roleId);
 
     RoutesValidator.assertStoreAccess(roleIds);

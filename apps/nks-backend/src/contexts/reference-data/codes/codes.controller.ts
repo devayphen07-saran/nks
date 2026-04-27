@@ -13,7 +13,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import { CodesService } from './codes.service';
+import { CodesQueryService } from './codes-query.service';
+import { CodesCommandService } from './codes-command.service';
 import { Public } from '../../../common/decorators/public.decorator';
 import { RequireEntityPermission } from '../../../common/decorators/require-entity-permission.decorator';
 import { EntityResource } from '../../../common/decorators/entity-resource.decorator';
@@ -30,7 +31,10 @@ import type { PaginatedResult } from '../../../common/utils/paginated-result';
 @Controller('codes')
 @EntityResource(EntityCodes.CODE_VALUE)
 export class CodesController {
-  constructor(private readonly service: CodesService) {}
+  constructor(
+    private readonly codesQuery: CodesQueryService,
+    private readonly codesCommand: CodesCommandService,
+  ) {}
 
   @Get(':categoryCode')
   @Public()
@@ -43,7 +47,7 @@ export class CodesController {
     @Param('categoryCode') categoryCode: string,
     @Query() query: GetCodeValuesQueryDto,
   ): Promise<PaginatedResult<CodeValueResponseDto>> {
-    return this.service.listValues(categoryCode.toUpperCase(), {
+    return this.codesQuery.listValues(categoryCode.toUpperCase(), {
       page: query.page,
       pageSize: query.pageSize,
       search: query.search,
@@ -65,7 +69,7 @@ export class CodesController {
     @Body() dto: CreateCodeValueDto,
     @CurrentUser() user: SessionUser,
   ): Promise<CodeValueResponseDto> {
-    return this.service.createValue(categoryCode.toUpperCase(), dto, user);
+    return this.codesCommand.createValue(categoryCode.toUpperCase(), dto, user);
   }
 
   @Put('values/:guuid')
@@ -78,7 +82,7 @@ export class CodesController {
     @Body() dto: UpdateCodeValueDto,
     @CurrentUser() user: SessionUser,
   ): Promise<CodeValueResponseDto> {
-    return this.service.updateValue(guuid, dto, user);
+    return this.codesCommand.updateValue(guuid, dto, user);
   }
 
   @Delete('values/:guuid')
@@ -90,6 +94,6 @@ export class CodesController {
     @Param('guuid', ParseUUIDPipe) guuid: string,
     @CurrentUser() user: SessionUser,
   ): Promise<void> {
-    await this.service.deleteValue(guuid, user);
+    await this.codesCommand.deleteValue(guuid, user);
   }
 }

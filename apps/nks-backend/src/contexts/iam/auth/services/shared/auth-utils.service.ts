@@ -43,7 +43,8 @@ export class AuthUtilsService {
     if (this.roleIdCache.has(roleCode)) return this.roleIdCache.get(roleCode) ?? null;
     const id = await this.roleQuery.findSystemRoleId(roleCode);
     if (this.roleIdCache.size >= 100) {
-      this.roleIdCache.delete(this.roleIdCache.keys().next().value!);
+      const oldest = this.roleIdCache.keys().next().value;
+      if (oldest !== undefined) this.roleIdCache.delete(oldest);
     }
     this.roleIdCache.set(roleCode, id);
     return id;

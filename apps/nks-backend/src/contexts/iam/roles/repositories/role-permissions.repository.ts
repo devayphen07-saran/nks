@@ -68,6 +68,9 @@ export interface BulkUpsertEntry {
   deny?: boolean;
 }
 
+type PermissionField = Exclude<keyof BulkUpsertEntry, 'entityCode' | 'deny'>;
+
+
 // ─── Repository ──────────────────────────────────────────────────────────────
 
 /**
@@ -183,7 +186,7 @@ export class PermissionsRepository extends BaseRepository implements OnModuleIni
     const codeToEntityId = new Map(typeRows.map((r) => [r.code, r.id]));
 
     // Expand each entry into one row per system action.
-    const ACTION_FIELDS: Array<[string, keyof BulkUpsertEntry]> = [
+    const ACTION_FIELDS: Array<[string, PermissionField]> = [
       ['VIEW',    'canView'],
       ['CREATE',  'canCreate'],
       ['EDIT',    'canEdit'],
@@ -206,8 +209,8 @@ export class PermissionsRepository extends BaseRepository implements OnModuleIni
           roleFk:       roleId,
           entityTypeFk,
           actionFk,
-          allowed:  Boolean(entry[field] ?? false),
-          deny:     Boolean(entry.deny ?? false),
+          allowed:  entry[field] ?? false,
+          deny:     entry.deny ?? false,
           isActive: true,
         });
       }

@@ -7,10 +7,11 @@ export class SyncDataMapper {
    * Soft-deleted rows become { operation: 'delete', data: null }.
    */
   static buildRouteChange(routeChangeRow: RouteChangeRow): SyncChange {
+    const updatedAt = routeChangeRow.updatedAt ?? new Date(0);
     return {
       table: 'routes',
       operation: routeChangeRow.deletedAt ? 'delete' : 'upsert',
-      updatedAt: routeChangeRow.updatedAt.getTime(),
+      updatedAt: updatedAt.getTime(),
       data: routeChangeRow.deletedAt
         ? null
         : {
@@ -26,7 +27,7 @@ export class SyncDataMapper {
             isPublic: routeChangeRow.isPublic,
             isActive: routeChangeRow.isActive,
             createdAt: routeChangeRow.createdAt.toISOString(),
-            updatedAt: routeChangeRow.updatedAt.toISOString(),
+            updatedAt: updatedAt.toISOString(),
             deletedAt: null,
           },
     };
@@ -36,10 +37,11 @@ export class SyncDataMapper {
    * Map a raw state DB row into a SyncChange payload for mobile clients.
    */
   static buildStateChange(stateChangeRow: StateChangeRow): SyncChange {
+    const updatedAt = stateChangeRow.updatedAt ?? new Date(0);
     return {
       table: 'state',
       operation: stateChangeRow.deletedAt ? 'delete' : 'upsert',
-      updatedAt: stateChangeRow.updatedAt.getTime(),
+      updatedAt: updatedAt.getTime(),
       data: stateChangeRow.deletedAt
         ? null
         : {
@@ -49,7 +51,7 @@ export class SyncDataMapper {
             gstStateCode: stateChangeRow.gstStateCode,
             isUnionTerritory: stateChangeRow.isUnionTerritory,
             isActive: stateChangeRow.isActive,
-            updatedAt: stateChangeRow.updatedAt.toISOString(),
+            updatedAt: updatedAt.toISOString(),
             deletedAt: null,
           },
     };
@@ -59,10 +61,11 @@ export class SyncDataMapper {
    * Map a raw district DB row into a SyncChange payload for mobile clients.
    */
   static buildDistrictChange(districtChangeRow: DistrictChangeRow): SyncChange {
+    const updatedAt = districtChangeRow.updatedAt ?? new Date(0);
     return {
       table: 'district',
       operation: districtChangeRow.deletedAt ? 'delete' : 'upsert',
-      updatedAt: districtChangeRow.updatedAt.getTime(),
+      updatedAt: updatedAt.getTime(),
       data: districtChangeRow.deletedAt
         ? null
         : {
@@ -72,7 +75,7 @@ export class SyncDataMapper {
             lgdCode: districtChangeRow.lgdCode,
             stateGuuid: districtChangeRow.stateGuuid,
             isActive: districtChangeRow.isActive,
-            updatedAt: districtChangeRow.updatedAt.toISOString(),
+            updatedAt: updatedAt.toISOString(),
             deletedAt: null,
           },
     };

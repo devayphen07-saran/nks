@@ -9,21 +9,16 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { CodesService } from './codes.service';
+import { CodesQueryService } from './codes-query.service';
+import { CodesCommandService } from './codes-command.service';
 import { RBACGuard } from '../../../common/guards/rbac.guard';
 import { RequireEntityPermission } from '../../../common/decorators/require-entity-permission.decorator';
 import { EntityResource } from '../../../common/decorators/entity-resource.decorator';
-import {
-  EntityCodes,
-  PermissionActions,
-} from '../../../common/constants/entity-codes.constants';
+import { EntityCodes, PermissionActions } from '../../../common/constants/entity-codes.constants';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
 import type { SessionUser } from '../../iam/auth/interfaces/session-user.interface';
-import {
-  CreateCodeCategoryDto,
-  GetCodeCategoriesQueryDto,
-} from './dto/codes-request.dto';
+import { CreateCodeCategoryDto, GetCodeCategoriesQueryDto } from './dto/codes-request.dto';
 import type { CodeCategoryResponseDto } from './dto/codes-response.dto';
 import type { PaginatedResult } from '../../../common/utils/paginated-result';
 
@@ -33,19 +28,19 @@ import type { PaginatedResult } from '../../../common/utils/paginated-result';
 @EntityResource(EntityCodes.CODE_CATEGORY)
 @ApiBearerAuth()
 export class AdminCodesController {
-  constructor(private readonly service: CodesService) {}
+  constructor(
+    private readonly codesQuery: CodesQueryService,
+    private readonly codesCommand: CodesCommandService,
+  ) {}
 
   @Get('categories')
-  @RequireEntityPermission({
-    action: PermissionActions.VIEW,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.VIEW, scope: 'PLATFORM' })
   @ResponseMessage('Code categories fetched')
   @ApiOperation({ summary: 'List all code categories' })
   async listCategories(
     @Query() query: GetCodeCategoriesQueryDto,
   ): Promise<PaginatedResult<CodeCategoryResponseDto>> {
-    return this.service.listCategories({
+    return this.codesQuery.listCategories({
       page: query.page,
       pageSize: query.pageSize,
       search: query.search,
@@ -56,10 +51,7 @@ export class AdminCodesController {
   }
 
   @Post('categories')
-  @RequireEntityPermission({
-    action: PermissionActions.CREATE,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.CREATE, scope: 'PLATFORM' })
   @HttpCode(HttpStatus.CREATED)
   @ResponseMessage('Code category created')
   @ApiOperation({ summary: 'Create a new code category' })
@@ -67,6 +59,6 @@ export class AdminCodesController {
     @Body() dto: CreateCodeCategoryDto,
     @CurrentUser() user: SessionUser,
   ): Promise<CodeCategoryResponseDto> {
-    return this.service.createCategory(dto, user.userId);
+    return this.codesCommand.createCategory(dto, user.userId);
   }
 }

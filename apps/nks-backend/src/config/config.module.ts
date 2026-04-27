@@ -3,16 +3,18 @@ import { ConfigModule as NestConfigModule } from '@nestjs/config';
 import appConfig from './app.config';
 import databaseConfig from './database.config';
 import msg91Config from './msg91.config';
+import { AppConfigService } from './app-config.service';
 
 @Global()
 @Module({
   imports: [
     NestConfigModule.forRoot({
-      isGlobal: true, // Makes ConfigService available globally
-      cache: true, // Performance: caches ENV reads
+      isGlobal: true,
+      cache: true,
       load: [appConfig, databaseConfig, msg91Config],
-      // Expandable later for Joi / class-validator validation Schema
     }),
   ],
+  providers: [AppConfigService],
+  exports: [AppConfigService],
 })
 export class ConfigModule {}

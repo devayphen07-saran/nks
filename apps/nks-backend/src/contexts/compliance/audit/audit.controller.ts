@@ -15,7 +15,7 @@ import {
   PermissionActions,
 } from '../../../common/constants/entity-codes.constants';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
-import { AuditService } from './audit.service';
+import { AuditQueryService } from './audit-query.service';
 import { AuditListQueryDto } from './dto/requests';
 import type { AuditLogResponseDto } from './dto/responses';
 import type { PaginatedResult } from '../../../common/utils/paginated-result';
@@ -26,7 +26,7 @@ import type { PaginatedResult } from '../../../common/utils/paginated-result';
 @EntityResource(EntityCodes.AUDIT_LOG)
 @ApiBearerAuth()
 export class AuditController {
-  constructor(private readonly auditService: AuditService) {}
+  constructor(private readonly auditQuery: AuditQueryService) {}
 
   @Get()
   @RequireEntityPermission({
@@ -38,7 +38,7 @@ export class AuditController {
   async listLogs(
     @Query() query: AuditListQueryDto,
   ): Promise<PaginatedResult<AuditLogResponseDto>> {
-    return this.auditService.listLogs(query);
+    return this.auditQuery.listLogs(query);
   }
 
   @Get(':auditGuuid')
@@ -51,6 +51,6 @@ export class AuditController {
   async getByGuuid(
     @Param('auditGuuid', ParseUUIDPipe) auditGuuid: string,
   ): Promise<AuditLogResponseDto> {
-    return this.auditService.getByGuuid(auditGuuid);
+    return this.auditQuery.getByGuuid(auditGuuid);
   }
 }

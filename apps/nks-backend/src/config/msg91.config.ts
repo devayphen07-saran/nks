@@ -1,18 +1,13 @@
 import { registerAs } from '@nestjs/config';
+import { getValidatedEnv } from './env.validation';
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value || !value.trim()) {
-    throw new Error(
-      `Missing required environment variable: ${name}. MSG91 OTP calls cannot be made without it.`,
-    );
-  }
-  return value;
-}
-
-export default registerAs('msg91', () => ({
-  authKey: requireEnv('MSG91_AUTH_KEY'),
-  widgetId: requireEnv('MSG91_WIDGET_ID'),
-  baseUrl:
-    process.env.MSG91_BASE_URL || 'https://control.msg91.com/api/v5/widget',
-}));
+// MSG91_AUTH_KEY, MSG91_WIDGET_ID, MSG91_BASE_URL are all validated and
+// required by envSchema — getValidatedEnv() guarantees they are present.
+export default registerAs('msg91', () => {
+  const env = getValidatedEnv();
+  return {
+    authKey: env.MSG91_AUTH_KEY,
+    widgetId: env.MSG91_WIDGET_ID,
+    baseUrl: env.MSG91_BASE_URL,
+  };
+});

@@ -32,7 +32,7 @@ export class TrimStringsPipe implements PipeTransform {
     return TrimStringsPipe.process(value, null);
   }
 
-  private static process(value: unknown, key: string | null): unknown {
+  static process(value: unknown, key: string | null): unknown {
     if (key !== null && TrimStringsPipe.SKIP_KEYS.has(key)) return value;
     if (typeof value === 'string') return value.trim();
     if (Array.isArray(value)) return value.map((item) => TrimStringsPipe.process(item, null));

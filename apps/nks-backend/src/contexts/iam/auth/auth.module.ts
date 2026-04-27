@@ -47,18 +47,34 @@ import { TokenLifecycleService } from './services/token/token-lifecycle.service'
 import { JtiBlocklistService } from './services/token/jti-blocklist.service';
 
 // Session
-import { AuthService } from './services/session/auth.service';
-import { SessionService } from './services/session/session.service';
+import { AuthCommandService } from './services/session/auth-command.service';
+import { AuthQueryService } from './services/session/auth-query.service';
+import { SessionCommandService } from './services/session/session-command.service';
+import { SessionQueryService } from './services/session/session-query.service';
+import { SessionBootstrapService } from './services/session/session-bootstrap.service';
 import { SessionCleanupService } from './services/session/session-cleanup.service';
 import { AuthContextService } from './services/session/auth-context.service';
 import { DeviceRevocationQueryService } from './services/session/device-revocation-query.service';
 
+// Guard services
+import { UserContextLoaderService } from './services/guard/user-context-loader.service';
+import { AuthPolicyService } from './services/guard/auth-policy.service';
+
+// Listeners
+import { SessionRevocationListener } from './listeners/session-revocation.listener';
+
 // Flows / orchestrators
-import { AuthFlowOrchestrator } from './services/orchestrators/auth-flow-orchestrator.service';
 import { OtpAuthOrchestrator } from './services/orchestrators/otp-auth-orchestrator.service';
 import { PasswordAuthService } from './services/flows/password-auth.service';
 import { OnboardingService } from './services/flows/onboarding.service';
 import { UserCreationService } from './services/flows/user-creation.service';
+
+// Use cases (Application layer — Controller → UseCase → Service)
+import { AuthFlowUseCase } from './use-cases/auth-flow.use-case';
+import { TokenRefreshUseCase } from './use-cases/token-refresh.use-case';
+import { SessionManagementUseCase } from './use-cases/session-management.use-case';
+import { UserOnboardingUseCase } from './use-cases/user-onboarding.use-case';
+import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case';
 
 /**
  * AuthModule — flat, single-module auth implementation.
@@ -122,25 +138,42 @@ import { UserCreationService } from './services/flows/user-creation.service';
     JtiBlocklistService,
 
     // Session
-    AuthService,
-    SessionService,
+    AuthCommandService,
+    AuthQueryService,
+    SessionCommandService,
+    SessionQueryService,
+    SessionBootstrapService,
     SessionCleanupService,
     AuthContextService,
     DeviceRevocationQueryService,
 
+    // Guard services (consumed by AuthGuard in common/guards via AuthModule exports)
+    UserContextLoaderService,
+    AuthPolicyService,
+
+    // Listeners
+    SessionRevocationListener,
+
     // Flows
-    AuthFlowOrchestrator,
     OtpAuthOrchestrator,
     PasswordAuthService,
     OnboardingService,
     UserCreationService,
+
+    // Use cases
+    AuthFlowUseCase,
+    TokenRefreshUseCase,
+    SessionManagementUseCase,
+    UserOnboardingUseCase,
+    PermissionsQueryUseCase,
   ],
   exports: [
     // Only export what external modules explicitly inject.
     JWTConfigService,
-    // GuardsModule (common/guards) injects this instead of reaching into
-    // SessionsRepository / AuthUsersRepository directly from AuthGuard.
+    // GuardsModule (common/guards) injects AuthGuard's dependencies.
     AuthContextService,
+    UserContextLoaderService,
+    AuthPolicyService,
     // SyncModule injects this instead of RevokedDevicesRepository directly,
     // so the repository layer stays inside iam/auth.
     DeviceRevocationQueryService,

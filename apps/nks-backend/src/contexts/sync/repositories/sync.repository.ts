@@ -25,7 +25,7 @@ export interface RouteChangeRow {
   isPublic: boolean;
   isActive: boolean;
   createdAt: Date;
-  updatedAt: Date;
+  updatedAt: Date | null;
   deletedAt: Date | null;
 }
 
@@ -37,7 +37,7 @@ export interface StateChangeRow {
   gstStateCode: string | null;
   isUnionTerritory: boolean;
   isActive: boolean;
-  updatedAt: Date;
+  updatedAt: Date | null;
   deletedAt: Date | null;
 }
 
@@ -47,9 +47,9 @@ export interface DistrictChangeRow {
   districtName: string;
   districtCode: string | null;
   lgdCode: string | null;
-  stateGuuid: string;
+  stateGuuid: string | null;
   isActive: boolean;
-  updatedAt: Date;
+  updatedAt: Date | null;
   deletedAt: Date | null;
 }
 
@@ -120,8 +120,8 @@ export class SyncRepository extends BaseRepository {
         fullPath: schema.routes.fullPath,
         description: schema.routes.description,
         iconName: schema.routes.iconName,
-        routeType: schema.routes.routeType,
-        routeScope: schema.routes.routeScope,
+        routeType: sql<string>`${schema.routes.routeType}::text`,
+        routeScope: sql<string>`${schema.routes.routeScope}::text`,
         isPublic: schema.routes.isPublic,
         isActive: schema.routes.isActive,
         createdAt: schema.routes.createdAt,
@@ -136,7 +136,7 @@ export class SyncRepository extends BaseRepository {
       .orderBy(schema.routes.updatedAt, schema.routes.id)
       .limit(limit + 1);
 
-    return rows as RouteChangeRow[];
+    return rows;
   }
 
   /**
@@ -163,7 +163,7 @@ export class SyncRepository extends BaseRepository {
       )
       .orderBy(schema.state.updatedAt, schema.state.id)
       .limit(limit + 1);
-    return rows as StateChangeRow[];
+    return rows;
   }
 
   /**
@@ -191,7 +191,7 @@ export class SyncRepository extends BaseRepository {
       )
       .orderBy(schema.district.updatedAt, schema.district.id)
       .limit(limit + 1);
-    return rows as DistrictChangeRow[];
+    return rows;
   }
 
   /**

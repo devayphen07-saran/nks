@@ -1,8 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { RolesRepository } from './repositories/roles.repository';
 import { PermissionsRepository } from './repositories/role-permissions.repository';
+import { RolesValidator } from './validators';
+import { RoleMapper } from './mapper/role.mapper';
+import { paginated } from '../../../common/utils/paginated-result';
 import type { EntityTypeRow } from './repositories/role-permissions.repository';
-import type { RoleEntityPermissions } from './dto/role-response.dto';
+import type {
+  RoleEntityPermissions,
+  RoleDetailResponse,
+  RoleResponseDto,
+  UserRoleRow,
+  UserRoleWithStoreRow,
+} from './dto/role-response.dto';
+import type { PaginatedResult } from '../../../common/utils/paginated-result';
 
 /**
  * RoleQueryService — cross-context read surface for roles and permissions.
@@ -106,5 +116,61 @@ export class RoleQueryService {
    */
   getEntityTypeHierarchy(): Promise<EntityTypeRow[]> {
     return this.rolePermissionsRepository.getEntityTypeHierarchy();
+  }
+
+  // ─── HTTP-facing reads (previously on RolesService) ───────────────────────
+
+  async getRoleWithPermissions(guuid: string, activeStoreId: number | null): Promise<RoleDetailResponse> {
+    const role = await this.rolesRepository.findByGuuid(guuid);
+    RolesValidator.assertFound(role);
+    RolesValidator.assertRoleStoreAccess(role.storeFk, activeStoreId);
+
+    const [flatPermissions, entityHierarchy, routePermissions, storeGuuid] = await Promise.all([
+      this.rolePermissionsRepository.getEntityPermissionMapForRole(role.id),
+      this.rolePermissionsRepository.getEntityTypeHierarchy(),
+      this.rolesRepository.findRoutePermissionsByRoleId(role.id),
+      role.storeFk ? this.rolesRepository.getStoreGuuidByFk(role.storeFk) : Promise.resolve(null),
+    ]);
+
+    const entityPermissions = RoleMapper.buildEntityPermissionTree(entityHierarchy, flatPermissions);
+    return RoleMapper.buildRoleDetailDto(role, storeGuuid, entityPermissions, routePermissions);
+  }
+
+  async listUserRoles(userId: number): Promise<UserRoleWithStoreRow[]> {
+    return this.rolesRepository.findUserRoles(userId);
+  }
+
+  async isStoreOwner(userId: number, storeId: number): Promise<boolean> {
+    return this.rolesRepository.isStoreOwner(userId, storeId);
+  }
+
+  async getActiveRolesForStore(
+    userId: number,
+    storeId: number,
+  ): Promise<Pick<UserRoleRow, 'roleId' | 'roleCode' | 'isSystem' | 'isPrimary'>[]> {
+    return this.rolesRepository.getActiveRolesForStore(userId, storeId);
+  }
+
+  async listRoles(opts: {
+    page: number;
+    pageSize: number;
+    storeId: number | null;
+    isSuperAdmin: boolean;
+    search?: string;
+    sortBy?: string;
+    sortOrder?: string;
+    isActive?: boolean;
+  }): Promise<PaginatedResult<RoleResponseDto>> {
+    const { rows, total } = await this.rolesRepository.findAll({
+      search: opts.search,
+      page: opts.page,
+      pageSize: opts.pageSize,
+      storeId: opts.storeId,
+      isSuperAdmin: opts.isSuperAdmin,
+      sortBy: opts.sortBy,
+      sortOrder: opts.sortOrder,
+      isActive: opts.isActive,
+    });
+    return paginated({ items: rows, page: opts.page, pageSize: opts.pageSize, total });
   }
 }

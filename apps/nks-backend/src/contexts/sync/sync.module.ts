@@ -6,11 +6,13 @@ import { SyncController } from './sync.controller';
 import { SyncService } from './sync.service';
 import { SyncRepository } from './repositories/sync.repository';
 import { SyncHandlerFactory } from './handlers/sync-handler.factory';
+import { SyncValidationService } from './services/sync-validation.service';
+import { SyncIdempotencyService } from './services/sync-idempotency.service';
 
 @Module({
   imports: [GuardsModule, RolesModule, AuthModule],
   controllers: [SyncController],
-  providers: [SyncService, SyncRepository, SyncHandlerFactory],
+  providers: [SyncService, SyncRepository, SyncHandlerFactory, SyncValidationService, SyncIdempotencyService],
   exports: [SyncService, SyncRepository, SyncHandlerFactory],
 })
 export class SyncModule {}

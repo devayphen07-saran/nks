@@ -8,7 +8,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { validateEnv } from './config/env.validation';
-import { CsrfMiddleware, PermissionsPolicyMiddleware } from './common/middleware';
+import { requestIdMiddleware } from './common/middleware';
 
 // ─── Env Validation ──────────────────────────────────────────────────────────
 // Validate all required environment variables before anything else in the app.
@@ -60,10 +60,10 @@ async function bootstrap() {
     }),
   );
 
-  // Permissions-Policy — deny browser APIs not needed by a POS application.
-  // Helmet does not set this header natively; applied separately.
-  const permissionsPolicy = new PermissionsPolicyMiddleware();
-  app.use(permissionsPolicy.use.bind(permissionsPolicy));
+  app.use((_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), usb=(), payment=(), fullscreen=()');
+    next();
+  });
 
   // ─── Trust Proxy ──────────────────────────────────────────────────────────
   // Required behind reverse proxies (nginx, AWS ALB) for accurate IP extraction
@@ -82,13 +82,12 @@ async function bootstrap() {
   // This parses Cookie headers into request.cookies object.
   // Signing secret enables signed cookies (res.cookie('name', 'val', { signed: true }))
   // and mitigates cookie tampering.
-  const cookieSecret = configService.getOrThrow<string>('COOKIE_SIGNING_SECRET');
+  const cookieSecret =
+    nodeEnv === 'production'
+      ? configService.getOrThrow<string>('COOKIE_SIGNING_SECRET')
+      : (configService.get<string>('COOKIE_SIGNING_SECRET') ?? 'dev-cookie-secret-change-in-production');
   app.use(cookieParser(cookieSecret));
-
-  // ─── CSRF Protection ──────────────────────────────────────────────────────
-  // ✅ Prevents cross-site request forgery attacks
-  const csrfMiddleware = new CsrfMiddleware(configService);
-  app.use(csrfMiddleware.use.bind(csrfMiddleware));
+  app.use(requestIdMiddleware);
 
   // ─── Swagger ──────────────────────────────────────────────────────────────
   // Never expose the API schema in production — it leaks endpoint details,

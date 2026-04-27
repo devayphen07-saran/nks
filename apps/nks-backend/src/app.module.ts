@@ -1,11 +1,11 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
-import { ZodValidationPipe } from 'nestjs-zod';
-import { TrimStringsPipe } from './common/pipes';
+import { AppValidationPipe } from './common/pipes';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { RequestIdMiddleware } from './common/middleware';
-import { LoggingInterceptor, TimeoutInterceptor, TransformInterceptor } from './common/interceptors';
+import { ApiVersionMiddleware, CsrfMiddleware, CsrfTokenService } from './common/middleware';
+import { TimeoutInterceptor, ResponseInterceptor, LoggingInterceptor, SessionRotationInterceptor } from './common/interceptors';
+import { CsrfValidationService } from './common/guards/services/csrf-validation.service';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './core/database/database.module';
@@ -91,18 +91,20 @@ import { HealthModule } from './core/health/health.module';
      * can remove it — the global guard makes it redundant. Controllers
      * using @UseGuards(AuthGuard, RBACGuard) should slim to @UseGuards(RBACGuard).
      */
+    CsrfTokenService,
+    CsrfValidationService,
     { provide: APP_FILTER,      useClass: GlobalExceptionFilter },
-    { provide: APP_PIPE,        useClass: TrimStringsPipe },
-    { provide: APP_PIPE,        useClass: ZodValidationPipe },
+    { provide: APP_PIPE,        useClass: AppValidationPipe },
     { provide: APP_GUARD,       useClass: AuthGuard },
     { provide: APP_GUARD,       useClass: RateLimitingGuard },
+    { provide: APP_INTERCEPTOR, useClass: SessionRotationInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
-    { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TimeoutInterceptor },
   ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RequestIdMiddleware).forRoutes('*');
+    consumer.apply(ApiVersionMiddleware, CsrfMiddleware).forRoutes('*');
   }
 }

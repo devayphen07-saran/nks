@@ -29,23 +29,23 @@ export class LookupsService {
   ) {}
 
   async getSalutations(): Promise<CodeValueResponse[]> {
-    return (await this.repository.getSalutations()).map(CodeValueMapper.buildCodeValueDto);
+    return (await this.repository.getValuesByCategory('SALUTATION')).map(CodeValueMapper.buildCodeValueDto);
   }
 
   async getAddressTypes(): Promise<CodeValueResponse[]> {
-    return (await this.repository.getAddressTypes()).map(CodeValueMapper.buildCodeValueDto);
+    return (await this.repository.getValuesByCategory('ADDRESS_TYPE')).map(CodeValueMapper.buildCodeValueDto);
   }
 
   async getDesignations(): Promise<CodeValueResponse[]> {
-    return (await this.repository.getDesignations()).map(CodeValueMapper.buildCodeValueDto);
+    return (await this.repository.getValuesByCategory('DESIGNATION')).map(CodeValueMapper.buildCodeValueDto);
   }
 
   async getStoreLegalTypes(): Promise<CodeValueResponse[]> {
-    return (await this.repository.getStoreLegalTypes()).map(CodeValueMapper.buildCodeValueDto);
+    return (await this.repository.getValuesByCategory('STORE_LEGAL_TYPE')).map(CodeValueMapper.buildCodeValueDto);
   }
 
   async getStoreCategories(): Promise<CodeValueResponse[]> {
-    return (await this.repository.getStoreCategories()).map(CodeValueMapper.buildCodeValueDto);
+    return (await this.repository.getValuesByCategory('STORE_CATEGORY')).map(CodeValueMapper.buildCodeValueDto);
   }
 
   async getCountries(): Promise<CountryResponse[]> {

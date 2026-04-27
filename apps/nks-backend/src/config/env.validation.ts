@@ -20,6 +20,7 @@ const envSchema = z.object({
 
   // ── Database ──────────────────────────────────────────────────────────────
   DATABASE_URL: z.url({ error: 'DATABASE_URL must be a valid PostgreSQL URL' }),
+  DATABASE_READONLY_URL: z.url().optional(), // optional read-replica; falls back to primary when absent
 
   // ── Better Auth ───────────────────────────────────────────────────────────
   BETTER_AUTH_SECRET: z
@@ -30,6 +31,7 @@ const envSchema = z.object({
   // ── MSG91 OTP ─────────────────────────────────────────────────────────────
   MSG91_AUTH_KEY: z.string().min(1, 'MSG91_AUTH_KEY is required'),
   MSG91_WIDGET_ID: z.string().min(1, 'MSG91_WIDGET_ID is required'),
+  MSG91_BASE_URL: z.url().optional().default('https://control.msg91.com/api/v5/widget'),
 
   // ── HMAC Secrets ─────────────────────────────────────────────────────────
   OTP_HMAC_SECRET: z
@@ -38,6 +40,9 @@ const envSchema = z.object({
   IP_HMAC_SECRET: z
     .string()
     .min(32, 'IP_HMAC_SECRET must be at least 32 characters'),
+  CSRF_HMAC_SECRET: z
+    .string()
+    .min(32, 'CSRF_HMAC_SECRET must be at least 32 characters'),
   OTP_IDENTIFIER_PEPPER: z
     .string()
     .min(16, 'OTP_IDENTIFIER_PEPPER must be at least 16 characters'),
@@ -51,8 +56,9 @@ const envSchema = z.object({
     .string()
     .min(32, 'COOKIE_SIGNING_SECRET must be at least 32 characters'),
 
-  // ── CORS ──────────────────────────────────────────────────────────────────
+  // ── CORS & Cookie strategy ────────────────────────────────────────────────
   ALLOWED_ORIGINS: z.string().optional(),
+  CSRF_SAME_SITE: z.enum(['strict', 'lax', 'none']).default('strict'),
 
   // ── JWT Keys ──────────────────────────────────────────────────────────────
   JWT_KEYS_DIR: z.string().optional(), // defaults to <cwd>/secrets — override in containerised deployments
@@ -96,10 +102,15 @@ const envSchema = z.object({
     .optional()
     .default('true')
     .transform((v) => v !== 'false'),
-  SLACK_WEBHOOK_URL: z.string().url().optional().or(z.literal('')).default(''),
+  SLACK_WEBHOOK_URL: z.url().or(z.literal('')).optional().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;
+
+// Module-level singleton — set once by validateEnv() in main.ts before
+// NestFactory.create(). Config factories call getValidatedEnv() to access
+// fully-typed, Zod-coerced values (e.g. PORT is number, not string).
+let _env: Env | undefined;
 
 /**
  * Call this at the very top of `main.ts` BEFORE NestFactory.create().
@@ -121,5 +132,18 @@ export function validateEnv(): Env {
     process.exit(1);
   }
 
+  _env = result.data;
   return result.data;
+}
+
+/**
+ * Returns the validated, Zod-coerced env. Safe to call from config factory
+ * functions (registerAs) because validateEnv() always runs first in main.ts.
+ *
+ * Falls back to parsing process.env directly so that test modules that build
+ * without calling validateEnv() still work, provided required vars are set.
+ */
+export function getValidatedEnv(): Env {
+  if (_env) return _env;
+  return envSchema.parse(process.env);
 }

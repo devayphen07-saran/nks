@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { RolesService } from './roles.service';
+import { RoleQueryService } from './role-query.service';
 import { RBACGuard } from '../../../common/guards/rbac.guard';
 import { RequireEntityPermission } from '../../../common/decorators/require-entity-permission.decorator';
 import { EntityResource } from '../../../common/decorators/entity-resource.decorator';
@@ -30,7 +31,10 @@ import type { PaginatedResult } from '../../../common/utils/paginated-result';
 @EntityResource(EntityCodes.ROLE)
 @ApiBearerAuth()
 export class RolesController {
-  constructor(private readonly rolesService: RolesService) {}
+  constructor(
+    private readonly rolesCommand: RolesService,
+    private readonly rolesQuery: RoleQueryService,
+  ) {}
 
   @Get()
   @RequireEntityPermission({ action: PermissionActions.VIEW })
@@ -40,7 +44,7 @@ export class RolesController {
     @Query() query: ListRolesQueryDto,
     @CurrentUser() user: SessionUser,
   ): Promise<PaginatedResult<RoleResponseDto>> {
-    return this.rolesService.listRoles({
+    return this.rolesQuery.listRoles({
       page: query.page,
       pageSize: query.pageSize,
       storeId: user.activeStoreId,
@@ -61,7 +65,7 @@ export class RolesController {
     @Body() dto: CreateRoleDto,
     @CurrentUser() user: SessionUser,
   ): Promise<RoleResponseDto> {
-    return this.rolesService.createRole(user.userId, dto, user.activeStoreId);
+    return this.rolesCommand.createRole(user.userId, dto, user.activeStoreId);
   }
 
   @Get(':guuid')
@@ -72,7 +76,7 @@ export class RolesController {
     @Param('guuid', ParseUUIDPipe) guuid: string,
     @CurrentUser() user: SessionUser,
   ): Promise<RoleDetailResponse> {
-    return this.rolesService.getRoleWithPermissions(guuid, user.activeStoreId);
+    return this.rolesQuery.getRoleWithPermissions(guuid, user.activeStoreId);
   }
 
   @Put(':guuid')
@@ -84,6 +88,6 @@ export class RolesController {
     @Body() dto: UpdateRoleDto,
     @CurrentUser() user: SessionUser,
   ): Promise<RoleResponseDto> {
-    return this.rolesService.updateRoleByGuuid(user.userId, guuid, dto, user.activeStoreId);
+    return this.rolesCommand.updateRoleByGuuid(user.userId, guuid, dto, user.activeStoreId);
   }
 }

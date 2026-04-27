@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { AppConfigService } from '../../config/app-config.service';
 import { fullName } from '../../common/utils/full-name';
 
 /**
@@ -18,8 +18,8 @@ export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
   private readonly isProduction: boolean;
 
-  constructor(private readonly configService: ConfigService) {
-    this.isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+  constructor(appConfig: AppConfigService) {
+    this.isProduction = appConfig.isProduction;
   }
 
   onModuleInit(): void {

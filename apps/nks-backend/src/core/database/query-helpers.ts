@@ -3,6 +3,15 @@ import { ilike, or, sql, SQL } from 'drizzle-orm';
 type IlikeCol = Parameters<typeof ilike>[0];
 
 /**
+ * Escape `%`, `_`, and `\` so they are treated as literals inside a
+ * PostgreSQL ILIKE pattern. PostgreSQL uses `\` as the default escape
+ * character (no explicit ESCAPE clause needed).
+ */
+function escapeLike(input: string): string {
+  return input.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/**
  * Returns `or(ilike(col1, '%term%'), ilike(col2, '%term%'), ...)` when search
  * has a non-empty trimmed value, otherwise `undefined` (safe to spread into `and()`).
  *
@@ -15,7 +24,8 @@ type IlikeCol = Parameters<typeof ilike>[0];
 export function ilikeAny(search: string | undefined, ...cols: IlikeCol[]): SQL | undefined {
   const term = search?.trim();
   if (!term) return undefined;
-  return or(...cols.map((col) => ilike(col, `%${term}%`)));
+  const safe = `%${escapeLike(term)}%`;
+  return or(...cols.map((col) => ilike(col, safe)));
 }
 
 /**
@@ -36,5 +46,5 @@ export function ilikeFullName(
 ): SQL | undefined {
   const term = search?.trim();
   if (!term) return undefined;
-  return sql`(${firstNameCol} || ' ' || ${lastNameCol}) ILIKE ${`%${term}%`}`;
+  return sql`(${firstNameCol} || ' ' || ${lastNameCol}) ILIKE ${`%${escapeLike(term)}%`}`;
 }

@@ -6,6 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
+    "typecheck": "tsc --noEmit",
     "build": "nest build && npm run generate:jwt-keys",
     "generate:jwt-keys": "node scripts/generate-rsa-keys.js",
     "db:migrate": "npx drizzle-kit migrate",
@@ -49,8 +50,8 @@
   },
   "devDependencies": {
     "@better-auth/cli": "^1.4.21",
-    "@eslint/eslintrc": "^3.2.0",
     "@eslint/js": "^9.18.0",
+    "dotenv": "^16.0.0",
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",

@@ -4,12 +4,13 @@ import { RolesModule } from '../../iam/roles/roles.module';
 import { LookupsModule } from '../lookups/lookups.module';
 import { CodesController } from './codes.controller';
 import { AdminCodesController } from './admin-codes.controller';
-import { CodesService } from './codes.service';
+import { CodesQueryService } from './codes-query.service';
+import { CodesCommandService } from './codes-command.service';
 
 @Module({
   imports:     [GuardsModule, RolesModule, LookupsModule],
   controllers: [CodesController, AdminCodesController],
-  providers:   [CodesService],
-  exports:     [CodesService],
+  providers:   [CodesQueryService, CodesCommandService],
+  exports:     [CodesQueryService, CodesCommandService],
 })
 export class CodesModule {}

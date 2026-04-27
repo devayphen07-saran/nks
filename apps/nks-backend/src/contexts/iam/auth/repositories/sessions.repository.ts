@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { eq, and, gt, lt, asc, desc, count, sql, notInArray, inArray, isNotNull } from 'drizzle-orm';
+import { eq, and, gt, lt, or, isNull, asc, desc, count, sql, notInArray, inArray, isNotNull } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
 import { TransactionService } from '../../../../core/database/transaction.service';
 import * as schema from '../../../../core/database/schema';
+import { userRoleMapping } from '../../../../core/database/schema/auth/user-role-mapping';
 import { ACCESS_TOKEN_TTL_MS } from '../auth.constants';
+import { AUTH_CONSTANTS } from '../../../../common/constants/app-constants';
 import type { UserSession, NewUserSession, UpdateUserSession } from '../../../../core/database/schema/auth/user-session';
 
 type Db = NodePgDatabase<typeof schema>;
@@ -87,6 +89,113 @@ export class SessionsRepository extends BaseRepository {
       .limit(1);
 
     return { session: row?.session ?? null, revokedJti: row?.revokedJti ?? null };
+  }
+
+  /**
+   * Single-query auth context: session + JTI check + user + roles in one round trip.
+   *
+   * JOINs:
+   *   LEFT  JOIN jti_blocklist          — detect revoked JTI atomically
+   *   INNER JOIN users                  — user must exist and not be soft-deleted
+   *   LEFT  JOIN user_role_mapping      — active, non-expired role assignments
+   *   INNER JOIN roles (via mapping)    — role must be active and not soft-deleted
+   *   LEFT  JOIN store (via mapping)    — resolve store guuid/name for scoped roles
+   *
+   * Returns multiple rows (one per role assignment). Caller deduplicates:
+   *   - session + user + revokedJti  → first row
+   *   - roles                        → collect from all rows, filter null roleId
+   */
+  async findSessionAuthContext(token: string): Promise<{
+    session: UserSession | null;
+    user: typeof schema.users.$inferSelect | null;
+    revokedJti: string | null;
+    roles: Array<{
+      roleId: number;
+      roleCode: string;
+      storeFk: number | null;
+      storeGuuid: string | null;
+      storeName: string | null;
+      isPrimary: boolean;
+      assignedAt: Date;
+      expiresAt: Date | null;
+    }>;
+  }> {
+    const rows = await this.db
+      .select({
+        session: schema.userSession,
+        user: schema.users,
+        revokedJti: schema.jtiBlocklist.jti,
+        roleId: userRoleMapping.roleFk,
+        roleCode: schema.roles.code,
+        storeFk: userRoleMapping.storeFk,
+        storeGuuid: schema.store.guuid,
+        storeName: schema.store.storeName,
+        isPrimary: userRoleMapping.isPrimary,
+        assignedAt: userRoleMapping.assignedAt,
+        expiresAt: userRoleMapping.expiresAt,
+      })
+      .from(schema.userSession)
+      .leftJoin(
+        schema.jtiBlocklist,
+        and(
+          isNotNull(schema.userSession.jti),
+          eq(schema.jtiBlocklist.jti, schema.userSession.jti),
+          gt(schema.jtiBlocklist.expiresAt, new Date()),
+        ),
+      )
+      .innerJoin(
+        schema.users,
+        and(
+          eq(schema.userSession.userFk, schema.users.id),
+          isNull(schema.users.deletedAt),
+        ),
+      )
+      .leftJoin(
+        userRoleMapping,
+        and(
+          eq(userRoleMapping.userFk, schema.users.id),
+          isNull(userRoleMapping.deletedAt),
+          eq(userRoleMapping.isActive, true),
+          or(
+            isNull(userRoleMapping.expiresAt),
+            gt(userRoleMapping.expiresAt, new Date()),
+          ),
+        ),
+      )
+      .leftJoin(
+        schema.roles,
+        and(
+          eq(userRoleMapping.roleFk, schema.roles.id),
+          eq(schema.roles.isActive, true),
+          isNull(schema.roles.deletedAt),
+        ),
+      )
+      .leftJoin(schema.store, eq(userRoleMapping.storeFk, schema.store.id))
+      .where(eq(schema.userSession.token, token));
+
+    if (rows.length === 0) {
+      return { session: null, user: null, revokedJti: null, roles: [] };
+    }
+
+    const first = rows[0];
+    const session = first.session;
+    const user = first.user;
+    const revokedJti = first.revokedJti ?? null;
+
+    const roles = rows
+      .filter((r) => r.roleId != null)
+      .map((r) => ({
+        roleId: r.roleId as number,
+        roleCode: r.roleCode as string,
+        storeFk: r.storeFk ?? null,
+        storeGuuid: r.storeGuuid ?? null,
+        storeName: r.storeName ?? null,
+        isPrimary: r.isPrimary as boolean,
+        assignedAt: r.assignedAt as Date,
+        expiresAt: r.expiresAt ?? null,
+      }));
+
+    return { session, user, revokedJti, roles };
   }
 
   /**
@@ -608,5 +717,51 @@ export class SessionsRepository extends BaseRepository {
       .delete(schema.userSession)
       .where(lt(schema.userSession.expiresAt, cutoffDate));
     return result.rowCount ?? 0;
+  }
+
+  /**
+   * Rolling session: atomically rotate the opaque session token.
+   *
+   * Uses a Compare-And-Swap (WHERE token = oldToken) so concurrent rotation
+   * attempts on the same session are safe: the first wins, the second returns
+   * false without modifying state.
+   *
+   * @returns true if rotation applied (row updated), false if another
+   * concurrent request already rotated this token.
+   */
+  async rotateToken(
+    oldToken: string,
+    newToken: string,
+    newExpiresAt: Date,
+    newCsrfSecret: string,
+  ): Promise<boolean> {
+    // Double guard: CAS on token value (prevents any concurrent rotation from
+    // overwriting a rotation that already completed) PLUS a lastRotatedAt
+    // interval check (prevents DB-level rotation even if the guard's in-memory
+    // check was bypassed, e.g. by a clock skew or a cache race).
+    const rotationThreshold = new Date(
+      Date.now() - AUTH_CONSTANTS.SESSION.ROTATION_INTERVAL_SECONDS * 1000,
+    );
+    const [updated] = await this.db
+      .update(schema.userSession)
+      .set({ token: newToken, lastRotatedAt: new Date(), expiresAt: newExpiresAt, csrfSecret: newCsrfSecret })
+      .where(
+        and(
+          eq(schema.userSession.token, oldToken),
+          or(
+            isNull(schema.userSession.lastRotatedAt),
+            lt(schema.userSession.lastRotatedAt, rotationThreshold),
+          ),
+        ),
+      )
+      .returning({ id: schema.userSession.id });
+    return !!updated;
+  }
+
+  async rotateCsrfSecret(sessionId: number, newCsrfSecret: string): Promise<void> {
+    await this.db
+      .update(schema.userSession)
+      .set({ csrfSecret: newCsrfSecret })
+      .where(eq(schema.userSession.id, sessionId));
   }
 }

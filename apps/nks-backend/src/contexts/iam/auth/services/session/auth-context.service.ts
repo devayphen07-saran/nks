@@ -21,6 +21,14 @@ export class AuthContextService {
   ) {}
 
   /**
+   * Single-query auth context: session + JTI check + user + roles in one round trip.
+   * Replaces the previous two-round-trip flow (findByTokenWithJtiCheck → findUserById + findUserRolesForAuth).
+   */
+  findSessionAuthContext(token: string) {
+    return this.sessionsRepository.findSessionAuthContext(token);
+  }
+
+  /**
    * Atomically fetch the session row + a JTI revocation flag in one query.
    * Returns `{ session: null, revokedJti: false }` for unknown tokens.
    */
@@ -37,21 +45,39 @@ export class AuthContextService {
   }
 
   /**
-   * Revoke + blocklist + delete every session for a user.
-   * Called when AuthGuard detects a blocked or inactive account.
-   * JTIs are blocklisted so outstanding access tokens cannot survive their 15-min TTL.
+   * Revoke + blocklist + delete a single session synchronously.
+   * Called by AuthPolicyService for the current session when a blocked/inactive
+   * account is detected — prevents immediate replay of the same token.
+   * Remaining sessions are cleaned up by SessionRevocationListener off the hot path.
    */
-  async revokeAndDeleteAllSessionsForUser(userId: number, reason: string): Promise<void> {
-    const jtis = await this.sessionsRepository.findJtisByUserId(userId);
-    await this.sessionsRepository.revokeAndDeleteAllForUser(userId, reason, jtis);
+  revokeCurrentSession(sessionId: number, reason: string, jti?: string): Promise<void> {
+    return this.sessionsRepository.revokeAndDeleteSession(sessionId, reason, jti);
   }
 
   /**
    * Persist a cleared activeStoreId to the session row.
-   * Called by AuthGuard when it detects the stored store is no longer
-   * a live role assignment — prevents the stale value from surfacing again.
+   * Called by UserContextLoaderService when it detects the stored store is no
+   * longer a live role assignment — prevents the stale value from surfacing again.
    */
   clearActiveStore(sessionId: number): Promise<void> {
     return this.sessionsRepository.clearActiveStore(sessionId);
+  }
+
+  /**
+   * Rolling session: CAS-rotate the opaque session token.
+   * Returns true if rotation succeeded, false if a concurrent request already
+   * rotated this token (race-safe: caller can silently ignore false).
+   */
+  rotateSessionToken(
+    oldToken: string,
+    newToken: string,
+    newExpiresAt: Date,
+    newCsrfSecret: string,
+  ): Promise<boolean> {
+    return this.sessionsRepository.rotateToken(oldToken, newToken, newExpiresAt, newCsrfSecret);
+  }
+
+  rotateCsrfSecret(sessionId: number, newCsrfSecret: string): Promise<void> {
+    return this.sessionsRepository.rotateCsrfSecret(sessionId, newCsrfSecret);
   }
 }

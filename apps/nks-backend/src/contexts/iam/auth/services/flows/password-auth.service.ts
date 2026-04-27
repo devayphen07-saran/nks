@@ -6,13 +6,16 @@ import { SanitizerValidator } from '../../../../../common/validators/sanitizer.v
 import { PasswordAuthValidator } from '../../validators';
 import { LoginDto, RegisterDto } from '../../dto';
 import type { AuthResponseEnvelope } from '../../dto';
-import { AuthFlowOrchestrator } from '../orchestrators/auth-flow-orchestrator.service';
+import { executeAuthFlow } from '../orchestrators/auth-flow-orchestrator.service';
+import { SessionCommandService } from '../session/session-command.service';
+import { TokenService } from '../token/token.service';
 import { PasswordService } from '../security/password.service';
-import { SessionService } from '../session/session.service';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SessionEvents } from '../../../../../common/events/session.events';
 import { RoleQueryService } from '../../../roles/role-query.service';
 import { RoleMutationService } from '../../../roles/role-mutation.service';
-import { AuditService } from '../../../../compliance/audit/audit.service';
+import { AuditCommandService } from '../../../../compliance/audit/audit-command.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
 import {
   ErrorCode,
@@ -22,7 +25,7 @@ import {
   InternalServerException,
 } from '../../../../../common/exceptions';
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
-import { AUTH_CONSTANTS } from '../../../../../common/constants/app-constants';
+import { AccountSecurityPolicy } from '../../domain/account-security.policy';
 import type { DeviceInfo } from '../../interfaces/device-info.interface';
 
 // Pre-computed once at module load — same cost as PasswordService.BCRYPT_ROUNDS.
@@ -50,12 +53,13 @@ export class PasswordAuthService {
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly passwordService: PasswordService,
-    private readonly authFlowOrchestrator: AuthFlowOrchestrator,
-    private readonly sessionService: SessionService,
+    private readonly sessionService: SessionCommandService,
+    private readonly tokenService: TokenService,
     private readonly roleQuery: RoleQueryService,
     private readonly roleMutation: RoleMutationService,
-    private readonly auditService: AuditService,
+    private readonly auditService: AuditCommandService,
     private readonly authUtils: AuthUtilsService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async login(
@@ -103,7 +107,7 @@ export class PasswordAuthService {
       severity: 'info',
     });
 
-    return this.authFlowOrchestrator.executeAuthFlow(user, deviceInfo);
+    return executeAuthFlow(user, deviceInfo, this.sessionService, this.tokenService);
   }
 
   async register(
@@ -150,7 +154,7 @@ export class PasswordAuthService {
       resourceId: user.id,
     });
 
-    return this.authFlowOrchestrator.executeAuthFlow(user, deviceInfo);
+    return executeAuthFlow(user, deviceInfo, this.sessionService, this.tokenService);
   }
 
   async isSuperAdminSeeded(): Promise<boolean> {
@@ -204,8 +208,8 @@ export class PasswordAuthService {
     auditMeta: AuditMeta,
   ): Promise<void> {
     if (!user.accountLockedUntil) return;
-    const now = new Date();
-    if (user.accountLockedUntil > now) {
+
+    if (AccountSecurityPolicy.isLocked(user.accountLockedUntil)) {
       this.auditService.log({
         ...this.loginAuditBase(user.id, deviceInfo, auditMeta),
         description: 'Login attempt - account locked (brute-force)',
@@ -214,9 +218,7 @@ export class PasswordAuthService {
       PasswordAuthValidator.assertNotLocked(user);
     } else {
       // Lock expired — CAS-safe auto-unlock: WHERE accountLockedUntil IS NOT NULL AND <= NOW()
-      // prevents two concurrent requests from both resetting the lock.
       await this.authUsersRepository.autoUnlockIfExpired(user.id);
-      // false = concurrent request already cleared the lock; both outcomes allow login to proceed.
       this.auditService.log({
         ...this.loginAuditBase(user.id, deviceInfo, auditMeta),
         action: 'ACCOUNT_UNBLOCKED',
@@ -232,30 +234,17 @@ export class PasswordAuthService {
     deviceInfo: DeviceInfo | undefined,
     auditMeta: AuditMeta,
   ): Promise<void> {
-    // Atomic SQL increment — safe under concurrent requests (no read-modify-write race).
-    const newFailedCount =
-      await this.authUsersRepository.incrementFailedAttempts(user.id);
-    const shouldLock =
-      newFailedCount >=
-      AUTH_CONSTANTS.ACCOUNT_SECURITY.MAX_FAILED_LOGIN_ATTEMPTS;
+    const newFailedCount = await this.authUsersRepository.incrementFailedAttempts(user.id);
+    const shouldLock = AccountSecurityPolicy.shouldLock(newFailedCount);
 
     if (shouldLock) {
-      // Conditional lock: WHERE account_locked_until IS NULL prevents concurrent requests
-      // from extending an existing lockout window.
-      await this.authUsersRepository.lockAccount(
-        user.id,
-        new Date(
-          Date.now() + AUTH_CONSTANTS.ACCOUNT_SECURITY.ACCOUNT_LOCKOUT_MS,
-        ),
-      );
-      // Revoke existing sessions so stolen tokens cannot bypass the lockout.
-      try {
-        await this.sessionService.terminateAllSessions(user.id);
-      } catch (err: unknown) {
-        this.logger.error(
-          `Failed to terminate sessions on lockout for user ${user.id}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
+      await this.authUsersRepository.lockAccount(user.id, AccountSecurityPolicy.lockoutExpiry());
+      // Revoke existing sessions off the hot path — the lockout is already
+      // committed, so new logins are blocked before the listener fires.
+      this.eventEmitter.emit(SessionEvents.REVOKE_ALL_FOR_USER, {
+        userId: user.id,
+        reason: 'ACCOUNT_LOCKED',
+      });
     }
 
     this.auditService.log({

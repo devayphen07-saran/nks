@@ -33,18 +33,17 @@ const AuthMinimalUserSchema = z.object({
   phoneNumber: z.string().nullable(),
 });
 
-// ─── Session Response Schema ───────────────────────────────────────────────
+// ─── Auth Token Schema ─────────────────────────────────────────────────────
 
-const AuthSessionSchema = z.object({
+const AuthTokenSchema = z.object({
   sessionId: z.string(),
   /**
    * Opaque session credential.
-   * Present ONLY for mobile clients (X-Device-Type: ANDROID | IOS).
-   * Web clients receive this in an httpOnly cookie instead — the body field
-   * is stripped at the controller layer so it never appears in browser devtools,
-   * CDN / API-gateway logs, or monitoring dashboards.
+   * Mobile clients (X-Device-Type: ANDROID | IOS): populated with the token.
+   * Web clients: null — token is delivered via httpOnly cookie instead so it
+   * never appears in browser devtools, CDN / API-gateway logs, or JS scope.
    */
-  sessionToken: z.string().optional(),
+  sessionToken: z.string().nullable(),
   /**
    * Always 'Bearer' — included so clients can build the Authorization
    * header without relying on a hard-coded convention.
@@ -81,7 +80,7 @@ const AuthSyncMetadataSchema = z.object({
 // ─── Exported DTOs ────────────────────────────────────────────────────────
 
 export class MeResponseDto extends createZodDto(AuthUserSchema) {}
-export class RefreshTokenResponseDto extends createZodDto(AuthSessionSchema) {}
+export class RefreshTokenResponseDto extends createZodDto(AuthTokenSchema) {}
 
 /**
  * Full auth response envelope returned by the mapper.
@@ -92,16 +91,16 @@ export class RefreshTokenResponseDto extends createZodDto(AuthSessionSchema) {}
  */
 export interface AuthResponseEnvelope {
   user: z.infer<typeof AuthMinimalUserSchema>;
-  session: z.infer<typeof AuthSessionSchema>;
+  auth: z.infer<typeof AuthTokenSchema>;
   context: z.infer<typeof AuthContextSchema>;
   sync: z.infer<typeof AuthSyncMetadataSchema>;
-  /** Present only for mobile clients. Contains the offline JWT and the
-   *  server-signed HMAC used for offline write verification. */
-  offline?: {
+  /** Offline credentials. Populated for mobile clients; null for web.
+   *  Clients should check for null rather than conditional key presence. */
+  offline: {
     /** RS256 JWT — 3-day TTL — for offline access verification on device. */
     token: string;
     /** HMAC-SHA256 of the offline session payload. Mobile stores this and
      *  checks its presence on load; signing secret never leaves the server. */
     sessionSignature?: string;
-  };
+  } | null;
 }

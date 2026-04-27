@@ -1,3 +1,4 @@
 export * from './status.controller';
 export * from './status.module';
-export * from './status.service';
+export * from './status-command.service';
+export * from './status-query.service';

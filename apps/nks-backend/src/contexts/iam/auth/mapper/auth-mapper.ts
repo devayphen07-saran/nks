@@ -103,7 +103,7 @@ export class AuthMapper {
 
     return {
       user: this.buildPublicUserDto(user),
-      session: {
+      auth: {
         sessionId,
         sessionToken,
         tokenType: 'Bearer' as const,
@@ -120,14 +120,12 @@ export class AuthMapper {
         lastSyncedAt: lastSyncedAtStr,
         deviceId: deviceId ?? null,
       },
-      ...(offlineToken
+      offline: offlineToken
         ? {
-            offline: {
-              token: offlineToken,
-              ...(offlineSessionSignature ? { sessionSignature: offlineSessionSignature } : {}),
-            },
+            token: offlineToken,
+            ...(offlineSessionSignature ? { sessionSignature: offlineSessionSignature } : {}),
           }
-        : {}),
+        : null,
     };
   }
 

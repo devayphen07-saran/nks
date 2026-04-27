@@ -1,6 +1,6 @@
 import { Controller, Get, Param } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import { EntityStatusService } from './entity-status.service';
+import { EntityStatusQueryService } from './entity-status-query.service';
 import type { EntityStatusResponse } from './dto/entity-status.dto';
 import { Public } from '../../../common/decorators/public.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
@@ -8,7 +8,7 @@ import { ResponseMessage } from '../../../common/decorators/response-message.dec
 @ApiTags('Entity Status')
 @Controller('entity-status')
 export class EntityStatusController {
-  constructor(private readonly entityStatusService: EntityStatusService) {}
+  constructor(private readonly entityStatusQuery: EntityStatusQueryService) {}
 
   @Get(':entityCode/public')
   @Public()
@@ -17,6 +17,6 @@ export class EntityStatusController {
   async getEntityStatusesPublic(
     @Param('entityCode') entityCode: string,
   ): Promise<EntityStatusResponse[]> {
-    return this.entityStatusService.getStatusesForEntity(entityCode);
+    return this.entityStatusQuery.getStatusesForEntity(entityCode);
   }
 }

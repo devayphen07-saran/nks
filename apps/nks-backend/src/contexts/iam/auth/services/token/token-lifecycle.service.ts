@@ -25,7 +25,9 @@ import {
   ErrorCode,
   errPayload,
 } from '../../../../../common/constants/error-codes.constants';
-import { AuditService } from '../../../../compliance/audit/audit.service';
+import { AuditCommandService } from '../../../../compliance/audit/audit-command.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SessionEvents } from '../../../../../common/events/session.events';
 
 /**
  * TokenLifecycleService
@@ -48,7 +50,8 @@ export class TokenLifecycleService {
     private readonly roleQuery: RoleQueryService,
     private readonly permissionsService: PermissionsService,
     private readonly authUtils: AuthUtilsService,
-    private readonly auditService: AuditService,
+    private readonly auditService: AuditCommandService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async refreshAccessToken(
@@ -104,10 +107,13 @@ export class TokenLifecycleService {
           reason: 'TOKEN_THEFT_DETECTED',
         },
       });
-      await this.sessionsRepository.revokeAndDeleteAllForUser(
-        session.userFk,
-        'TOKEN_REUSE',
-      );
+      // Fan out full session cleanup off the hot path — the compromised session is
+      // already marked (refreshTokenRevokedAt set), so further reuse is rejected
+      // before the listener fires. Other sessions are cleaned up asynchronously.
+      this.eventEmitter.emit(SessionEvents.REVOKE_ALL_FOR_USER, {
+        userId: session.userFk,
+        reason: 'TOKEN_REUSE',
+      });
       TokenLifecycleValidator.assertNotCompromised(
         session.refreshTokenRevokedAt,
       );

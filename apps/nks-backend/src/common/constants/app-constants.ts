@@ -1,17 +1,3 @@
-/**
- * Application Constants
- * Centralized configuration for all hardcoded magic numbers and strings
- *
- * ⚠️ IMPORTANT: These values should be configurable via environment variables
- * for different deployment environments (dev, staging, prod)
- */
-
-// ============================================================================
-// DATABASE CONFIGURATION
-// ============================================================================
-
-export const DATABASE_CONNECTION = 'DATABASE_CONNECTION';
-
 // ============================================================================
 // AUTH & SESSION CONFIGURATION
 // ============================================================================
@@ -23,12 +9,25 @@ export const AUTH_CONSTANTS = {
   SESSION: {
     EXPIRY_DAYS: 30,
     EXPIRY_SECONDS: 60 * 60 * 24 * 30,
-    UPDATE_AGE_SECONDS: 60 * 60 * 24, // Refresh if older than 1 day
+    UPDATE_AGE_SECONDS: 60 * 60 * 24, // BetterAuth compat: refresh if older than 1 day
     COOKIE_NAME: 'nks_session',
-    COOKIE_SECURE: true, // always secure; HTTP-only dev override must be done at call site via ConfigService
+    COOKIE_SECURE: process.env['NODE_ENV'] === 'production',
+    // SameSite strategy:
+    //   'strict' — same-domain deployments (default, most secure)
+    //   'lax'    — cross-site top-level navigations (OAuth callbacks, email links)
+    //   'none'   — cross-domain API (forces Secure=true regardless of NODE_ENV)
+    COOKIE_SAME_SITE: (process.env['CSRF_SAME_SITE'] ?? 'strict') as 'strict' | 'lax' | 'none',
     COOKIE_HTTP_ONLY: true,
     COOKIE_PATH: '/',
     MAX_PER_USER: 5,
+
+    // Rolling session — opaque token rotation for cookie-based (web) sessions.
+    // Every ROTATION_INTERVAL_SECONDS the nks_session cookie value is replaced
+    // with a new random token and expiresAt is pushed forward EXPIRY_SECONDS.
+    // This bounds the replay window: a stolen cookie is only usable until the
+    // legitimate user's next request triggers rotation and invalidates it.
+    // Bearer (mobile) sessions are exempt — they use the explicit refresh-token flow.
+    ROTATION_INTERVAL_SECONDS: 60 * 60, // rotate every 1 hour
   },
 
   // Login Attempts & Lockout
@@ -43,119 +42,13 @@ export const AUTH_CONSTANTS = {
 
   // Password Requirements
   PASSWORD: {
-    MIN_LENGTH: 8,
+    MIN_LENGTH: 12,
     REQUIRE_UPPERCASE: true,
     REQUIRE_LOWERCASE: true,
     REQUIRE_NUMBERS: true,
     REQUIRE_SPECIAL_CHARS: true,
     SPECIAL_CHARS_REGEX: /[!@#$%^&*]/,
   },
-} as const;
-
-// ============================================================================
-// RATE LIMITING CONFIGURATION
-// ============================================================================
-
-export const RATE_LIMIT_CONSTANTS = {
-  // Global Rate Limit
-  GLOBAL: {
-    WINDOW_SECONDS: 60,
-    MAX_REQUESTS: 100,
-  },
-
-  // Sign-in Rate Limit
-  SIGN_IN: {
-    WINDOW_SECONDS: 60 * 15, // 15 minutes
-    MAX_ATTEMPTS: 5,
-  },
-
-  // Sign-up Rate Limit
-  SIGN_UP: {
-    WINDOW_SECONDS: 60 * 10, // 10 minutes
-    MAX_ATTEMPTS: 10,
-  },
-
-  // OTP Rate Limit
-  OTP: {
-    WINDOW_SECONDS: 60,
-    MAX_REQUESTS: 3,
-    RESEND_COOLDOWN_SECONDS: 60,
-  },
-} as const;
-
-// ============================================================================
-// OTP CONFIGURATION
-// ============================================================================
-
-export const OTP_CONSTANTS = {
-  // SMS OTP — expiry is OTP_EXPIRY_MS from auth.constants.ts (15 min)
-  SMS: {
-    LENGTH: 6,
-    MIN_VALUE: 100000,
-    MAX_VALUE: 999999,
-    MAX_ATTEMPTS: 5,
-  },
-
-  // Email OTP
-  EMAIL: {
-    LENGTH: 6,
-    MIN_VALUE: 100000,
-    MAX_VALUE: 999999,
-    EXPIRY_HOURS: 24,
-    EXPIRY_MS: 24 * 60 * 60 * 1000,
-    MAX_ATTEMPTS: 3,
-  },
-
-  // Token Generation
-  TOKEN: {
-    LENGTH: 32,
-    CHARSET: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
-  },
-} as const;
-
-// ============================================================================
-// STORE & STAFF CONFIGURATION
-// ============================================================================
-
-export const STORE_CONSTANTS = {
-  // Staff Invite
-  STAFF_INVITE: {
-    TOKEN_LENGTH: 32,
-    EXPIRY_DAYS: 7,
-    EXPIRY_MS: 7 * 24 * 60 * 60 * 1000,
-    MAX_INVITES_PER_STORE_PER_DAY: 50,
-  },
-
-  // Store Code Format
-  STORE_CODE: {
-    MIN_LENGTH: 1,
-    MAX_LENGTH: 50,
-    PATTERN: /^[A-Z0-9_-]+$/, // Alphanumeric, underscore, hyphen
-  },
-} as const;
-
-// ============================================================================
-// PAGINATION & QUERY DEFAULTS
-// ============================================================================
-
-export const PAGINATION_CONSTANTS = {
-  DEFAULT_PAGE: 1,
-  DEFAULT_PAGE_SIZE: 20,
-  MAX_PAGE_SIZE: 100,
-  MIN_PAGE_SIZE: 1,
-} as const;
-
-// ============================================================================
-// CORS & SECURITY CONFIGURATION
-// ============================================================================
-
-export const CORS_CONSTANTS = {
-  // Default origin for development (should be environment-based)
-  DEFAULT_ORIGIN: 'http://localhost:3000',
-  ALLOWED_METHODS: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  ALLOWED_HEADERS: ['Content-Type', 'Authorization', 'X-Request-ID'],
-  EXPOSE_HEADERS: ['Content-Range', 'X-Content-Range'],
-  CREDENTIALS: true,
 } as const;
 
 // ============================================================================
@@ -170,35 +63,3 @@ export const SERVER_CONSTANTS = {
   REQUEST_TIMEOUT_MS: 30 * 1000,
 } as const;
 
-// ============================================================================
-// DATABASE CONFIGURATION
-// ============================================================================
-
-export const DATABASE_CONSTANTS = {
-  // Connection Pool
-  POOL: {
-    MIN_SIZE: 5,
-    MAX_SIZE: 20,
-  },
-
-  // Query Timeout
-  QUERY_TIMEOUT_MS: 30 * 1000,
-
-  // Transaction Timeout
-  TRANSACTION_TIMEOUT_MS: 60 * 1000,
-} as const;
-
-// ============================================================================
-// VALIDATION PATTERNS
-// ============================================================================
-
-export const VALIDATION_PATTERNS = {
-  EMAIL: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-  PHONE: /^[+]?[(]?[0-9]{1,4}[)]?[-\s.]?[(]?[0-9]{1,4}[)]?[-\s.]?[0-9]{1,9}$/,
-  URL: /^https?:\/\/.+/,
-  UUID: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-  POSTAL_CODE: /^[A-Z0-9]{3,20}$/i,
-  STORE_CODE: /^[A-Z0-9_-]+$/,
-} as const;
-
-export type DeviceType = (typeof AUTH_CONSTANTS.SUPPORTED_DEVICE_TYPES)[number];

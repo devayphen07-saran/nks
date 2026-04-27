@@ -1,6 +1,6 @@
 import type { UserSession } from '../../../../core/database/schema/auth/user-session';
 import type { User as DbUser } from '../../../../core/database/schema/auth/users/users.table';
-import type { PublicSession } from '../services/session/session.service';
+import type { PublicSession } from '../services/session/session-query.service';
 import type { SessionInfoDto } from '../dto';
 import type { SessionUser, SessionUserRole } from '../interfaces/session-user.interface';
 import { SystemRoleCodes } from '../../../../common/constants/system-role-codes.constant';

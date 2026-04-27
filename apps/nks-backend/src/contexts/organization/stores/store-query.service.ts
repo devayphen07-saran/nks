@@ -1,20 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import { StoresRepository } from './repositories/stores.repository';
+import { StoresMapper, type StoreDto } from './mapper/stores.mapper';
 
 /**
- * StoreQueryService — narrow read surface for cross-context consumers.
+ * StoreQueryService — read-only surface for stores.
  *
- * Guards in common/guards/ must not import the full StoresService (domain service
- * with write operations and business logic). This service exposes only the
- * read-only predicates that infrastructure-level code actually needs.
- *
- * Mutation flows remain in StoresService. RBACGuard injects this service so
- * it can verify store-active state without taking a dependency on the full
- * stores domain.
+ * Guards (RBACGuard) and the StoresController both use this service for all
+ * read operations. Write operations (setDefaultStore) live in StoresService.
  */
 @Injectable()
 export class StoreQueryService {
   constructor(private readonly storesRepository: StoresRepository) {}
+
+  async getMyStores(userId: number): Promise<{ myStores: StoreDto[]; invitedStores: StoreDto[] }> {
+    const rows = await this.storesRepository.getStoresForUser(userId);
+    return {
+      myStores: rows.filter((r) => r.isOwner).map(StoresMapper.buildStoreDto),
+      invitedStores: rows.filter((r) => !r.isOwner).map(StoresMapper.buildStoreDto),
+    };
+  }
 
   /**
    * True iff the store exists, is active, and is not soft-deleted.

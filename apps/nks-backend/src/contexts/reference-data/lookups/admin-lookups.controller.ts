@@ -20,7 +20,8 @@ import { EntityCodes, PermissionActions } from '../../../common/constants/entity
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
 import type { SessionUser } from '../../iam/auth/interfaces/session-user.interface';
-import { LookupsService } from './lookups.service';
+import { LookupsQueryService } from './lookups-query.service';
+import { LookupsCommandService } from './lookups-command.service';
 import type {
   LookupTypesListResponse,
   LookupValueAdminResponse,
@@ -38,38 +39,32 @@ import type { PaginatedResult } from '../../../common/utils/paginated-result';
 @EntityResource(EntityCodes.LOOKUP)
 @ApiBearerAuth()
 export class AdminLookupsController {
-  constructor(private readonly lookupsService: LookupsService) {}
+  constructor(
+    private readonly lookupsQuery: LookupsQueryService,
+    private readonly lookupsCommand: LookupsCommandService,
+  ) {}
 
   @Get()
-  @RequireEntityPermission({
-    action: PermissionActions.VIEW,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.VIEW, scope: 'PLATFORM' })
   @ResponseMessage('Lookup types retrieved successfully')
   @ApiOperation({ summary: 'Get all lookup types' })
   async getAllLookupTypes(): Promise<LookupTypesListResponse> {
-    return this.lookupsService.getAllLookupTypes();
+    return this.lookupsQuery.getAllLookupTypes();
   }
 
   @Get(':code')
-  @RequireEntityPermission({
-    action: PermissionActions.VIEW,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.VIEW, scope: 'PLATFORM' })
   @ResponseMessage('Lookup values retrieved successfully')
   @ApiOperation({ summary: 'Get values for a lookup type' })
   async listLookupValues(
     @Param('code') code: string,
     @Query() query: GetLookupValuesQueryDto,
   ): Promise<PaginatedResult<LookupValueAdminResponse>> {
-    return this.lookupsService.listLookupValues(code, query);
+    return this.lookupsQuery.listLookupValues(code, query);
   }
 
   @Post(':code')
-  @RequireEntityPermission({
-    action: PermissionActions.CREATE,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.CREATE, scope: 'PLATFORM' })
   @HttpCode(HttpStatus.CREATED)
   @ResponseMessage('Lookup value created successfully')
   @ApiOperation({ summary: 'Create a lookup value' })
@@ -78,14 +73,11 @@ export class AdminLookupsController {
     @Body() dto: CreateLookupValueDto,
     @CurrentUser() user: SessionUser,
   ): Promise<LookupValueAdminResponse> {
-    return this.lookupsService.createLookupValue(code, dto, user.userId);
+    return this.lookupsCommand.createLookupValue(code, dto, user.userId);
   }
 
   @Put(':code/:guuid')
-  @RequireEntityPermission({
-    action: PermissionActions.EDIT,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.EDIT, scope: 'PLATFORM' })
   @ResponseMessage('Lookup value updated successfully')
   @ApiOperation({ summary: 'Update a lookup value' })
   async updateLookupValue(
@@ -94,14 +86,11 @@ export class AdminLookupsController {
     @Body() dto: UpdateLookupValueDto,
     @CurrentUser() user: SessionUser,
   ): Promise<LookupValueAdminResponse> {
-    return this.lookupsService.updateLookupValue(code, guuid, dto, user.userId);
+    return this.lookupsCommand.updateLookupValue(code, guuid, dto, user.userId);
   }
 
   @Delete(':code/:guuid')
-  @RequireEntityPermission({
-    action: PermissionActions.DELETE,
-    scope: 'PLATFORM',
-  })
+  @RequireEntityPermission({ action: PermissionActions.DELETE, scope: 'PLATFORM' })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a lookup value' })
   async deleteLookupValue(
@@ -109,6 +98,6 @@ export class AdminLookupsController {
     @Param('guuid', ParseUUIDPipe) guuid: string,
     @CurrentUser() user: SessionUser,
   ): Promise<void> {
-    await this.lookupsService.deleteLookupValue(code, guuid, user.userId);
+    await this.lookupsCommand.deleteLookupValue(code, guuid, user.userId);
   }
 }

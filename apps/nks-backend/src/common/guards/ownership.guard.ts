@@ -1,10 +1,6 @@
-import {
-  Injectable,
-  CanActivate,
-  ExecutionContext,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { ErrorCode } from '../constants/error-codes.constants';
+import { ForbiddenException } from '../exceptions';
 import type { AuthenticatedRequest } from './auth.guard';
 
 /**
