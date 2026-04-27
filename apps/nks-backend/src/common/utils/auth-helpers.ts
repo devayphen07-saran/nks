@@ -21,9 +21,9 @@ import { AUTH_CONSTANTS } from '../constants/app-constants';
  *    MOBILE (deviceType ∈ {'ANDROID', 'IOS'}):
  *      - Server does NOT set the session cookie (controllers skip the call
  *        based on `deviceInfo.deviceType`).
- *      - Mobile stores `session.sessionToken` and `session.jwtToken` from
+ *      - Mobile stores `session.sessionToken` and `session.accessToken` from
  *        the body and attaches `Authorization: Bearer <token>` on requests.
- *      - Mobile additionally consumes `offlineToken` / `offlineSessionSignature`
+ *      - Mobile additionally consumes `offline.token` / `offline.sessionSignature`
  *        for offline-capable verification.
  *
  *  Detection: driven by the `X-Device-Type` request header (normalised by

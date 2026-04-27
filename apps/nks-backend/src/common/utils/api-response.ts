@@ -22,21 +22,13 @@ export interface ApiResponseInit<T> {
 }
 
 /**
- * Unified API response envelope — identical shape for both success and error.
+ * Unified API response envelope.
  *
- * Wire shape:
- * {
- *   status:     'success' | 'error',
- *   statusCode: number,
- *   message:    string,
- *   errorCode:  string | null,
- *   data:       T | null,
- *   errors:     Record<string, string[]> | null,
- *   details:    string[] | null,
- *   path:       string | null,
- *   timestamp:  string,
- *   requestId:  string | undefined,
- * }
+ * Success wire shape (HTTP 2xx):
+ * { message, data, timestamp, [meta], [requestId] }
+ *
+ * Error wire shape (HTTP 4xx/5xx):
+ * { status: 'error', statusCode, message, errorCode, [errors], [details], [path], timestamp, [requestId] }
  *
  * Rules:
  *   - TransformInterceptor is the sole builder of success envelopes.
@@ -78,19 +70,24 @@ export class ApiResponse<T = unknown> {
    * Wire serialization — omits nullable fields when empty so the JSON payload
    * stays lean. Mirrors Spring's `@JsonInclude(NON_NULL)` / Go's `omitempty`.
    *
-   * Always present: status, statusCode, message, data, timestamp.
-   * Present only when non-null: errorCode, errors, details, path, requestId.
+   * Success shape: { message, data, timestamp, [meta], [requestId] }
+   * Error shape:   { status: 'error', statusCode, message, errorCode, [errors], [details], [path], timestamp, [requestId] }
+   *
+   * status/statusCode are omitted from success responses — HTTP status is the
+   * authoritative source; duplicating it in the body is payload bloat.
    */
   toJSON(): Record<string, unknown> {
     const out: Record<string, unknown> = {
-      status: this.status,
-      statusCode: this.statusCode,
       message: this.message,
       data: this.data,
       timestamp: this.timestamp,
     };
+    if (this.status === 'error') {
+      out.status = this.status;
+      out.statusCode = this.statusCode;
+      out.errorCode = this.errorCode;
+    }
     if (this.meta !== null) out.meta = this.meta;
-    if (this.errorCode !== null) out.errorCode = this.errorCode;
     if (this.errors !== null) out.errors = this.errors;
     if (this.details !== null) out.details = this.details;
     if (this.path !== null) out.path = this.path;

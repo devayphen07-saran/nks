@@ -79,7 +79,7 @@ export class TokenService {
     firstName?: string,
     lastName?: string,
   ): Promise<TokenPair> {
-    const jwtToken = this.createAccessToken({
+    const accessToken = this.createAccessToken({
       sub: userGuuid,
       sid: sessionGuuid,
       jti,
@@ -109,7 +109,7 @@ export class TokenService {
       `Token pair created for ${userGuuid}. Access: 15 min. Refresh: 7 days.`,
     );
 
-    return { jwtToken, refreshToken, jwtExpiresAt, refreshTokenExpiresAt };
+    return { accessToken, refreshToken, jwtExpiresAt, refreshTokenExpiresAt };
   }
 
   // ─── Auth Response Assembly ────────────────────────────────────────────────

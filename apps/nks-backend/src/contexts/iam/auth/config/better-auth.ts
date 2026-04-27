@@ -105,7 +105,7 @@ export const getAuth = (
         userRoles: { type: 'string', required: false }, // JSON array of roles
         primaryRole: { type: 'string', required: false }, // Primary role code
 
-        // Note: roleHash and jwtToken are handled separately in auth.service.ts
+        // Note: roleHash and accessToken are handled separately in auth.service.ts
         // They are not defined here to avoid Better Auth insertion conflicts
         // Instead, they are UPDATEd after session creation
       },

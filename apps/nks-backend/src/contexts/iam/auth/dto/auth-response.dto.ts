@@ -53,12 +53,16 @@ const AuthSessionSchema = z.object({
   expiresAt: z.string(),
   refreshToken: z.string(),
   refreshExpiresAt: z.string(),
-  defaultStore: z
-    .object({
-      guuid: z.string(),
-    })
-    .nullable(),
-  jwtToken: z.string().optional(),
+  accessToken: z.string().optional(),
+});
+
+// ─── Client Context Schema ────────────────────────────────────────────────
+// Tenant/store selection state — separated from auth credentials so the
+// two domains can evolve independently. defaultStoreGuuid is null for users
+// who have not yet set a default store or have no store role.
+
+const AuthContextSchema = z.object({
+  defaultStoreGuuid: z.string().nullable(),
 });
 
 // ─── Sync Metadata Schema ─────────────────────────────────────────────────
@@ -89,10 +93,15 @@ export class RefreshTokenResponseDto extends createZodDto(AuthSessionSchema) {}
 export interface AuthResponseEnvelope {
   user: z.infer<typeof AuthMinimalUserSchema>;
   session: z.infer<typeof AuthSessionSchema>;
+  context: z.infer<typeof AuthContextSchema>;
   sync: z.infer<typeof AuthSyncMetadataSchema>;
-  offlineToken?: string;
-  /** HMAC-SHA256 of the offline session payload, signed server-side.
-   *  Mobile stores this and checks its presence on load; the signing secret
-   *  never leaves the server, so clients cannot forge a new signature.  */
-  offlineSessionSignature?: string;
+  /** Present only for mobile clients. Contains the offline JWT and the
+   *  server-signed HMAC used for offline write verification. */
+  offline?: {
+    /** RS256 JWT — 3-day TTL — for offline access verification on device. */
+    token: string;
+    /** HMAC-SHA256 of the offline session payload. Mobile stores this and
+     *  checks its presence on load; signing secret never leaves the server. */
+    sessionSignature?: string;
+  };
 }

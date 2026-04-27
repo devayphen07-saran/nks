@@ -277,7 +277,7 @@ export class TokenLifecycleService {
         token: newSession.token,
       },
       {
-        jwtToken: accessToken,
+        accessToken: accessToken,
         refreshToken: newRefreshToken,
         jwtExpiresAt: accessTokenExpiresAt,
         refreshTokenExpiresAt: newRefreshTokenExpiresAt,

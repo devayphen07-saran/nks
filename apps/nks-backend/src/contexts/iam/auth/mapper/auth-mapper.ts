@@ -55,7 +55,7 @@ export type PermissionContext = {
 };
 
 export type TokenPair = {
-  jwtToken: string;
+  accessToken: string;
   refreshToken: string;
   jwtExpiresAt: Date;
   refreshTokenExpiresAt: Date;
@@ -84,7 +84,7 @@ export class AuthMapper {
       );
     }
 
-    const jwtToken = tokenPair?.jwtToken;
+    const accessToken = tokenPair?.accessToken;
     const refreshToken = tokenPair?.refreshToken ?? sessionToken;
 
     // Convert expiresAt/refreshExpiresAt to ISO string (transformation only, no calculation)
@@ -110,16 +110,24 @@ export class AuthMapper {
         expiresAt: expiresAtStr,
         refreshToken,
         refreshExpiresAt: refreshExpiresAtStr,
-        defaultStore: defaultStore ?? null,
-        ...(jwtToken ? { jwtToken } : {}),
+        ...(accessToken ? { accessToken } : {}),
+      },
+      context: {
+        defaultStoreGuuid: defaultStore?.guuid ?? null,
       },
       sync: {
         cursor: INITIAL_SYNC_CURSOR,
         lastSyncedAt: lastSyncedAtStr,
         deviceId: deviceId ?? null,
       },
-      ...(offlineToken ? { offlineToken } : {}),
-      ...(offlineSessionSignature ? { offlineSessionSignature } : {}),
+      ...(offlineToken
+        ? {
+            offline: {
+              token: offlineToken,
+              ...(offlineSessionSignature ? { sessionSignature: offlineSessionSignature } : {}),
+            },
+          }
+        : {}),
     };
   }
 

@@ -58,7 +58,7 @@ export class AuthGuard implements CanActivate {
 
     // ── Token authority ──────────────────────────────────────────────────────
     // This guard reads ONLY the opaque sessionToken (BetterAuth).
-    //   jwtToken  — RS256, 15 min — for downstream/cross-service calls; never sent to this guard.
+    //   accessToken — RS256, 15 min — for downstream/cross-service calls; never sent to this guard.
     //   offlineToken — RS256, 3 days — mobile sync-push only; verified in SyncService.
     // Web:    httpOnly cookie nks_session → sessionToken → DB lookup
     // Mobile: Authorization: Bearer <sessionToken> → DB lookup
