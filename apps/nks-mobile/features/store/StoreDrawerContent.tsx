@@ -29,12 +29,12 @@ export function StoreDrawerContent({ navigation }: StoreDrawerContentProps) {
   const { logout } = useLogout();
 
   const userInitials =
-    user?.name
-      ?.split(" ")
-      .map((n: string) => n[0])
+    [user?.firstName, user?.lastName]
+      .filter(Boolean)
+      .map((n) => n![0])
       .join("")
       .toUpperCase()
-      .slice(0, 2) ?? "U";
+      .slice(0, 2) || "U";
 
   // Use role-based menu items
   const mainMenuItems = menuItems;

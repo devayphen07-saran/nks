@@ -16,6 +16,7 @@ export enum ErrorCode {
 
   // Authentication errors
   AUTH_ERROR = 'AUTH_ERROR',
+  AUTH_NO_ADMIN = 'AUTH_NO_ADMIN',
   UNAUTHORIZED = 'UNAUTHORIZED',
   SESSION_EXPIRED = 'SESSION_EXPIRED',
   INVALID_CREDENTIALS = 'INVALID_CREDENTIALS',
@@ -58,6 +59,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   [ErrorCode.INVALID_PASSWORD]: 'Password must be at least 8 characters.',
 
   [ErrorCode.AUTH_ERROR]: 'Authentication failed. Please try again.',
+  [ErrorCode.AUTH_NO_ADMIN]: 'No admin account exists. Please register using email and password first.',
   [ErrorCode.UNAUTHORIZED]: 'You are not authorized for this action.',
   [ErrorCode.SESSION_EXPIRED]: 'Your session has expired. Please log in again.',
   [ErrorCode.INVALID_CREDENTIALS]: 'Invalid phone number or OTP.',

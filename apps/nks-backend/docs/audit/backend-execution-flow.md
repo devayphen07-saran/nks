@@ -3,7 +3,7 @@
 > Full file-by-file behavioral trace of the NestJS backend.
 > Derived from real on-disk source — no assumptions.
 >
-> **Last updated:** 2026-04-27 — reflects the guard/interceptor/pipe/middleware refactor.
+> **Last updated:** 2026-04-27 — guard/interceptor refactor + security hardening (safe-method CSRF skip, typed sessionContext, headersSent guard, sync decomposition).
 
 ---
 
@@ -26,7 +26,7 @@ HTTP Request
   │     9. CsrfMiddleware                   sets csrf_token cookie for unauthenticated requests
   │
   ├─[Global guards — APP_GUARD providers, registration order]
-  │    10. AuthGuard                        token → single-JOIN session+user+roles → req.user + _pendingSessionUpdates
+  │    10. AuthGuard                        token → single-JOIN session+user+roles → req.user + req.sessionContext
   │    11. RateLimitingGuard                DB-backed sliding-window upsert
   │
   ├─[Route-level guards — @UseGuards on controllers]
@@ -54,7 +54,8 @@ HTTP Request
   │    19. TimeoutInterceptor               no-op on success
   │    20. LoggingInterceptor               logs response time
   │    21. ResponseInterceptor              wraps result in ApiResponse envelope
-  │    22. SessionRotationInterceptor       reads _pendingSessionUpdates → applies DB rotation + Set-Cookie
+  │    22. SessionRotationInterceptor       reads req.sessionContext → applies DB rotation + Set-Cookie
+  │                                         guard: if res.headersSent → skip all updates (warn)
   │
   ├─[On error — APP_FILTER]
   │       GlobalExceptionFilter             AppException | Zod | HttpException | DB | unknown → ApiResponse
@@ -77,7 +78,7 @@ Order is **Express middleware first** (`app.use(...)` in `main.ts`), then **Nest
 | 3 | `main.ts` (cookie-parser) | Express | Parses `Cookie` header into `req.cookies` and `req.signedCookies`. Cookie signing secret is required in production. |
 | 4 | `common/middleware/request-id.middleware.ts` (`requestIdMiddleware`) | Express (`app.use()`) | Reads or generates `x-request-id`; mirrors to `X-Request-ID` response header. |
 | 5 | `common/middleware/api-version.middleware.ts` (`ApiVersionMiddleware`) | Nest, `configure()` forRoutes('*') | Validates `X-API-Version` header and `/api/v{n}/` URL segment against `SUPPORTED_VERSIONS`. Rejects unsupported with 400 `API_VERSION_UNSUPPORTED`. Stamps `X-API-Version` on response. |
-| 6 | `common/middleware/csrf.middleware.ts` (`CsrfMiddleware`) | Nest, `configure()` forRoutes('*') | For unauthenticated requests: reads `nks_session` cookie → computes `HMAC-SHA256(csrfSecret ?? sessionToken, CSRF_HMAC_SECRET)` → writes/refreshes `csrf_token` cookie. Skips if session already authenticated. Does NOT validate. |
+| 6 | `common/middleware/csrf.middleware.ts` (`CsrfMiddleware`) | Nest, `configure()` forRoutes('*') | Sets pre-auth `csrf_token` cookie. Skips: GET/HEAD/OPTIONS (safe methods), Bearer requests, requests with an active `nks_session` cookie (AuthGuard handles those). Only runs for unauthenticated non-safe requests. Does NOT validate. |
 
 Supporting (not directly in the request path but used by middleware):
 - `common/middleware/csrf-token.service.ts` — HMAC compute helper (`computeFor(sessionToken)`, `validate(provided, expected)`, `isExempt(path)`).
@@ -88,7 +89,7 @@ Execution: **global first** (`APP_GUARD` array order), **then class-level**, **t
 
 | # | File | Scope | Reads | Writes | Throws |
 |---|------|-------|-------|--------|--------|
-| 1 | `common/guards/auth.guard.ts` | Global | `Authorization` (Bearer) or `nks_session` cookie | `req.user`, `req._pendingSessionUpdates` | `Unauthorized` / `Forbidden` |
+| 1 | `common/guards/auth.guard.ts` | Global | `Authorization` (Bearer) or `nks_session` cookie | `req.user`, `req.sessionContext` | `Unauthorized` / `Forbidden` |
 | 2 | `common/guards/rate-limiting.guard.ts` | Global | `req.user.userId` (if set) or `req.ip` + `req.route.path` | `rate_limit_entries` row (DB upsert) | `TooManyRequests` |
 | 3 | `common/guards/rbac.guard.ts` | Route (where applied) | `@RequireEntityPermission`, `@EntityResource`, `req.user`, `req.params` | nothing | `BadRequest` (unknown entity) / `Forbidden` |
 | 4 | `common/guards/ownership.guard.ts` | Route (where applied) | record ownership criteria | nothing | `Forbidden` |
@@ -105,7 +106,7 @@ Execution: **global first** (`APP_GUARD` array order), **then class-level**, **t
 After all checks pass, for cookie sessions the guard stamps:
 
 ```typescript
-req._pendingSessionUpdates = {
+req.sessionContext = {           // typed SessionUpdateContext — see common/guards/session-context.ts
   authType: 'cookie',
   sessionToken,
   sessionId: session.id,
@@ -115,7 +116,7 @@ req._pendingSessionUpdates = {
 };
 ```
 
-`SessionRotationInterceptor` reads `_pendingSessionUpdates` after the handler and applies all cookie/DB side effects. If the handler throws, no side effects are applied.
+`SessionRotationInterceptor` reads `req.sessionContext` after the handler and applies all cookie/DB side effects. If the handler throws, no side effects are applied. If `res.headersSent` is already true (streaming endpoint), all updates are skipped with a warning to prevent token desync.
 
 ### 2.3 Interceptors
 
@@ -125,7 +126,7 @@ NestJS interceptors wrap in reverse on the way out, so the effective after-handl
 
 | # | File | Before handler | After handler |
 |---|------|----------------|---------------|
-| 1 | `common/interceptors/session-rotation.interceptor.ts` | passthrough | reads `req._pendingSessionUpdates`; applies rolling rotation (new session token + CSRF secret in DB + cookies), or `@RotateCsrf()` CSRF-only rotation, or cookie sync |
+| 1 | `common/interceptors/session-rotation.interceptor.ts` | passthrough | reads `req.sessionContext`; guards `res.headersSent` first; applies rolling rotation (new session token + CSRF secret in DB + cookies), or `@RotateCsrf()` CSRF-only rotation, or cookie sync |
 | 2 | `common/interceptors/response.interceptor.ts` (`ResponseInterceptor`) | passthrough | wraps result in `ApiResponse` envelope; reads `RESPONSE_MESSAGE_KEY` metadata; handles `PaginatedResult<T>` and 204 passthrough |
 | 3 | `common/interceptors/logging.interceptor.ts` | records start time | logs method, path, status, duration |
 | 4 | `common/interceptors/timeout.interceptor.ts` | starts `rxjs.timeout(30s)` | converts `TimeoutError` → `RequestTimeoutException(408)` |
@@ -422,6 +423,9 @@ Guard sub-services live in `common/guards/services/`:
 - `session-lifecycle.service.ts` — `isRotationDue()` check only
 - `csrf-validation.service.ts` — HMAC double-submit validation
 
+Shared contract type:
+- `common/guards/session-context.ts` — `SessionUpdateContext` interface + `Express.Request` module augmentation (`req.sessionContext`)
+
 ### 3.6 `contexts/iam/roles/`
 
 ```
@@ -448,7 +452,6 @@ routes/
 ├── routes.controller.ts           ← public navigation tree
 ├── admin-routes.controller.ts     ← admin route management
 ├── routes.service.ts              ← builds permission-filtered tree
-├── routes.types.ts
 ├── dto/route-response.dto.ts, routes.interface.ts
 ├── mapper/route.mapper.ts
 └── validators/routes.validator.ts
@@ -515,8 +518,12 @@ audit/
 sync/
 ├── sync.module.ts
 ├── sync.controller.ts             ← /sync/changes (pull), /sync/push (offline mutations)
-├── sync.service.ts                ← god-service: validation + batching + idempotency + revocation
+├── sync.service.ts                ← thin orchestrator: coordinates push batch + pull changes
 ├── sync.constants.ts
+├── services/
+│   ├── sync-validation.service.ts ← op-type check, HMAC signature verify, hashOperation(),
+│   │                                  offline session HMAC + JWT cross-validation
+│   └── sync-idempotency.service.ts← claim() → 'processed' | 'duplicate' | 'replay'
 ├── handlers/
 │   ├── sync-handler.interface.ts
 │   └── sync-handler.factory.ts
@@ -569,7 +576,7 @@ UserContextLoaderService.load(user, roles, activeStoreFk, sessionId)
    ↓ (no additional DB calls — uses pre-fetched data)
    ↓
 req.user = SessionUser
-req._pendingSessionUpdates = { ... }   ← cookie sessions only
+req.sessionContext = { ... }           ← cookie sessions only (SessionUpdateContext)
 ```
 
 ### 4.2 Cookies
@@ -620,7 +627,8 @@ State-mutating authenticated request (POST/PUT/PATCH/DELETE, cookie session):
     SHA256(provided) vs SHA256(expected) via crypto.timingSafeEqual → ForbiddenException if mismatch
 
 Post-handler (cookie session only):
-  SessionRotationInterceptor reads _pendingSessionUpdates:
+  SessionRotationInterceptor reads req.sessionContext:
+    guard: if res.headersSent → skip all updates (warn) — avoids token desync on streaming endpoints
     - Rolling rotation  → new session token + new CSRF secret written to DB; both cookies refreshed
     - @RotateCsrf()     → new CSRF secret only written to DB; csrf_token cookie refreshed
     - Cookie sync       → csrf_token cookie refreshed if stale (no DB write)
@@ -696,7 +704,7 @@ AuthGuard
    - AuthPolicyService.enforceAccountStatus() → active, not blocked
    - SessionLifecycleService.isRotationDue() → rotation interval not elapsed → false
    - req.user = SessionUser
-   - req._pendingSessionUpdates = { shouldRotateSession: false, ... }
+   - req.sessionContext = { shouldRotateSession: false, ... }
    - returns true
   ↓
 RateLimitingGuard
@@ -740,7 +748,8 @@ LoggingInterceptor (after) — logs method, path, 201, duration
 ResponseInterceptor (after) — wraps in ApiResponse{ status:'success', statusCode:201, data: Role, requestId }
   ↓
 SessionRotationInterceptor (after)
-   - reads _pendingSessionUpdates.shouldRotateSession = false
+   - res.headersSent? no → proceed
+   - reads req.sessionContext.shouldRotateSession = false
    - csrf_token cookie stale check → refreshes if needed
   ↓
 res.status(201).json(envelope)
@@ -769,7 +778,8 @@ res.status(409).json(envelope)
 - **Files involved per request:** ~25 hot-path files for an authenticated CRUD call.
 - **Source of truth for ordering:** `main.ts` (Express middleware), `app.module.ts` (Nest middleware + APP_GUARD/PIPE/INTERCEPTOR/FILTER arrays), and route-level decorators.
 - **Single DB round trip per authenticated request:** `findSessionAuthContext()` returns session + user + roles + JTI in one JOIN query.
-- **Guard is pure validation:** all cookie and DB side effects are deferred to `SessionRotationInterceptor` post-handler. If the handler throws, no session state is mutated.
+- **Guard is pure validation:** all cookie and DB side effects are deferred to `SessionRotationInterceptor` post-handler. If the handler throws, no session state is mutated. If `res.headersSent`, the interceptor skips updates entirely.
+- **Typed guard→interceptor contract:** `req.sessionContext` (`SessionUpdateContext`) via Express module augmentation — no casts, no magic properties.
 - **All other files** in the codebase (DTOs, mappers, schema, validators, lookup tables) are referenced indirectly from the hot path via DI.
 
 This document mirrors the actual on-disk source and is the canonical reference for the request lifecycle.

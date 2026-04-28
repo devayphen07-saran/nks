@@ -23,7 +23,7 @@ export class SessionRevocationListener {
     try {
       // The triggering session is already deleted; this picks up only the remaining ones.
       const jtis = await this.sessionsRepository.findJtisByUserId(payload.userId);
-      await this.sessionsRepository.revokeAndDeleteAllForUser(payload.userId, payload.reason, jtis);
+      await this.sessionsRepository.revokeAllForUser(payload.userId, payload.reason, jtis);
       this.logger.log(
         `Background revocation complete — reason=${payload.reason} userId=${payload.userId} sessions=${jtis.length}`,
       );

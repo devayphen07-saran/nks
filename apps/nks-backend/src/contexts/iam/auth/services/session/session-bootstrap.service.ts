@@ -81,11 +81,13 @@ export class SessionBootstrapService {
           : null;
 
       const jti = crypto.randomUUID();
+      const csrfSecret = crypto.randomBytes(32).toString('hex');
 
       const updatedSession = await this.sessionsRepository.updateByToken(session.token, {
         roleHash,
         activeStoreFk,
         jti,
+        csrfSecret,
         ...(deviceInfo
           ? {
               deviceId: deviceInfo.deviceId ?? null,

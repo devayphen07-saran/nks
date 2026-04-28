@@ -21,6 +21,7 @@ export interface RefreshAttemptResult {
   newToken?: string;
   error?: string;
   shouldLogout?: boolean; // true if refresh token is invalid/expired
+  permissionsChanged?: boolean; // true if server detected role changes since last login
 }
 
 /**
@@ -59,7 +60,7 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
     });
 
     const result = response.data?.data;
-    const newSessionToken = result?.sessionToken;
+    const newSessionToken = result?.auth?.sessionToken;
 
     if (!newSessionToken || !envelope?.data) {
       log.warn("[RefreshAttempt] Malformed refresh response");
@@ -75,29 +76,26 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
     // ✅ Update SecureStore session with new tokens
     const updated: AuthResponse = {
       ...envelope.data,
-      session: {
-        ...envelope.data.session,
+      auth: {
+        ...envelope.data.auth,
         sessionToken: newSessionToken,
-        ...(result?.refreshToken ? { refreshToken: result.refreshToken } : {}),
-        ...(result?.expiresAt ? { expiresAt: result.expiresAt } : {}),
-        ...(result?.refreshExpiresAt
-          ? { refreshExpiresAt: result.refreshExpiresAt }
-          : {}),
+        ...(result?.auth?.refreshToken ? { refreshToken: result.auth.refreshToken } : {}),
+        ...(result?.auth?.expiresAt ? { expiresAt: result.auth.expiresAt } : {}),
+        ...(result?.auth?.refreshExpiresAt ? { refreshExpiresAt: result.auth.refreshExpiresAt } : {}),
+        ...(result?.auth?.accessToken ? { accessToken: result.auth.accessToken } : {}),
       },
-      ...(result?.offlineToken ? { offlineToken: result.offlineToken } : {}),
-      ...(result?.offlineSessionSignature
-        ? { offlineSessionSignature: result.offlineSessionSignature }
-        : {}),
+      context: result?.context ?? envelope.data.context,
+      offline: result?.offline !== undefined ? result.offline : envelope.data.offline,
     };
 
     await tokenManager.persistSession(updated);
 
     // ✅ Sync JWTManager dual tokens after refresh
-    if (result?.jwtToken && result?.offlineToken && result?.refreshToken) {
+    if (result?.auth?.accessToken && result?.offline?.token && result?.auth?.refreshToken) {
       await JWTManager.persistTokens({
-        accessToken: result.jwtToken,
-        offlineToken: result.offlineToken,
-        refreshToken: result.refreshToken,
+        accessToken: result.auth.accessToken,
+        offlineToken: result.offline.token,
+        refreshToken: result.auth.refreshToken,
       }).catch((err) => {
         log.warn("[RefreshAttempt] JWTManager persistTokens failed:", sanitizeError(err));
       });
@@ -114,10 +112,16 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
     }
 
     // ✅ Extend offline session validity on successful token refresh
+    // If permissions changed server-side, mark roles stale so the next sync picks them up
     try {
       const session = await offlineSession.load();
       if (session) {
-        await offlineSession.extendValidity(session);
+        if (result?.permissionsChanged) {
+          log.warn("[RefreshAttempt] Permissions changed — marking offline session roles stale");
+          await offlineSession.extendValidity({ ...session, lastRoleSyncAt: 0 });
+        } else {
+          await offlineSession.extendValidity(session);
+        }
         log.info("[RefreshAttempt] Offline session validity extended");
       }
     } catch (error) {
@@ -132,6 +136,7 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
     return {
       success: true,
       newToken: newSessionToken,
+      permissionsChanged: result?.permissionsChanged ?? false,
     };
   } catch (error: unknown) {
     const axiosError = error as AxiosError | undefined;

@@ -35,6 +35,7 @@ import { CurrentUser } from '../../../../common/decorators/current-user.decorato
 import { RateLimit } from '../../../../common/decorators/rate-limit.decorator';
 import { NoEntityPermissionRequired } from '../../../../common/decorators/no-entity-permission-required.decorator';
 import { RawResponse } from '../../../../common/decorators/raw-response.decorator';
+import { CsrfService } from '../../../../common/csrf.service';
 import { JWTConfigService } from '../../../../config/jwt.config';
 import type { SessionUser } from '../interfaces/session-user.interface';
 import {
@@ -56,6 +57,7 @@ export class AuthController {
     private readonly onboarding: UserOnboardingUseCase,
     private readonly permissions: PermissionsQueryUseCase,
     private readonly jwtConfig: JWTConfigService,
+    private readonly csrf: CsrfService,
   ) {}
 
   @Post('login')
@@ -72,6 +74,9 @@ export class AuthController {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
     const result = await this.authFlow.login(dto, deviceInfo);
     AuthControllerHelpers.applySessionCookie(res, result);
+    if (result.auth?.sessionToken && !AuthControllerHelpers.isMobile(deviceInfo.deviceType)) {
+      this.csrf.refresh(req, res, result.auth.sessionToken);
+    }
     return AuthControllerHelpers.forClient(result, deviceInfo.deviceType);
   }
 
@@ -91,6 +96,9 @@ export class AuthController {
     const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
     const result = await this.authFlow.register(dto, deviceInfo);
     AuthControllerHelpers.applySessionCookie(res, result);
+    if (result.auth?.sessionToken && !AuthControllerHelpers.isMobile(deviceInfo.deviceType)) {
+      this.csrf.refresh(req, res, result.auth.sessionToken);
+    }
     return AuthControllerHelpers.forClient(result, deviceInfo.deviceType);
   }
 
@@ -124,6 +132,9 @@ export class AuthController {
     const deviceType =
       (req.headers as Record<string, string | undefined>)['x-device-type'];
     AuthControllerHelpers.applySessionCookie(res, result);
+    if (result.auth?.sessionToken && !AuthControllerHelpers.isMobile(deviceType)) {
+      this.csrf.refresh(req, res, result.auth.sessionToken);
+    }
     return AuthControllerHelpers.forClient(result, deviceType);
   }
 

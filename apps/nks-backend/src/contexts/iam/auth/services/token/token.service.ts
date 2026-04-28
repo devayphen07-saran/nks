@@ -19,12 +19,21 @@ import {
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
 
 /**
- * TokenService
+ * TokenService — token creation and auth response assembly.
  *
- * Owns token creation and auth response assembly:
- *   - createAccessToken  — raw RS256 JWT wrapper
- *   - createTokenPair    — JWT + opaque refresh token, stored in session
- *   - buildAuthResponse  — full AuthResponseEnvelope (permissions, offline token, HMAC)
+ * Token lifecycle responsibilities:
+ *   session token  — opaque 64-char hex; primary auth credential for cookie/bearer transport;
+ *                    long-lived (30 days), rotated every 1h for web by SessionRotationService.
+ *   access JWT     — RS256, 15-min TTL; short-lived authorization artifact for API calls;
+ *                    never stored; signed from the session token's backing session row.
+ *   refresh token  — opaque 32-byte base64url; used ONLY for token renewal; rotated
+ *                    on every use (in-place, same session row); 7-day TTL.
+ *   offline JWT    — RS256, 3-day TTL; mobile-only; verifiable without a network round trip.
+ *
+ * Methods:
+ *   createAccessToken  — raw RS256 JWT wrapper
+ *   createTokenPair    — access JWT + opaque refresh token stored in session
+ *   buildAuthResponse  — full AuthResponseEnvelope (permissions, offline token, HMAC)
  */
 @Injectable()
 export class TokenService {

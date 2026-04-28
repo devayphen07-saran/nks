@@ -1,36 +1,33 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { AppConfigService } from '../../config/app-config.service';
-import { CsrfTokenService } from './csrf-token.service';
-import { AuthControllerHelpers } from '../utils/auth-helpers';
+import { CsrfService } from '../csrf.service';
 
 /**
- * CSRF Sync Middleware — manages the csrf_token cookie lifecycle only.
+ * CsrfMiddleware — pre-auth CSRF cookie bootstrapper.
  *
- * CSRF Sync Middleware — pre-auth CSRF cookie only.
+ * Responsibility: ensure the web client has a csrf_token cookie BEFORE a
+ * session exists so the login/register form can include X-CSRF-Token.
+ * This is the double-submit baseline for unauthenticated requests.
  *
- * Responsibility split:
- *   Middleware: sets a random csrf_token cookie for UNAUTHENTICATED requests only.
- *              (pre-login state; double-submit baseline so the web app has a token
- *               available before the session exists)
- *   AuthGuard:  for authenticated cookie sessions, computes csrf_token from
- *              session.csrfSecret (per-session random secret stored in DB) and
- *              refreshes the cookie after every auth check.
+ * The token is IP-bound: HMAC-SHA256(nonce:clientIp, CSRF_HMAC_SECRET).
+ * Binding to the originating IP makes the token harder to reuse from a
+ * different network context even if intercepted.
  *
- * Skip conditions:
- *   - Bearer token requests — mobile clients; no CSRF concern.
- *   - Requests that already have an nks_session cookie — AuthGuard handles those.
+ * What this middleware does NOT do:
+ *   - Validate X-CSRF-Token (guard owns that for authenticated routes)
+ *   - Touch the csrf_token cookie for authenticated sessions
+ *     (cookie is always present after login; if it exists, this branch is a no-op)
  *
- * Why non-httpOnly: the double-submit pattern requires JS to read csrf_token
- * so it can echo the value in X-CSRF-Token on state-mutating requests.
- * SameSite=strict (default) means a cross-origin attacker cannot make the
- * browser send it automatically.
+ * Skip conditions (no cookie work needed):
+ *   - GET / HEAD / OPTIONS  — safe methods, no state mutation
+ *   - Authorization: Bearer — mobile/API clients, no cookies involved
  */
 @Injectable()
 export class CsrfMiddleware implements NestMiddleware {
   constructor(
     private readonly appConfig: AppConfigService,
-    private readonly csrfToken: CsrfTokenService,
+    private readonly csrf: CsrfService,
   ) {}
 
   use(req: Request, res: Response, next: NextFunction) {
@@ -40,17 +37,16 @@ export class CsrfMiddleware implements NestMiddleware {
     // Bearer clients don't use cookies — CSRF is irrelevant.
     if (req.headers['authorization']?.startsWith('Bearer ')) return next();
 
+    // Set a pre-auth CSRF cookie if none exists.
+    // Authenticated sessions: csrf_token is always set in the login/register/
+    //   OTP-verify/refresh response and kept fresh by SessionRotationService —
+    //   the cookie will already be present, so this branch is a no-op.
+    // Unauthenticated: provides an IP-bound baseline so the web app has a
+    //   csrf_token cookie available before any session exists.
     const cookies = req.cookies as Record<string, string | undefined>;
-
-    // Authenticated sessions: AuthGuard loads the session row (which carries
-    // csrfSecret) and refreshes the CSRF cookie after auth. Skip here.
-    if (cookies[AuthControllerHelpers.SESSION_COOKIE_NAME]) return next();
-
-    // Unauthenticated: set a random pre-auth CSRF cookie so the web app has
-    // a token value available before login completes.
     if (!cookies['csrf_token']) {
       const sameSite = this.appConfig.csrfSameSite;
-      res.cookie('csrf_token', this.csrfToken.generatePreAuth(), {
+      res.cookie('csrf_token', this.csrf.generate(), {
         httpOnly: false,
         secure: this.appConfig.isProduction || sameSite === 'none',
         sameSite,

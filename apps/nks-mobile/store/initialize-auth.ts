@@ -67,7 +67,7 @@ export const initializeAuth = createAsyncThunk<
     log.info("Session validation passed");
 
     // Validate session has not expired before restoring (uses server-adjusted time)
-    const sessionExpiresAt = envelope.data.session.expiresAt;
+    const sessionExpiresAt = envelope.data.auth.expiresAt;
     if (sessionExpiresAt) {
       const expiryTime = new Date(sessionExpiresAt).getTime();
       const now = await getServerAdjustedNow();
@@ -82,9 +82,9 @@ export const initializeAuth = createAsyncThunk<
     }
 
     // Validate token format one more time
-    const sessionToken = envelope.data.session.sessionToken;
-    if (!sessionTokenReg.test(sessionToken)) {
-      log.error("Session token format invalid, clearing session");
+    const sessionToken = envelope.data.auth.sessionToken;
+    if (!sessionToken || !sessionTokenReg.test(sessionToken)) {
+      log.error("Session token missing or format invalid, clearing session");
       await clearAuthState(dispatch, setUnauthenticated);
       return;
     }

@@ -47,6 +47,7 @@ import { TokenLifecycleService } from './services/token/token-lifecycle.service'
 import { JtiBlocklistService } from './services/token/jti-blocklist.service';
 
 // Session
+import { CsrfService } from '../../../common/csrf.service';
 import { AuthCommandService } from './services/session/auth-command.service';
 import { AuthQueryService } from './services/session/auth-query.service';
 import { SessionCommandService } from './services/session/session-command.service';
@@ -115,6 +116,9 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
           googleClientSecret: config.get<string>('GOOGLE_CLIENT_SECRET'),
         }),
     },
+
+    // CSRF — needed by auth controllers to set csrf_token cookie in login/register responses
+    CsrfService,
 
     // Security
     PasswordService,

@@ -113,8 +113,7 @@ export const userSession = pgTable(
     // Independent of the session token: even if the session token leaks, an
     // attacker cannot forge a CSRF token without also knowing csrfSecret.
     // Rotated on every rolling session rotation and on @RotateCsrf() routes.
-    // NULL for sessions created before this feature — falls back to HMAC(token, secret).
-    csrfSecret: varchar('csrf_secret', { length: 64 }),
+    csrfSecret: varchar('csrf_secret', { length: 64 }).notNull(),
   },
   (table) => [
     index('user_session_user_idx').on(table.userFk),

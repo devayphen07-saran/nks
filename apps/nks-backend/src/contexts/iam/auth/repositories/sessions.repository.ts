@@ -171,7 +171,12 @@ export class SessionsRepository extends BaseRepository {
         ),
       )
       .leftJoin(schema.store, eq(userRoleMapping.storeFk, schema.store.id))
-      .where(eq(schema.userSession.token, token));
+      .where(
+        and(
+          eq(schema.userSession.token, token),
+          isNull(schema.userSession.refreshTokenRevokedAt),
+        ),
+      );
 
     if (rows.length === 0) {
       return { session: null, user: null, revokedJti: null, roles: [] };
@@ -276,7 +281,12 @@ export class SessionsRepository extends BaseRepository {
    * transaction eliminates that window: other transactions either see the row in its
    * original state (blocked by our lock) or see it gone after we commit.
    */
-  async revokeAndDeleteSession(sessionId: number, revokedReason = 'LOGOUT', jti?: string): Promise<void> {
+  /**
+   * Soft-revoke a session: mark refreshTokenRevokedAt + reason, blocklist the JTI.
+   * The row is NOT deleted — it stays for audit trail and theft-detection purposes.
+   * SessionCleanupService.cleanupOldRevokedSessions() removes rows after 30 days.
+   */
+  async revokeSession(sessionId: number, revokedReason = 'LOGOUT', jti?: string): Promise<void> {
     await this.txService.run(async (tx) => {
       if (jti) {
         const jtiExpiresAt = new Date(Date.now() + ACCESS_TOKEN_TTL_MS);
@@ -289,10 +299,7 @@ export class SessionsRepository extends BaseRepository {
         .update(schema.userSession)
         .set({ refreshTokenRevokedAt: new Date(), revokedReason })
         .where(eq(schema.userSession.id, sessionId));
-      await tx
-        .delete(schema.userSession)
-        .where(eq(schema.userSession.id, sessionId));
-    }, { name: 'SessionsRepo.revokeAndDeleteSession' });
+    }, { name: 'SessionsRepo.revokeSession' });
   }
 
   /**
@@ -492,7 +499,11 @@ export class SessionsRepository extends BaseRepository {
    * Both the revocation mark and the deletion are wrapped in a single transaction
    * so a crash between the two cannot leave sessions alive post-theft-detection.
    */
-  async revokeAndDeleteAllForUser(
+  /**
+   * Soft-revoke all active sessions for a user: mark refreshTokenRevokedAt + reason,
+   * blocklist all JTIs. Rows are NOT deleted — retained for audit and theft detection.
+   */
+  async revokeAllForUser(
     userId: number,
     revokedReason: string,
     jtis: string[] = [],
@@ -509,11 +520,7 @@ export class SessionsRepository extends BaseRepository {
         .update(schema.userSession)
         .set({ refreshTokenRevokedAt: new Date(), revokedReason })
         .where(eq(schema.userSession.userFk, userId));
-
-      await tx
-        .delete(schema.userSession)
-        .where(eq(schema.userSession.userFk, userId));
-    }, { name: 'SessionsRepo.revokeAndDeleteAllForUser' });
+    }, { name: 'SessionsRepo.revokeAllForUser' });
   }
 
   /**
@@ -551,6 +558,13 @@ export class SessionsRepository extends BaseRepository {
     data: NewUserSession,
   ): Promise<UserSession | null> {
     return this.txService.run(async (tx) => {
+      // Serialize concurrent session creation for the same user.
+      // pg_advisory_xact_lock is scoped to the transaction and released automatically
+      // at commit/rollback — no manual unlock needed.
+      // Without this, two concurrent logins can both read the pre-delete state,
+      // both select the same keepIds, and both insert — temporarily exceeding the limit.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${userId})`);
+
       // DELETE all sessions beyond the (maxAllowed - 1) most recent,
       // making room for the new one we are about to insert.
       const keepIds = tx
@@ -632,47 +646,34 @@ export class SessionsRepository extends BaseRepository {
   }
 
   /**
-   * Atomically rotate the refresh token using Compare-And-Swap.
+   * Atomically rotate the refresh token in-place using Compare-And-Swap.
    *
-   * The old session is only marked as rotated if `refresh_token_revoked_at IS NULL`
-   * (CAS guard). This prevents the race where two concurrent refreshes both see the
-   * old token as valid and both rotate — the second rotation would otherwise cause a
-   * false theft-detection on the next attempt.
+   * Updates the existing session row — no new row created. The CAS condition
+   * `WHERE refreshTokenHash = oldHash` guarantees that a concurrent refresh
+   * which already replaced the hash will cause this UPDATE to match 0 rows
+   * (returns false). Caller treats false as a race — not theft.
    *
-   * Returns true if rotation succeeded, false if the old session was already rotated
-   * (another refresh won the race — caller should re-read the token, not treat as theft).
+   * In-place rotation eliminates the session-row proliferation that the
+   * old create-new / mark-old pattern caused (one extra row per refresh).
+   * Rows now stay bounded to active sessions only.
    */
-  async rotateRefreshToken(
-    newSessionId: number,
+  async rotateRefreshTokenInPlace(
+    sessionId: number,
+    oldRefreshTokenHash: string,
     updates: UpdateUserSession,
-    oldSessionId: number,
   ): Promise<boolean> {
-    return await this.txService.run(async (tx) => {
-      // CAS: only revoke the old session if it hasn't been revoked yet
-      const result = await tx
-        .update(schema.userSession)
-        .set({ refreshTokenRevokedAt: new Date(), revokedReason: 'ROTATION' })
-        .where(
-          and(
-            eq(schema.userSession.id, oldSessionId),
-            sql`${schema.userSession.refreshTokenRevokedAt} IS NULL`,
-          ),
-        )
-        .returning({ id: schema.userSession.id });
+    const result = await this.db
+      .update(schema.userSession)
+      .set(updates)
+      .where(
+        and(
+          eq(schema.userSession.id, sessionId),
+          eq(schema.userSession.refreshTokenHash, oldRefreshTokenHash),
+        ),
+      )
+      .returning({ id: schema.userSession.id });
 
-      if (result.length === 0) {
-        // Another refresh already rotated this token — not theft, just a race
-        return false;
-      }
-
-      // CAS succeeded — update the new session with fresh token data
-      await tx
-        .update(schema.userSession)
-        .set(updates)
-        .where(eq(schema.userSession.id, newSessionId));
-
-      return true;
-    }, { name: 'SessionsRepo.rotateRefreshToken' });
+    return result.length > 0;
   }
 
   /**

@@ -46,7 +46,7 @@ export function PersonalScreen() {
       <ScrollArea showsVerticalScrollIndicator={false}>
         <Column padding="large" gap="large">
           {/* Welcome Card */}
-          <WelcomeBanner name={user?.name } />
+          <WelcomeBanner name={[user?.firstName, user?.lastName].filter(Boolean).join(" ") || undefined} />
 
           {/* Stat Cards */}
           <Row gap="medium">

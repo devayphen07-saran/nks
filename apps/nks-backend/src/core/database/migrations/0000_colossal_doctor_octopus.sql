@@ -14,13 +14,14 @@ CREATE TYPE "public"."commodity_code_type" AS ENUM('HSN', 'SAC', 'HS', 'CN', 'UN
 CREATE TYPE "public"."commodity_digits" AS ENUM('4', '6', '8', '10');--> statement-breakpoint
 CREATE TABLE "users" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
 	"deleted_at" timestamp with time zone,
-	"iam_user_id" varchar(64),
-	"name" varchar(255) NOT NULL,
+	"iam_user_id" varchar(64) NOT NULL,
+	"first_name" varchar(255) NOT NULL,
+	"last_name" varchar(255) DEFAULT '' NOT NULL,
 	"email" varchar(255),
 	"email_verified" boolean DEFAULT false NOT NULL,
 	"image" text,
@@ -38,22 +39,24 @@ CREATE TABLE "users" (
 	"login_count" integer DEFAULT 0 NOT NULL,
 	"failed_login_attempts" integer DEFAULT 0 NOT NULL,
 	"last_login_at" timestamp with time zone,
-	"last_active_at" timestamp with time zone,
+	"default_store_fk" bigint,
 	"profile_completed" boolean DEFAULT false NOT NULL,
 	"profile_completed_at" timestamp with time zone,
-	"permissions_version" varchar(20) DEFAULT 'v1' NOT NULL,
+	"permissions_version" integer DEFAULT 1 NOT NULL,
+	"two_factor_enabled" boolean DEFAULT false NOT NULL,
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
 	CONSTRAINT "users_guuid_unique" UNIQUE("guuid"),
 	CONSTRAINT "users_iam_user_id_unique" UNIQUE("iam_user_id"),
 	CONSTRAINT "users_email_unique" UNIQUE("email"),
-	CONSTRAINT "users_phone_number_unique" UNIQUE("phone_number")
+	CONSTRAINT "users_phone_number_unique" UNIQUE("phone_number"),
+	CONSTRAINT "users_contact_method_chk" CHECK (email IS NOT NULL OR phone_number IS NOT NULL)
 );
 --> statement-breakpoint
 CREATE TABLE "user_session" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
 	"expires_at" timestamp with time zone NOT NULL,
@@ -71,16 +74,21 @@ CREATE TABLE "user_session" (
 	"refresh_token_hash" varchar(64),
 	"refresh_token_expires_at" timestamp with time zone,
 	"access_token_expires_at" timestamp with time zone,
+	"ip_hash" varchar(64),
 	"role_hash" varchar(64),
+	"jti" uuid,
 	"refresh_token_revoked_at" timestamp with time zone,
+	"revoked_reason" varchar(50),
 	"is_refresh_token_rotated" boolean DEFAULT false NOT NULL,
+	"last_rotated_at" timestamp with time zone,
+	"csrf_secret" varchar(64) NOT NULL,
 	CONSTRAINT "user_session_guuid_unique" UNIQUE("guuid"),
 	CONSTRAINT "user_session_token_unique" UNIQUE("token")
 );
 --> statement-breakpoint
 CREATE TABLE "user_auth_provider" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
 	"account_id" text NOT NULL,
@@ -100,7 +108,7 @@ CREATE TABLE "user_auth_provider" (
 --> statement-breakpoint
 CREATE TABLE "otp_verification" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
 	"identifier" text NOT NULL,
@@ -110,23 +118,27 @@ CREATE TABLE "otp_verification" (
 	"is_used" boolean DEFAULT false NOT NULL,
 	"expires_at" timestamp with time zone NOT NULL,
 	"auth_provider_fk" bigint,
+	"req_id" text,
 	CONSTRAINT "otp_verification_guuid_unique" UNIQUE("guuid")
 );
 --> statement-breakpoint
 CREATE TABLE "otp_request_log" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
 	"identifier_hash" text NOT NULL,
 	"request_count" smallint DEFAULT 1 NOT NULL,
 	"window_expires_at" timestamp with time zone NOT NULL,
+	"last_attempt_at" timestamp with time zone,
+	"consecutive_failures" smallint DEFAULT 0 NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
 	CONSTRAINT "otp_request_log_guuid_unique" UNIQUE("guuid")
 );
 --> statement-breakpoint
 CREATE TABLE "user_role_mapping" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -137,12 +149,13 @@ CREATE TABLE "user_role_mapping" (
 	"is_primary" boolean DEFAULT false NOT NULL,
 	"assigned_by" bigint,
 	"assigned_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"expires_at" timestamp with time zone,
 	CONSTRAINT "user_role_mapping_guuid_unique" UNIQUE("guuid")
 );
 --> statement-breakpoint
 CREATE TABLE "store" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -157,7 +170,6 @@ CREATE TABLE "store" (
 	"store_legal_type_fk" bigint NOT NULL,
 	"store_category_fk" bigint NOT NULL,
 	"registration_number" varchar(100),
-	"tax_number" varchar(100),
 	"kyc_level" smallint DEFAULT 0 NOT NULL,
 	"is_verified" boolean DEFAULT false NOT NULL,
 	"store_status" "store_status" DEFAULT 'ACTIVE' NOT NULL,
@@ -177,7 +189,7 @@ CREATE TABLE "store" (
 --> statement-breakpoint
 CREATE TABLE "store_user_mapping" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -189,12 +201,13 @@ CREATE TABLE "store_user_mapping" (
 	"assigned_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
-	CONSTRAINT "store_user_mapping_guuid_unique" UNIQUE("guuid")
+	CONSTRAINT "store_user_mapping_guuid_unique" UNIQUE("guuid"),
+	CONSTRAINT "store_user_mapping_active_deleted_consistency" CHECK (NOT (is_active = true AND deleted_at IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "store_documents" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -212,12 +225,13 @@ CREATE TABLE "store_documents" (
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
-	CONSTRAINT "store_documents_guuid_unique" UNIQUE("guuid")
+	CONSTRAINT "store_documents_guuid_unique" UNIQUE("guuid"),
+	CONSTRAINT "store_documents_verified_requires_url" CHECK (NOT (is_verified = true AND document_url IS NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "store_operating_hours" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -246,7 +260,7 @@ CREATE TABLE "store_operating_hours" (
 --> statement-breakpoint
 CREATE TABLE "roles" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -267,7 +281,7 @@ CREATE TABLE "roles" (
 --> statement-breakpoint
 CREATE TABLE "routes" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -284,10 +298,14 @@ CREATE TABLE "routes" (
 	"route_type" "route_type" DEFAULT 'screen' NOT NULL,
 	"route_scope" "route_scope" DEFAULT 'admin' NOT NULL,
 	"is_public" boolean DEFAULT false NOT NULL,
+	"enable" boolean DEFAULT true NOT NULL,
+	"entity_type_fk" bigint,
+	"default_action" varchar(50) DEFAULT 'view',
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
-	CONSTRAINT "routes_guuid_unique" UNIQUE("guuid")
+	CONSTRAINT "routes_guuid_unique" UNIQUE("guuid"),
+	CONSTRAINT "routes_deleted_must_be_disabled" CHECK (NOT (deleted_at IS NOT NULL AND enable = true))
 );
 --> statement-breakpoint
 CREATE TABLE "role_route_mapping" (
@@ -303,12 +321,14 @@ CREATE TABLE "role_route_mapping" (
 	"can_delete" boolean DEFAULT false NOT NULL,
 	"can_export" boolean DEFAULT false NOT NULL,
 	"assigned_by" bigint,
-	CONSTRAINT "role_route_mapping_unique_idx" UNIQUE("role_fk","route_fk")
+	CONSTRAINT "role_route_mapping_unique_idx" UNIQUE("role_fk","route_fk"),
+	CONSTRAINT "role_route_mapping_no_allow_deny_conflict" CHECK (NOT (allow = true AND deny = true)),
+	CONSTRAINT "role_route_mapping_crud_requires_allow" CHECK (allow = true OR (can_view = false AND can_create = false AND can_edit = false AND can_delete = false AND can_export = false))
 );
 --> statement-breakpoint
-CREATE TABLE "role_entity_permission" (
+CREATE TABLE "permission_action" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -316,20 +336,36 @@ CREATE TABLE "role_entity_permission" (
 	"sort_order" integer,
 	"is_hidden" boolean DEFAULT false NOT NULL,
 	"is_system" boolean DEFAULT false NOT NULL,
+	"code" varchar(50) NOT NULL,
+	"display_name" varchar(100) NOT NULL,
+	"description" text,
+	"created_by" bigint,
+	"modified_by" bigint,
+	"deleted_by" bigint,
+	CONSTRAINT "permission_action_guuid_unique" UNIQUE("guuid"),
+	CONSTRAINT "permission_action_code_unique" UNIQUE("code")
+);
+--> statement-breakpoint
+CREATE TABLE "role_permissions" (
+	"id" bigserial PRIMARY KEY NOT NULL,
+	"guuid" uuid NOT NULL,
+	"is_active" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone,
+	"deleted_at" timestamp with time zone,
 	"role_fk" bigint NOT NULL,
 	"entity_type_fk" bigint NOT NULL,
-	"can_view" boolean DEFAULT false NOT NULL,
-	"can_create" boolean DEFAULT false NOT NULL,
-	"can_edit" boolean DEFAULT false NOT NULL,
-	"can_delete" boolean DEFAULT false NOT NULL,
+	"action_fk" bigint NOT NULL,
+	"allowed" boolean DEFAULT false NOT NULL,
 	"deny" boolean DEFAULT false NOT NULL,
-	CONSTRAINT "role_entity_permission_guuid_unique" UNIQUE("guuid"),
-	CONSTRAINT "role_entity_permission_unique_idx" UNIQUE("role_fk","entity_type_fk")
+	CONSTRAINT "role_permissions_guuid_unique" UNIQUE("guuid"),
+	CONSTRAINT "role_permissions_unique_idx" UNIQUE("role_fk","entity_type_fk","action_fk"),
+	CONSTRAINT "role_permissions_no_allow_deny_conflict" CHECK (NOT (allowed = true AND deny = true))
 );
 --> statement-breakpoint
 CREATE TABLE "country" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -354,7 +390,7 @@ CREATE TABLE "country" (
 --> statement-breakpoint
 CREATE TABLE "state" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -375,7 +411,7 @@ CREATE TABLE "state" (
 --> statement-breakpoint
 CREATE TABLE "district" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -396,7 +432,7 @@ CREATE TABLE "district" (
 --> statement-breakpoint
 CREATE TABLE "pincode" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -408,8 +444,7 @@ CREATE TABLE "pincode" (
 	"locality_name" varchar(150) NOT NULL,
 	"area_name" varchar(150),
 	"district_fk" bigint NOT NULL,
-	"state_fk" bigint NOT NULL,
-	"latitude" numeric(10, 7),
+	"latitude" numeric(9, 7),
 	"longitude" numeric(10, 7),
 	"created_by" bigint,
 	"modified_by" bigint,
@@ -419,7 +454,7 @@ CREATE TABLE "pincode" (
 --> statement-breakpoint
 CREATE TABLE "address" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -432,7 +467,7 @@ CREATE TABLE "address" (
 	"address_type_fk" bigint NOT NULL,
 	"line1" varchar(255) NOT NULL,
 	"line2" varchar(255),
-	"city_name" varchar(150),
+	"city_name" varchar(150) NOT NULL,
 	"state_fk" bigint,
 	"district_fk" bigint,
 	"pincode_fk" bigint,
@@ -446,7 +481,7 @@ CREATE TABLE "address" (
 --> statement-breakpoint
 CREATE TABLE "address_type" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -457,7 +492,7 @@ CREATE TABLE "address_type" (
 	"code" varchar(30) NOT NULL,
 	"label" varchar(100) NOT NULL,
 	"description" text,
-	"is_shipping_applicable" boolean DEFAULT true,
+	"is_shipping_applicable" boolean DEFAULT true NOT NULL,
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
@@ -467,7 +502,7 @@ CREATE TABLE "address_type" (
 --> statement-breakpoint
 CREATE TABLE "commodity_codes" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -491,7 +526,7 @@ CREATE TABLE "commodity_codes" (
 --> statement-breakpoint
 CREATE TABLE "tax_agencies" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -513,7 +548,7 @@ CREATE TABLE "tax_agencies" (
 --> statement-breakpoint
 CREATE TABLE "tax_names" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -534,7 +569,7 @@ CREATE TABLE "tax_names" (
 --> statement-breakpoint
 CREATE TABLE "tax_levels" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -566,7 +601,7 @@ CREATE TABLE "tax_level_mapping" (
 --> statement-breakpoint
 CREATE TABLE "tax_registrations" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -594,7 +629,7 @@ CREATE TABLE "tax_registrations" (
 --> statement-breakpoint
 CREATE TABLE "tax_registration_type" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -614,7 +649,7 @@ CREATE TABLE "tax_registration_type" (
 --> statement-breakpoint
 CREATE TABLE "tax_filing_frequency" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -635,7 +670,7 @@ CREATE TABLE "tax_filing_frequency" (
 --> statement-breakpoint
 CREATE TABLE "tax_line_status" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -655,7 +690,7 @@ CREATE TABLE "tax_line_status" (
 --> statement-breakpoint
 CREATE TABLE "tax_rate_master" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -671,8 +706,8 @@ CREATE TABLE "tax_rate_master" (
 	"component2_rate" numeric(10, 3),
 	"component3_rate" numeric(10, 3),
 	"additional_rate" numeric(10, 3) DEFAULT '0',
-	"effective_from" date NOT NULL,
-	"effective_to" date,
+	"effective_from" timestamp with time zone NOT NULL,
+	"effective_to" timestamp with time zone,
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
@@ -685,7 +720,7 @@ CREATE TABLE "tax_rate_master" (
 --> statement-breakpoint
 CREATE TABLE "daily_tax_summary" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -744,7 +779,7 @@ CREATE TABLE "transaction_tax_lines" (
 --> statement-breakpoint
 CREATE TABLE "code_category" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -763,7 +798,7 @@ CREATE TABLE "code_category" (
 --> statement-breakpoint
 CREATE TABLE "code_value" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -782,9 +817,20 @@ CREATE TABLE "code_value" (
 	CONSTRAINT "code_value_guuid_unique" UNIQUE("guuid")
 );
 --> statement-breakpoint
+CREATE TABLE "lookup_type" (
+	"id" bigserial PRIMARY KEY NOT NULL,
+	"code" varchar(30) NOT NULL,
+	"title" varchar(50) NOT NULL,
+	"description" varchar(150),
+	"has_table" boolean DEFAULT false NOT NULL,
+	"is_active" boolean DEFAULT true NOT NULL,
+	"is_custom_table" boolean DEFAULT false NOT NULL,
+	CONSTRAINT "lookup_type_code_unique" UNIQUE("code")
+);
+--> statement-breakpoint
 CREATE TABLE "lookup" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -792,6 +838,7 @@ CREATE TABLE "lookup" (
 	"sort_order" integer,
 	"is_hidden" boolean DEFAULT false NOT NULL,
 	"is_system" boolean DEFAULT false NOT NULL,
+	"lookup_type_fk" bigint NOT NULL,
 	"code" varchar(30) NOT NULL,
 	"title" varchar(50) NOT NULL,
 	"description" varchar(100),
@@ -804,7 +851,7 @@ CREATE TABLE "lookup" (
 --> statement-breakpoint
 CREATE TABLE "salutation_type" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -824,7 +871,7 @@ CREATE TABLE "salutation_type" (
 --> statement-breakpoint
 CREATE TABLE "designation_type" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -846,7 +893,7 @@ CREATE TABLE "designation_type" (
 --> statement-breakpoint
 CREATE TABLE "store_legal_type" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -866,7 +913,7 @@ CREATE TABLE "store_legal_type" (
 --> statement-breakpoint
 CREATE TABLE "store_category" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -886,7 +933,7 @@ CREATE TABLE "store_category" (
 --> statement-breakpoint
 CREATE TABLE "communication_type" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -908,7 +955,7 @@ CREATE TABLE "communication_type" (
 --> statement-breakpoint
 CREATE TABLE "contact_person_type" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -928,7 +975,7 @@ CREATE TABLE "contact_person_type" (
 --> statement-breakpoint
 CREATE TABLE "notes_type" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -949,7 +996,7 @@ CREATE TABLE "notes_type" (
 --> statement-breakpoint
 CREATE TABLE "volumes" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -975,7 +1022,7 @@ CREATE TABLE "volumes" (
 --> statement-breakpoint
 CREATE TABLE "currency" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -995,7 +1042,7 @@ CREATE TABLE "currency" (
 --> statement-breakpoint
 CREATE TABLE "billing_frequency" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1016,7 +1063,7 @@ CREATE TABLE "billing_frequency" (
 --> statement-breakpoint
 CREATE TABLE "plan_type" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1036,7 +1083,7 @@ CREATE TABLE "plan_type" (
 --> statement-breakpoint
 CREATE TABLE "entity_type" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1047,6 +1094,8 @@ CREATE TABLE "entity_type" (
 	"code" varchar(50) NOT NULL,
 	"label" varchar(100) NOT NULL,
 	"description" text,
+	"parent_entity_type_fk" bigint,
+	"default_allow" boolean DEFAULT false NOT NULL,
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
@@ -1056,7 +1105,7 @@ CREATE TABLE "entity_type" (
 --> statement-breakpoint
 CREATE TABLE "notification_status" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1080,7 +1129,7 @@ CREATE TABLE "notification_status" (
 --> statement-breakpoint
 CREATE TABLE "staff_invite_status" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1091,7 +1140,8 @@ CREATE TABLE "staff_invite_status" (
 	"code" varchar(30) NOT NULL,
 	"label" varchar(100) NOT NULL,
 	"description" text,
-	"is_terminal" boolean DEFAULT false,
+	"is_pending" boolean DEFAULT false NOT NULL,
+	"is_terminal" boolean DEFAULT false NOT NULL,
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
@@ -1101,7 +1151,7 @@ CREATE TABLE "staff_invite_status" (
 --> statement-breakpoint
 CREATE TABLE "notifications" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1127,7 +1177,7 @@ CREATE TABLE "notifications" (
 --> statement-breakpoint
 CREATE TABLE "notification_types" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1145,7 +1195,7 @@ CREATE TABLE "notification_types" (
 --> statement-breakpoint
 CREATE TABLE "notification_templates" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1162,7 +1212,7 @@ CREATE TABLE "notification_templates" (
 --> statement-breakpoint
 CREATE TABLE "push_tokens" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1188,7 +1238,7 @@ CREATE TABLE "entity_status_mapping" (
 --> statement-breakpoint
 CREATE TABLE "status" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1212,7 +1262,7 @@ CREATE TABLE "status" (
 --> statement-breakpoint
 CREATE TABLE "entity" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1231,7 +1281,7 @@ CREATE TABLE "entity" (
 --> statement-breakpoint
 CREATE TABLE "communication" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1267,7 +1317,7 @@ CREATE TABLE "communication" (
 --> statement-breakpoint
 CREATE TABLE "contact_person" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1287,12 +1337,13 @@ CREATE TABLE "contact_person" (
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
-	CONSTRAINT "contact_person_guuid_unique" UNIQUE("guuid")
+	CONSTRAINT "contact_person_guuid_unique" UNIQUE("guuid"),
+	CONSTRAINT "contact_person_designation_required" CHECK (designation_fk IS NOT NULL OR designation_free_text IS NOT NULL)
 );
 --> statement-breakpoint
 CREATE TABLE "notes" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1312,7 +1363,7 @@ CREATE TABLE "notes" (
 --> statement-breakpoint
 CREATE TABLE "staff_invite" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1327,6 +1378,7 @@ CREATE TABLE "staff_invite" (
 	"expires_at" timestamp with time zone NOT NULL,
 	"accepted_at" timestamp with time zone,
 	"accepted_by_fk" bigint,
+	"is_pending" boolean DEFAULT true NOT NULL,
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
@@ -1336,7 +1388,7 @@ CREATE TABLE "staff_invite" (
 --> statement-breakpoint
 CREATE TABLE "plans" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1365,7 +1417,7 @@ CREATE TABLE "plans" (
 --> statement-breakpoint
 CREATE TABLE "plan_price" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1388,7 +1440,7 @@ CREATE TABLE "plan_price" (
 --> statement-breakpoint
 CREATE TABLE "subscription" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1399,8 +1451,9 @@ CREATE TABLE "subscription" (
 	"store_fk" bigint NOT NULL,
 	"plan_fk" bigint NOT NULL,
 	"status_fk" bigint NOT NULL,
-	"first_invoice_recorded_at" date,
-	"trial_end" date,
+	"is_current" boolean DEFAULT false NOT NULL,
+	"first_invoice_recorded_at" timestamp with time zone,
+	"trial_end" timestamp with time zone,
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
@@ -1409,7 +1462,7 @@ CREATE TABLE "subscription" (
 --> statement-breakpoint
 CREATE TABLE "subscription_item" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1418,10 +1471,10 @@ CREATE TABLE "subscription_item" (
 	"is_hidden" boolean DEFAULT false NOT NULL,
 	"is_system" boolean DEFAULT false NOT NULL,
 	"subscription_fk" bigint NOT NULL,
-	"plan_price_fk" bigint,
+	"plan_price_fk" bigint NOT NULL,
 	"price_mode" varchar(30) DEFAULT 'RECURRING' NOT NULL,
-	"effective_from" date,
-	"effective_to" date,
+	"effective_from" timestamp with time zone,
+	"effective_to" timestamp with time zone,
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
@@ -1431,6 +1484,7 @@ CREATE TABLE "subscription_item" (
 CREATE TABLE "audit_logs" (
 	"id" bigserial PRIMARY KEY NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"guuid" uuid NOT NULL,
 	"user_fk" bigint,
 	"store_fk" bigint,
 	"session_fk" bigint,
@@ -1446,12 +1500,20 @@ CREATE TABLE "audit_logs" (
 	"device_id" varchar(100),
 	"device_type" "session_device_type",
 	"is_success" boolean DEFAULT true NOT NULL,
-	"failure_reason" text
+	"failure_reason" text,
+	CONSTRAINT "audit_logs_guuid_unique" UNIQUE("guuid")
+);
+--> statement-breakpoint
+CREATE TABLE "idempotency_log" (
+	"key" text PRIMARY KEY NOT NULL,
+	"request_hash" text NOT NULL,
+	"processed_at" timestamp with time zone DEFAULT NOW() NOT NULL,
+	"expires_at" timestamp with time zone DEFAULT NOW() + INTERVAL '7 days' NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "user_preferences" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1460,7 +1522,6 @@ CREATE TABLE "user_preferences" (
 	"theme" varchar(20) DEFAULT 'light',
 	"timezone" varchar(50),
 	"notifications_enabled" boolean DEFAULT true NOT NULL,
-	"two_factor_enabled" boolean DEFAULT false NOT NULL,
 	"created_by" bigint,
 	"modified_by" bigint,
 	"deleted_by" bigint,
@@ -1470,7 +1531,7 @@ CREATE TABLE "user_preferences" (
 --> statement-breakpoint
 CREATE TABLE "system_config" (
 	"id" bigserial PRIMARY KEY NOT NULL,
-	"guuid" varchar(255) NOT NULL,
+	"guuid" uuid NOT NULL,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone,
@@ -1487,7 +1548,12 @@ CREATE TABLE "system_config" (
 );
 --> statement-breakpoint
 CREATE TABLE "files" (
-	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "files_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
+	"id" bigserial PRIMARY KEY NOT NULL,
+	"guuid" uuid NOT NULL,
+	"is_active" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone,
+	"deleted_at" timestamp with time zone,
 	"entity_type" varchar(50) NOT NULL,
 	"entity_id" bigint NOT NULL,
 	"file_name" varchar(255) NOT NULL,
@@ -1495,102 +1561,135 @@ CREATE TABLE "files" (
 	"file_size" bigint NOT NULL,
 	"mime_type" varchar(100),
 	"file_url" varchar(500),
-	"is_deleted" boolean DEFAULT false NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"created_by" bigint NOT NULL,
-	"deleted_at" timestamp with time zone,
-	"deleted_by" bigint
+	"modified_by" bigint,
+	"deleted_by" bigint,
+	CONSTRAINT "files_guuid_unique" UNIQUE("guuid")
+);
+--> statement-breakpoint
+CREATE TABLE "rate_limit_entries" (
+	"key" text PRIMARY KEY NOT NULL,
+	"hits" integer DEFAULT 1 NOT NULL,
+	"window_start" timestamp with time zone NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "jti_blocklist" (
+	"jti" uuid PRIMARY KEY NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "permissions_changelog" (
+	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "permissions_changelog_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
+	"user_fk" bigint NOT NULL,
+	"version_number" integer NOT NULL,
+	"entity_code" varchar(100) NOT NULL,
+	"operation" varchar(10) NOT NULL,
+	"data" jsonb,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "revoked_devices" (
+	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "revoked_devices_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
+	"user_fk" bigint NOT NULL,
+	"device_id" varchar(255) NOT NULL,
+	"revoked_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"revoked_by" bigint
 );
 --> statement-breakpoint
 ALTER TABLE "users" ADD CONSTRAINT "users_blocked_by_users_id_fk" FOREIGN KEY ("blocked_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "users" ADD CONSTRAINT "users_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "users" ADD CONSTRAINT "users_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "users" ADD CONSTRAINT "users_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "users" ADD CONSTRAINT "users_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "users" ADD CONSTRAINT "users_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "users" ADD CONSTRAINT "users_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_session" ADD CONSTRAINT "user_session_user_fk_users_id_fk" FOREIGN KEY ("user_fk") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_session" ADD CONSTRAINT "user_session_active_store_fk_store_id_fk" FOREIGN KEY ("active_store_fk") REFERENCES "public"."store"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_auth_provider" ADD CONSTRAINT "user_auth_provider_user_fk_users_id_fk" FOREIGN KEY ("user_fk") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "otp_verification" ADD CONSTRAINT "otp_verification_auth_provider_fk_user_auth_provider_id_fk" FOREIGN KEY ("auth_provider_fk") REFERENCES "public"."user_auth_provider"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "otp_verification" ADD CONSTRAINT "otp_verification_auth_provider_fk_user_auth_provider_id_fk" FOREIGN KEY ("auth_provider_fk") REFERENCES "public"."user_auth_provider"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_role_mapping" ADD CONSTRAINT "user_role_mapping_user_fk_users_id_fk" FOREIGN KEY ("user_fk") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_role_mapping" ADD CONSTRAINT "user_role_mapping_role_fk_roles_id_fk" FOREIGN KEY ("role_fk") REFERENCES "public"."roles"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_role_mapping" ADD CONSTRAINT "user_role_mapping_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_role_mapping" ADD CONSTRAINT "user_role_mapping_assigned_by_users_id_fk" FOREIGN KEY ("assigned_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store" ADD CONSTRAINT "store_owner_user_fk_users_id_fk" FOREIGN KEY ("owner_user_fk") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store" ADD CONSTRAINT "store_owner_user_fk_users_id_fk" FOREIGN KEY ("owner_user_fk") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "store" ADD CONSTRAINT "store_store_legal_type_fk_store_legal_type_id_fk" FOREIGN KEY ("store_legal_type_fk") REFERENCES "public"."store_legal_type"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "store" ADD CONSTRAINT "store_store_category_fk_store_category_id_fk" FOREIGN KEY ("store_category_fk") REFERENCES "public"."store_category"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "store" ADD CONSTRAINT "store_country_fk_country_id_fk" FOREIGN KEY ("country_fk") REFERENCES "public"."country"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "store" ADD CONSTRAINT "store_parent_store_fk_store_id_fk" FOREIGN KEY ("parent_store_fk") REFERENCES "public"."store"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store" ADD CONSTRAINT "store_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store" ADD CONSTRAINT "store_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store" ADD CONSTRAINT "store_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store" ADD CONSTRAINT "store_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store" ADD CONSTRAINT "store_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store" ADD CONSTRAINT "store_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "store_user_mapping" ADD CONSTRAINT "store_user_mapping_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "store_user_mapping" ADD CONSTRAINT "store_user_mapping_user_fk_users_id_fk" FOREIGN KEY ("user_fk") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_user_mapping" ADD CONSTRAINT "store_user_mapping_designation_fk_code_value_id_fk" FOREIGN KEY ("designation_fk") REFERENCES "public"."code_value"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_user_mapping" ADD CONSTRAINT "store_user_mapping_designation_fk_designation_type_id_fk" FOREIGN KEY ("designation_fk") REFERENCES "public"."designation_type"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "store_user_mapping" ADD CONSTRAINT "store_user_mapping_assigned_by_users_id_fk" FOREIGN KEY ("assigned_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "store_user_mapping" ADD CONSTRAINT "store_user_mapping_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "store_user_mapping" ADD CONSTRAINT "store_user_mapping_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "store_documents" ADD CONSTRAINT "store_documents_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_documents" ADD CONSTRAINT "store_documents_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_documents" ADD CONSTRAINT "store_documents_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_documents" ADD CONSTRAINT "store_documents_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_documents" ADD CONSTRAINT "store_documents_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_documents" ADD CONSTRAINT "store_documents_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_documents" ADD CONSTRAINT "store_documents_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "store_operating_hours" ADD CONSTRAINT "store_operating_hours_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_operating_hours" ADD CONSTRAINT "store_operating_hours_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_operating_hours" ADD CONSTRAINT "store_operating_hours_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_operating_hours" ADD CONSTRAINT "store_operating_hours_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_operating_hours" ADD CONSTRAINT "store_operating_hours_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_operating_hours" ADD CONSTRAINT "store_operating_hours_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_operating_hours" ADD CONSTRAINT "store_operating_hours_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "roles" ADD CONSTRAINT "roles_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "roles" ADD CONSTRAINT "roles_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "roles" ADD CONSTRAINT "roles_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "roles" ADD CONSTRAINT "roles_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "roles" ADD CONSTRAINT "roles_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "roles" ADD CONSTRAINT "roles_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "roles" ADD CONSTRAINT "roles_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "routes" ADD CONSTRAINT "routes_parent_route_fk_routes_id_fk" FOREIGN KEY ("parent_route_fk") REFERENCES "public"."routes"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "routes" ADD CONSTRAINT "routes_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "routes" ADD CONSTRAINT "routes_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "routes" ADD CONSTRAINT "routes_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "routes" ADD CONSTRAINT "routes_entity_type_fk_entity_type_id_fk" FOREIGN KEY ("entity_type_fk") REFERENCES "public"."entity_type"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "routes" ADD CONSTRAINT "routes_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "routes" ADD CONSTRAINT "routes_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "routes" ADD CONSTRAINT "routes_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "role_route_mapping" ADD CONSTRAINT "role_route_mapping_role_fk_roles_id_fk" FOREIGN KEY ("role_fk") REFERENCES "public"."roles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "role_route_mapping" ADD CONSTRAINT "role_route_mapping_route_fk_routes_id_fk" FOREIGN KEY ("route_fk") REFERENCES "public"."routes"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "role_route_mapping" ADD CONSTRAINT "role_route_mapping_assigned_by_users_id_fk" FOREIGN KEY ("assigned_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "role_entity_permission" ADD CONSTRAINT "role_entity_permission_role_fk_roles_id_fk" FOREIGN KEY ("role_fk") REFERENCES "public"."roles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "role_entity_permission" ADD CONSTRAINT "role_entity_permission_entity_type_fk_entity_type_id_fk" FOREIGN KEY ("entity_type_fk") REFERENCES "public"."entity_type"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "country" ADD CONSTRAINT "country_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "country" ADD CONSTRAINT "country_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "country" ADD CONSTRAINT "country_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "state" ADD CONSTRAINT "state_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "state" ADD CONSTRAINT "state_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "state" ADD CONSTRAINT "state_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "permission_action" ADD CONSTRAINT "permission_action_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "permission_action" ADD CONSTRAINT "permission_action_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "permission_action" ADD CONSTRAINT "permission_action_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_role_fk_roles_id_fk" FOREIGN KEY ("role_fk") REFERENCES "public"."roles"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_entity_type_fk_entity_type_id_fk" FOREIGN KEY ("entity_type_fk") REFERENCES "public"."entity_type"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_action_fk_permission_action_id_fk" FOREIGN KEY ("action_fk") REFERENCES "public"."permission_action"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "country" ADD CONSTRAINT "country_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "country" ADD CONSTRAINT "country_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "country" ADD CONSTRAINT "country_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "state" ADD CONSTRAINT "state_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "state" ADD CONSTRAINT "state_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "state" ADD CONSTRAINT "state_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "district" ADD CONSTRAINT "district_state_fk_state_id_fk" FOREIGN KEY ("state_fk") REFERENCES "public"."state"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "district" ADD CONSTRAINT "district_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "district" ADD CONSTRAINT "district_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "district" ADD CONSTRAINT "district_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "district" ADD CONSTRAINT "district_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "district" ADD CONSTRAINT "district_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "district" ADD CONSTRAINT "district_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "pincode" ADD CONSTRAINT "pincode_district_fk_district_id_fk" FOREIGN KEY ("district_fk") REFERENCES "public"."district"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "pincode" ADD CONSTRAINT "pincode_state_fk_state_id_fk" FOREIGN KEY ("state_fk") REFERENCES "public"."state"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "pincode" ADD CONSTRAINT "pincode_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "pincode" ADD CONSTRAINT "pincode_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "pincode" ADD CONSTRAINT "pincode_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "pincode" ADD CONSTRAINT "pincode_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "pincode" ADD CONSTRAINT "pincode_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "pincode" ADD CONSTRAINT "pincode_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "address" ADD CONSTRAINT "address_entity_fk_entity_id_fk" FOREIGN KEY ("entity_fk") REFERENCES "public"."entity"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "address" ADD CONSTRAINT "address_address_type_fk_address_type_id_fk" FOREIGN KEY ("address_type_fk") REFERENCES "public"."address_type"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "address" ADD CONSTRAINT "address_state_fk_state_id_fk" FOREIGN KEY ("state_fk") REFERENCES "public"."state"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "address" ADD CONSTRAINT "address_district_fk_district_id_fk" FOREIGN KEY ("district_fk") REFERENCES "public"."district"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "address" ADD CONSTRAINT "address_pincode_fk_pincode_id_fk" FOREIGN KEY ("pincode_fk") REFERENCES "public"."pincode"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "address" ADD CONSTRAINT "address_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "address" ADD CONSTRAINT "address_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "address" ADD CONSTRAINT "address_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "address_type" ADD CONSTRAINT "address_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "address_type" ADD CONSTRAINT "address_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "address_type" ADD CONSTRAINT "address_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "address" ADD CONSTRAINT "address_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "address" ADD CONSTRAINT "address_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "address" ADD CONSTRAINT "address_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "address_type" ADD CONSTRAINT "address_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "address_type" ADD CONSTRAINT "address_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "address_type" ADD CONSTRAINT "address_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "commodity_codes" ADD CONSTRAINT "commodity_codes_country_fk_country_id_fk" FOREIGN KEY ("country_fk") REFERENCES "public"."country"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "commodity_codes" ADD CONSTRAINT "commodity_codes_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "commodity_codes" ADD CONSTRAINT "commodity_codes_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "commodity_codes" ADD CONSTRAINT "commodity_codes_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "commodity_codes" ADD CONSTRAINT "commodity_codes_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "commodity_codes" ADD CONSTRAINT "commodity_codes_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "commodity_codes" ADD CONSTRAINT "commodity_codes_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tax_agencies" ADD CONSTRAINT "tax_agencies_country_fk_country_id_fk" FOREIGN KEY ("country_fk") REFERENCES "public"."country"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_agencies" ADD CONSTRAINT "tax_agencies_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_agencies" ADD CONSTRAINT "tax_agencies_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_agencies" ADD CONSTRAINT "tax_agencies_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_agencies" ADD CONSTRAINT "tax_agencies_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_agencies" ADD CONSTRAINT "tax_agencies_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_agencies" ADD CONSTRAINT "tax_agencies_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tax_names" ADD CONSTRAINT "tax_names_tax_agency_fk_tax_agencies_id_fk" FOREIGN KEY ("tax_agency_fk") REFERENCES "public"."tax_agencies"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_names" ADD CONSTRAINT "tax_names_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_names" ADD CONSTRAINT "tax_names_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_names" ADD CONSTRAINT "tax_names_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_names" ADD CONSTRAINT "tax_names_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_names" ADD CONSTRAINT "tax_names_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_names" ADD CONSTRAINT "tax_names_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tax_levels" ADD CONSTRAINT "tax_levels_tax_name_fk_tax_names_id_fk" FOREIGN KEY ("tax_name_fk") REFERENCES "public"."tax_names"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_levels" ADD CONSTRAINT "tax_levels_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_levels" ADD CONSTRAINT "tax_levels_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_levels" ADD CONSTRAINT "tax_levels_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_levels" ADD CONSTRAINT "tax_levels_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_levels" ADD CONSTRAINT "tax_levels_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_levels" ADD CONSTRAINT "tax_levels_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tax_level_mapping" ADD CONSTRAINT "tax_level_mapping_tax_agency_fk_tax_agencies_id_fk" FOREIGN KEY ("tax_agency_fk") REFERENCES "public"."tax_agencies"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tax_level_mapping" ADD CONSTRAINT "tax_level_mapping_tax_name_fk_tax_names_id_fk" FOREIGN KEY ("tax_name_fk") REFERENCES "public"."tax_names"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tax_level_mapping" ADD CONSTRAINT "tax_level_mapping_tax_level_fk_tax_levels_id_fk" FOREIGN KEY ("tax_level_fk") REFERENCES "public"."tax_levels"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -1600,29 +1699,29 @@ ALTER TABLE "tax_registrations" ADD CONSTRAINT "tax_registrations_tax_agency_fk_
 ALTER TABLE "tax_registrations" ADD CONSTRAINT "tax_registrations_tax_name_fk_tax_names_id_fk" FOREIGN KEY ("tax_name_fk") REFERENCES "public"."tax_names"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tax_registrations" ADD CONSTRAINT "tax_registrations_registration_type_fk_tax_registration_type_id_fk" FOREIGN KEY ("registration_type_fk") REFERENCES "public"."tax_registration_type"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tax_registrations" ADD CONSTRAINT "tax_registrations_filing_frequency_fk_tax_filing_frequency_id_fk" FOREIGN KEY ("filing_frequency_fk") REFERENCES "public"."tax_filing_frequency"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_registrations" ADD CONSTRAINT "tax_registrations_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_registrations" ADD CONSTRAINT "tax_registrations_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_registrations" ADD CONSTRAINT "tax_registrations_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_registration_type" ADD CONSTRAINT "tax_registration_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_registration_type" ADD CONSTRAINT "tax_registration_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_registration_type" ADD CONSTRAINT "tax_registration_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_filing_frequency" ADD CONSTRAINT "tax_filing_frequency_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_filing_frequency" ADD CONSTRAINT "tax_filing_frequency_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_filing_frequency" ADD CONSTRAINT "tax_filing_frequency_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_line_status" ADD CONSTRAINT "tax_line_status_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_line_status" ADD CONSTRAINT "tax_line_status_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_line_status" ADD CONSTRAINT "tax_line_status_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_registrations" ADD CONSTRAINT "tax_registrations_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_registrations" ADD CONSTRAINT "tax_registrations_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_registrations" ADD CONSTRAINT "tax_registrations_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_registration_type" ADD CONSTRAINT "tax_registration_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_registration_type" ADD CONSTRAINT "tax_registration_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_registration_type" ADD CONSTRAINT "tax_registration_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_filing_frequency" ADD CONSTRAINT "tax_filing_frequency_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_filing_frequency" ADD CONSTRAINT "tax_filing_frequency_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_filing_frequency" ADD CONSTRAINT "tax_filing_frequency_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_line_status" ADD CONSTRAINT "tax_line_status_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_line_status" ADD CONSTRAINT "tax_line_status_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_line_status" ADD CONSTRAINT "tax_line_status_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tax_rate_master" ADD CONSTRAINT "tax_rate_master_country_fk_country_id_fk" FOREIGN KEY ("country_fk") REFERENCES "public"."country"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tax_rate_master" ADD CONSTRAINT "tax_rate_master_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "tax_rate_master" ADD CONSTRAINT "tax_rate_master_commodity_code_fk_commodity_codes_id_fk" FOREIGN KEY ("commodity_code_fk") REFERENCES "public"."commodity_codes"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_rate_master" ADD CONSTRAINT "tax_rate_master_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_rate_master" ADD CONSTRAINT "tax_rate_master_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "tax_rate_master" ADD CONSTRAINT "tax_rate_master_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_rate_master" ADD CONSTRAINT "tax_rate_master_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_rate_master" ADD CONSTRAINT "tax_rate_master_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tax_rate_master" ADD CONSTRAINT "tax_rate_master_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "daily_tax_summary" ADD CONSTRAINT "daily_tax_summary_country_fk_country_id_fk" FOREIGN KEY ("country_fk") REFERENCES "public"."country"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "daily_tax_summary" ADD CONSTRAINT "daily_tax_summary_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "daily_tax_summary" ADD CONSTRAINT "daily_tax_summary_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "daily_tax_summary" ADD CONSTRAINT "daily_tax_summary_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "daily_tax_summary" ADD CONSTRAINT "daily_tax_summary_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "daily_tax_summary" ADD CONSTRAINT "daily_tax_summary_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "daily_tax_summary" ADD CONSTRAINT "daily_tax_summary_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "daily_tax_summary" ADD CONSTRAINT "daily_tax_summary_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transaction_tax_lines" ADD CONSTRAINT "transaction_tax_lines_country_fk_country_id_fk" FOREIGN KEY ("country_fk") REFERENCES "public"."country"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transaction_tax_lines" ADD CONSTRAINT "transaction_tax_lines_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transaction_tax_lines" ADD CONSTRAINT "transaction_tax_lines_tax_registration_fk_tax_registrations_id_fk" FOREIGN KEY ("tax_registration_fk") REFERENCES "public"."tax_registrations"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
@@ -1631,60 +1730,62 @@ ALTER TABLE "transaction_tax_lines" ADD CONSTRAINT "transaction_tax_lines_tax_ra
 ALTER TABLE "transaction_tax_lines" ADD CONSTRAINT "transaction_tax_lines_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transaction_tax_lines" ADD CONSTRAINT "transaction_tax_lines_approval_status_fk_tax_line_status_id_fk" FOREIGN KEY ("approval_status_fk") REFERENCES "public"."tax_line_status"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transaction_tax_lines" ADD CONSTRAINT "transaction_tax_lines_approved_by_users_id_fk" FOREIGN KEY ("approved_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "code_category" ADD CONSTRAINT "code_category_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "code_category" ADD CONSTRAINT "code_category_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "code_category" ADD CONSTRAINT "code_category_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "code_category" ADD CONSTRAINT "code_category_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "code_category" ADD CONSTRAINT "code_category_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "code_category" ADD CONSTRAINT "code_category_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "code_value" ADD CONSTRAINT "code_value_category_fk_code_category_id_fk" FOREIGN KEY ("category_fk") REFERENCES "public"."code_category"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "code_value" ADD CONSTRAINT "code_value_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "code_value" ADD CONSTRAINT "code_value_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "code_value" ADD CONSTRAINT "code_value_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "code_value" ADD CONSTRAINT "code_value_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "lookup" ADD CONSTRAINT "lookup_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "lookup" ADD CONSTRAINT "lookup_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "lookup" ADD CONSTRAINT "lookup_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "salutation_type" ADD CONSTRAINT "salutation_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "salutation_type" ADD CONSTRAINT "salutation_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "salutation_type" ADD CONSTRAINT "salutation_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "designation_type" ADD CONSTRAINT "designation_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "designation_type" ADD CONSTRAINT "designation_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "designation_type" ADD CONSTRAINT "designation_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_legal_type" ADD CONSTRAINT "store_legal_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_legal_type" ADD CONSTRAINT "store_legal_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_legal_type" ADD CONSTRAINT "store_legal_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_category" ADD CONSTRAINT "store_category_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_category" ADD CONSTRAINT "store_category_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "store_category" ADD CONSTRAINT "store_category_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "communication_type" ADD CONSTRAINT "communication_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "communication_type" ADD CONSTRAINT "communication_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "communication_type" ADD CONSTRAINT "communication_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "contact_person_type" ADD CONSTRAINT "contact_person_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "contact_person_type" ADD CONSTRAINT "contact_person_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "contact_person_type" ADD CONSTRAINT "contact_person_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notes_type" ADD CONSTRAINT "notes_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notes_type" ADD CONSTRAINT "notes_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notes_type" ADD CONSTRAINT "notes_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "code_value" ADD CONSTRAINT "code_value_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "code_value" ADD CONSTRAINT "code_value_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "code_value" ADD CONSTRAINT "code_value_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "lookup" ADD CONSTRAINT "lookup_lookup_type_fk_lookup_type_id_fk" FOREIGN KEY ("lookup_type_fk") REFERENCES "public"."lookup_type"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "lookup" ADD CONSTRAINT "lookup_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "lookup" ADD CONSTRAINT "lookup_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "lookup" ADD CONSTRAINT "lookup_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "salutation_type" ADD CONSTRAINT "salutation_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "salutation_type" ADD CONSTRAINT "salutation_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "salutation_type" ADD CONSTRAINT "salutation_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "designation_type" ADD CONSTRAINT "designation_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "designation_type" ADD CONSTRAINT "designation_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "designation_type" ADD CONSTRAINT "designation_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_legal_type" ADD CONSTRAINT "store_legal_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_legal_type" ADD CONSTRAINT "store_legal_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_legal_type" ADD CONSTRAINT "store_legal_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_category" ADD CONSTRAINT "store_category_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_category" ADD CONSTRAINT "store_category_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "store_category" ADD CONSTRAINT "store_category_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "communication_type" ADD CONSTRAINT "communication_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "communication_type" ADD CONSTRAINT "communication_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "communication_type" ADD CONSTRAINT "communication_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "contact_person_type" ADD CONSTRAINT "contact_person_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "contact_person_type" ADD CONSTRAINT "contact_person_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "contact_person_type" ADD CONSTRAINT "contact_person_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notes_type" ADD CONSTRAINT "notes_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notes_type" ADD CONSTRAINT "notes_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notes_type" ADD CONSTRAINT "notes_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "volumes" ADD CONSTRAINT "volumes_base_volume_fk_volumes_id_fk" FOREIGN KEY ("base_volume_fk") REFERENCES "public"."volumes"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "volumes" ADD CONSTRAINT "volumes_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "volumes" ADD CONSTRAINT "volumes_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "volumes" ADD CONSTRAINT "volumes_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "currency" ADD CONSTRAINT "currency_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "currency" ADD CONSTRAINT "currency_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "currency" ADD CONSTRAINT "currency_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "billing_frequency" ADD CONSTRAINT "billing_frequency_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "billing_frequency" ADD CONSTRAINT "billing_frequency_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "billing_frequency" ADD CONSTRAINT "billing_frequency_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "plan_type" ADD CONSTRAINT "plan_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "plan_type" ADD CONSTRAINT "plan_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "plan_type" ADD CONSTRAINT "plan_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "entity_type" ADD CONSTRAINT "entity_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "entity_type" ADD CONSTRAINT "entity_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "entity_type" ADD CONSTRAINT "entity_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notification_status" ADD CONSTRAINT "notification_status_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notification_status" ADD CONSTRAINT "notification_status_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notification_status" ADD CONSTRAINT "notification_status_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "staff_invite_status" ADD CONSTRAINT "staff_invite_status_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "staff_invite_status" ADD CONSTRAINT "staff_invite_status_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "staff_invite_status" ADD CONSTRAINT "staff_invite_status_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "volumes" ADD CONSTRAINT "volumes_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "volumes" ADD CONSTRAINT "volumes_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "volumes" ADD CONSTRAINT "volumes_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "currency" ADD CONSTRAINT "currency_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "currency" ADD CONSTRAINT "currency_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "currency" ADD CONSTRAINT "currency_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "billing_frequency" ADD CONSTRAINT "billing_frequency_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "billing_frequency" ADD CONSTRAINT "billing_frequency_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "billing_frequency" ADD CONSTRAINT "billing_frequency_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "plan_type" ADD CONSTRAINT "plan_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "plan_type" ADD CONSTRAINT "plan_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "plan_type" ADD CONSTRAINT "plan_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "entity_type" ADD CONSTRAINT "entity_type_parent_entity_type_fk_entity_type_id_fk" FOREIGN KEY ("parent_entity_type_fk") REFERENCES "public"."entity_type"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "entity_type" ADD CONSTRAINT "entity_type_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "entity_type" ADD CONSTRAINT "entity_type_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "entity_type" ADD CONSTRAINT "entity_type_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notification_status" ADD CONSTRAINT "notification_status_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notification_status" ADD CONSTRAINT "notification_status_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notification_status" ADD CONSTRAINT "notification_status_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "staff_invite_status" ADD CONSTRAINT "staff_invite_status_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "staff_invite_status" ADD CONSTRAINT "staff_invite_status_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "staff_invite_status" ADD CONSTRAINT "staff_invite_status_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_user_fk_users_id_fk" FOREIGN KEY ("user_fk") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_type_fk_notification_types_id_fk" FOREIGN KEY ("type_fk") REFERENCES "public"."notification_types"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
@@ -1692,89 +1793,98 @@ ALTER TABLE "notifications" ADD CONSTRAINT "notifications_template_fk_notificati
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_status_fk_notification_status_id_fk" FOREIGN KEY ("status_fk") REFERENCES "public"."notification_status"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notification_templates" ADD CONSTRAINT "notification_templates_type_fk_notification_types_id_fk" FOREIGN KEY ("type_fk") REFERENCES "public"."notification_types"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "push_tokens" ADD CONSTRAINT "push_tokens_user_fk_users_id_fk" FOREIGN KEY ("user_fk") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "entity_status_mapping" ADD CONSTRAINT "entity_status_mapping_entity_code_entity_type_code_fk" FOREIGN KEY ("entity_code") REFERENCES "public"."entity_type"("code") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "entity_status_mapping" ADD CONSTRAINT "entity_status_mapping_status_fk_status_id_fk" FOREIGN KEY ("status_fk") REFERENCES "public"."status"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "status" ADD CONSTRAINT "status_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "status" ADD CONSTRAINT "status_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "status" ADD CONSTRAINT "status_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "entity" ADD CONSTRAINT "entity_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "entity" ADD CONSTRAINT "entity_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "entity" ADD CONSTRAINT "entity_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "status" ADD CONSTRAINT "status_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "status" ADD CONSTRAINT "status_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "status" ADD CONSTRAINT "status_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "entity" ADD CONSTRAINT "entity_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "entity" ADD CONSTRAINT "entity_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "entity" ADD CONSTRAINT "entity_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "communication" ADD CONSTRAINT "communication_entity_fk_entity_id_fk" FOREIGN KEY ("entity_fk") REFERENCES "public"."entity"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "communication" ADD CONSTRAINT "communication_communication_type_fk_communication_type_id_fk" FOREIGN KEY ("communication_type_fk") REFERENCES "public"."communication_type"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "communication" ADD CONSTRAINT "communication_dial_country_fk_country_id_fk" FOREIGN KEY ("dial_country_fk") REFERENCES "public"."country"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "communication" ADD CONSTRAINT "communication_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "communication" ADD CONSTRAINT "communication_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "communication" ADD CONSTRAINT "communication_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "communication" ADD CONSTRAINT "communication_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "communication" ADD CONSTRAINT "communication_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "communication" ADD CONSTRAINT "communication_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "contact_person" ADD CONSTRAINT "contact_person_entity_fk_entity_id_fk" FOREIGN KEY ("entity_fk") REFERENCES "public"."entity"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "contact_person" ADD CONSTRAINT "contact_person_contact_person_type_fk_contact_person_type_id_fk" FOREIGN KEY ("contact_person_type_fk") REFERENCES "public"."contact_person_type"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "contact_person" ADD CONSTRAINT "contact_person_salutation_fk_salutation_type_id_fk" FOREIGN KEY ("salutation_fk") REFERENCES "public"."salutation_type"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "contact_person" ADD CONSTRAINT "contact_person_designation_fk_designation_type_id_fk" FOREIGN KEY ("designation_fk") REFERENCES "public"."designation_type"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "contact_person" ADD CONSTRAINT "contact_person_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "contact_person" ADD CONSTRAINT "contact_person_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "contact_person" ADD CONSTRAINT "contact_person_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "contact_person" ADD CONSTRAINT "contact_person_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "contact_person" ADD CONSTRAINT "contact_person_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "contact_person" ADD CONSTRAINT "contact_person_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notes" ADD CONSTRAINT "notes_entity_fk_entity_id_fk" FOREIGN KEY ("entity_fk") REFERENCES "public"."entity"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notes" ADD CONSTRAINT "notes_notes_type_fk_notes_type_id_fk" FOREIGN KEY ("notes_type_fk") REFERENCES "public"."notes_type"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notes" ADD CONSTRAINT "notes_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notes" ADD CONSTRAINT "notes_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notes" ADD CONSTRAINT "notes_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notes" ADD CONSTRAINT "notes_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notes" ADD CONSTRAINT "notes_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notes" ADD CONSTRAINT "notes_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_invited_by_fk_users_id_fk" FOREIGN KEY ("invited_by_fk") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_invitee_fk_users_id_fk" FOREIGN KEY ("invitee_fk") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_role_fk_roles_id_fk" FOREIGN KEY ("role_fk") REFERENCES "public"."roles"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_status_fk_staff_invite_status_id_fk" FOREIGN KEY ("status_fk") REFERENCES "public"."staff_invite_status"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_accepted_by_fk_users_id_fk" FOREIGN KEY ("accepted_by_fk") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "staff_invite" ADD CONSTRAINT "staff_invite_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "plans" ADD CONSTRAINT "plans_plan_type_fk_plan_type_id_fk" FOREIGN KEY ("plan_type_fk") REFERENCES "public"."plan_type"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "plans" ADD CONSTRAINT "plans_allow_to_upgrade_fk_plans_id_fk" FOREIGN KEY ("allow_to_upgrade_fk") REFERENCES "public"."plans"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "plans" ADD CONSTRAINT "plans_allow_to_downgrade_fk_plans_id_fk" FOREIGN KEY ("allow_to_downgrade_fk") REFERENCES "public"."plans"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "plans" ADD CONSTRAINT "plans_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "plans" ADD CONSTRAINT "plans_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "plans" ADD CONSTRAINT "plans_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "plans" ADD CONSTRAINT "plans_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "plans" ADD CONSTRAINT "plans_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "plans" ADD CONSTRAINT "plans_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "plan_price" ADD CONSTRAINT "plan_price_plan_fk_plans_id_fk" FOREIGN KEY ("plan_fk") REFERENCES "public"."plans"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "plan_price" ADD CONSTRAINT "plan_price_currency_fk_currency_id_fk" FOREIGN KEY ("currency_fk") REFERENCES "public"."currency"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "plan_price" ADD CONSTRAINT "plan_price_frequency_fk_billing_frequency_id_fk" FOREIGN KEY ("frequency_fk") REFERENCES "public"."billing_frequency"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "plan_price" ADD CONSTRAINT "plan_price_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "plan_price" ADD CONSTRAINT "plan_price_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "plan_price" ADD CONSTRAINT "plan_price_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "plan_price" ADD CONSTRAINT "plan_price_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "plan_price" ADD CONSTRAINT "plan_price_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "plan_price" ADD CONSTRAINT "plan_price_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "subscription" ADD CONSTRAINT "subscription_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "subscription" ADD CONSTRAINT "subscription_plan_fk_plans_id_fk" FOREIGN KEY ("plan_fk") REFERENCES "public"."plans"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "subscription" ADD CONSTRAINT "subscription_status_fk_status_id_fk" FOREIGN KEY ("status_fk") REFERENCES "public"."status"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "subscription" ADD CONSTRAINT "subscription_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "subscription" ADD CONSTRAINT "subscription_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "subscription" ADD CONSTRAINT "subscription_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "subscription" ADD CONSTRAINT "subscription_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "subscription" ADD CONSTRAINT "subscription_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "subscription" ADD CONSTRAINT "subscription_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "subscription_item" ADD CONSTRAINT "subscription_item_subscription_fk_subscription_id_fk" FOREIGN KEY ("subscription_fk") REFERENCES "public"."subscription"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "subscription_item" ADD CONSTRAINT "subscription_item_plan_price_fk_plan_price_id_fk" FOREIGN KEY ("plan_price_fk") REFERENCES "public"."plan_price"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "subscription_item" ADD CONSTRAINT "subscription_item_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "subscription_item" ADD CONSTRAINT "subscription_item_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "subscription_item" ADD CONSTRAINT "subscription_item_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "subscription_item" ADD CONSTRAINT "subscription_item_plan_price_fk_plan_price_id_fk" FOREIGN KEY ("plan_price_fk") REFERENCES "public"."plan_price"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "subscription_item" ADD CONSTRAINT "subscription_item_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "subscription_item" ADD CONSTRAINT "subscription_item_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "subscription_item" ADD CONSTRAINT "subscription_item_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_user_fk_users_id_fk" FOREIGN KEY ("user_fk") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_store_fk_store_id_fk" FOREIGN KEY ("store_fk") REFERENCES "public"."store"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_session_fk_user_session_id_fk" FOREIGN KEY ("session_fk") REFERENCES "public"."user_session"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_user_fk_users_id_fk" FOREIGN KEY ("user_fk") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "system_config" ADD CONSTRAINT "system_config_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "system_config" ADD CONSTRAINT "system_config_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "system_config" ADD CONSTRAINT "system_config_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "system_config" ADD CONSTRAINT "system_config_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "system_config" ADD CONSTRAINT "system_config_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "system_config" ADD CONSTRAINT "system_config_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "files" ADD CONSTRAINT "files_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "files" ADD CONSTRAINT "files_modified_by_users_id_fk" FOREIGN KEY ("modified_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "files" ADD CONSTRAINT "files_deleted_by_users_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "permissions_changelog" ADD CONSTRAINT "permissions_changelog_user_fk_users_id_fk" FOREIGN KEY ("user_fk") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "revoked_devices" ADD CONSTRAINT "revoked_devices_user_fk_users_id_fk" FOREIGN KEY ("user_fk") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "revoked_devices" ADD CONSTRAINT "revoked_devices_revoked_by_users_id_fk" FOREIGN KEY ("revoked_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "users_email_idx" ON "users" USING btree ("email");--> statement-breakpoint
 CREATE INDEX "users_phone_number_idx" ON "users" USING btree ("phone_number");--> statement-breakpoint
 CREATE UNIQUE INDEX "users_iam_user_id_idx" ON "users" USING btree ("iam_user_id");--> statement-breakpoint
+CREATE INDEX "users_default_store_idx" ON "users" USING btree ("default_store_fk");--> statement-breakpoint
 CREATE INDEX "users_blocked_by_idx" ON "users" USING btree ("blocked_by");--> statement-breakpoint
 CREATE INDEX "users_profile_completed_idx" ON "users" USING btree ("profile_completed");--> statement-breakpoint
 CREATE INDEX "users_permissions_version_idx" ON "users" USING btree ("permissions_version");--> statement-breakpoint
 CREATE INDEX "user_session_user_idx" ON "user_session" USING btree ("user_fk");--> statement-breakpoint
 CREATE INDEX "user_session_token_idx" ON "user_session" USING btree ("token");--> statement-breakpoint
+CREATE INDEX "user_session_refresh_token_hash_idx" ON "user_session" USING btree ("refresh_token_hash");--> statement-breakpoint
+CREATE INDEX "user_session_expires_at_idx" ON "user_session" USING btree ("expires_at");--> statement-breakpoint
 CREATE INDEX "user_session_revoked_idx" ON "user_session" USING btree ("user_fk","refresh_token_revoked_at");--> statement-breakpoint
 CREATE INDEX "user_auth_provider_user_idx" ON "user_auth_provider" USING btree ("user_fk");--> statement-breakpoint
 CREATE UNIQUE INDEX "user_auth_provider_user_provider_unique" ON "user_auth_provider" USING btree ("user_fk","provider_id");--> statement-breakpoint
 CREATE INDEX "otp_verification_identifier_purpose_idx" ON "otp_verification" USING btree ("identifier","purpose");--> statement-breakpoint
 CREATE INDEX "otp_verification_auth_provider_idx" ON "otp_verification" USING btree ("auth_provider_fk");--> statement-breakpoint
-CREATE INDEX "otp_request_log_identifier_hash_idx" ON "otp_request_log" USING btree ("identifier_hash");--> statement-breakpoint
+CREATE UNIQUE INDEX "otp_request_log_identifier_hash_idx" ON "otp_request_log" USING btree ("identifier_hash");--> statement-breakpoint
+CREATE INDEX "otp_request_log_expires_at_idx" ON "otp_request_log" USING btree ("expires_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "urm_unique_global_idx" ON "user_role_mapping" USING btree ("user_fk","role_fk") WHERE store_fk IS NULL AND deleted_at IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "urm_unique_store_idx" ON "user_role_mapping" USING btree ("user_fk","role_fk","store_fk") WHERE store_fk IS NOT NULL AND deleted_at IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "urm_primary_global_idx" ON "user_role_mapping" USING btree ("user_fk") WHERE store_fk IS NULL AND is_primary = true AND deleted_at IS NULL;--> statement-breakpoint
@@ -1783,7 +1893,10 @@ CREATE INDEX "urm_user_idx" ON "user_role_mapping" USING btree ("user_fk");--> s
 CREATE INDEX "urm_role_idx" ON "user_role_mapping" USING btree ("role_fk");--> statement-breakpoint
 CREATE INDEX "urm_store_idx" ON "user_role_mapping" USING btree ("store_fk");--> statement-breakpoint
 CREATE INDEX "urm_user_store_idx" ON "user_role_mapping" USING btree ("user_fk","store_fk");--> statement-breakpoint
+CREATE INDEX "urm_expires_at_idx" ON "user_role_mapping" USING btree ("expires_at");--> statement-breakpoint
+CREATE INDEX "urm_assigned_by_idx" ON "user_role_mapping" USING btree ("assigned_by");--> statement-breakpoint
 CREATE INDEX "store_owner_user_idx" ON "store" USING btree ("owner_user_fk");--> statement-breakpoint
+CREATE INDEX "store_parent_store_idx" ON "store" USING btree ("parent_store_fk");--> statement-breakpoint
 CREATE UNIQUE INDEX "store_user_mapping_active_unique_idx" ON "store_user_mapping" USING btree ("store_fk","user_fk") WHERE deleted_at IS NULL;--> statement-breakpoint
 CREATE INDEX "store_user_mapping_user_idx" ON "store_user_mapping" USING btree ("user_fk");--> statement-breakpoint
 CREATE INDEX "store_user_mapping_designation_idx" ON "store_user_mapping" USING btree ("designation_fk");--> statement-breakpoint
@@ -1801,18 +1914,18 @@ CREATE UNIQUE INDEX "roles_code_global_idx" ON "roles" USING btree ("code") WHER
 CREATE INDEX "roles_store_idx" ON "roles" USING btree ("store_fk");--> statement-breakpoint
 CREATE INDEX "roles_is_system_idx" ON "roles" USING btree ("is_system");--> statement-breakpoint
 CREATE UNIQUE INDEX "routes_path_scope_idx" ON "routes" USING btree ("route_path","route_scope") WHERE deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "routes_entity_type_idx" ON "routes" USING btree ("entity_type_fk") WHERE entity_type_fk IS NOT NULL AND deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "routes_parent_route_fk_idx" ON "routes" USING btree ("parent_route_fk") WHERE parent_route_fk IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "role_route_mapping_route_idx" ON "role_route_mapping" USING btree ("route_fk");--> statement-breakpoint
-CREATE INDEX "role_entity_permission_role_entity_idx" ON "role_entity_permission" USING btree ("role_fk","entity_type_fk");--> statement-breakpoint
-CREATE INDEX "role_entity_permission_role_idx" ON "role_entity_permission" USING btree ("role_fk");--> statement-breakpoint
-CREATE INDEX "role_entity_permission_entity_idx" ON "role_entity_permission" USING btree ("entity_type_fk");--> statement-breakpoint
-CREATE INDEX "role_entity_permission_active_idx" ON "role_entity_permission" USING btree ("is_active");--> statement-breakpoint
+CREATE INDEX "permission_action_active_idx" ON "permission_action" USING btree ("is_active") WHERE is_active = true AND deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "role_permissions_role_idx" ON "role_permissions" USING btree ("role_fk") WHERE is_active = true AND deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "role_permissions_role_entity_idx" ON "role_permissions" USING btree ("role_fk","entity_type_fk") WHERE is_active = true AND deleted_at IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "state_name_idx" ON "state" USING btree ("state_name") WHERE deleted_at IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "state_code_idx" ON "state" USING btree ("state_code") WHERE deleted_at IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "district_name_state_idx" ON "district" USING btree ("district_name","state_fk") WHERE deleted_at IS NULL;--> statement-breakpoint
 CREATE INDEX "district_state_idx" ON "district" USING btree ("state_fk");--> statement-breakpoint
 CREATE UNIQUE INDEX "pincode_code_idx" ON "pincode" USING btree ("code") WHERE deleted_at IS NULL;--> statement-breakpoint
 CREATE INDEX "pincode_district_idx" ON "pincode" USING btree ("district_fk");--> statement-breakpoint
-CREATE INDEX "pincode_state_idx" ON "pincode" USING btree ("state_fk");--> statement-breakpoint
 CREATE INDEX "address_entity_record_idx" ON "address" USING btree ("entity_fk","record_id");--> statement-breakpoint
 CREATE INDEX "address_entity_type_idx" ON "address" USING btree ("entity_fk","address_type_fk");--> statement-breakpoint
 CREATE INDEX "address_entity_record_active_idx" ON "address" USING btree ("entity_fk","record_id") WHERE is_active = true;--> statement-breakpoint
@@ -1865,12 +1978,13 @@ CREATE UNIQUE INDEX "code_value_code_category_global_idx" ON "code_value" USING 
 CREATE UNIQUE INDEX "code_value_code_category_store_idx" ON "code_value" USING btree ("code","category_fk","store_fk") WHERE deleted_at IS NULL AND store_fk IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "code_value_category_idx" ON "code_value" USING btree ("category_fk");--> statement-breakpoint
 CREATE INDEX "code_value_store_idx" ON "code_value" USING btree ("store_fk");--> statement-breakpoint
+CREATE INDEX "lookup_type_fk_idx" ON "lookup" USING btree ("lookup_type_fk");--> statement-breakpoint
 CREATE INDEX "notifications_created_at_idx" ON "notifications" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX "notifications_user_fk_idx" ON "notifications" USING btree ("user_fk");--> statement-breakpoint
 CREATE INDEX "notifications_user_status_idx" ON "notifications" USING btree ("user_fk","status_fk");--> statement-breakpoint
 CREATE INDEX "notifications_user_store_idx" ON "notifications" USING btree ("user_fk","store_fk");--> statement-breakpoint
 CREATE INDEX "notifications_user_unread_idx" ON "notifications" USING btree ("user_fk") WHERE read_at IS NULL;--> statement-breakpoint
-CREATE INDEX "notifications_retry_idx" ON "notifications" USING btree ("status_fk","retry_count") WHERE retry_count < 3;--> statement-breakpoint
+CREATE INDEX "notifications_retry_idx" ON "notifications" USING btree ("status_fk","retry_count");--> statement-breakpoint
 CREATE UNIQUE INDEX "notifications_ticket_idx" ON "notifications" USING btree ("expo_push_ticket_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "notification_templates_published_idx" ON "notification_templates" USING btree ("type_fk","language") WHERE status = 'PUBLISHED' AND deleted_at IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "notification_templates_draft_idx" ON "notification_templates" USING btree ("type_fk","language") WHERE status = 'DRAFT' AND deleted_at IS NULL;--> statement-breakpoint
@@ -1884,6 +1998,8 @@ CREATE INDEX "communication_entity_idx" ON "communication" USING btree ("entity_
 CREATE INDEX "communication_record_idx" ON "communication" USING btree ("record_id");--> statement-breakpoint
 CREATE INDEX "communication_type_idx" ON "communication" USING btree ("communication_type_fk");--> statement-breakpoint
 CREATE INDEX "communication_dial_country_idx" ON "communication" USING btree ("dial_country_fk");--> statement-breakpoint
+CREATE INDEX "communication_email_idx" ON "communication" USING btree ("email");--> statement-breakpoint
+CREATE INDEX "communication_phone_idx" ON "communication" USING btree ("phone_number");--> statement-breakpoint
 CREATE INDEX "contact_person_entity_record_idx" ON "contact_person" USING btree ("entity_fk","record_id");--> statement-breakpoint
 CREATE INDEX "contact_person_entity_record_active_idx" ON "contact_person" USING btree ("entity_fk","record_id") WHERE is_active = true;--> statement-breakpoint
 CREATE UNIQUE INDEX "contact_person_one_primary_idx" ON "contact_person" USING btree ("entity_fk","record_id") WHERE is_primary = true AND deleted_at IS NULL;--> statement-breakpoint
@@ -1892,8 +2008,17 @@ CREATE INDEX "notes_entity_record_active_idx" ON "notes" USING btree ("entity_fk
 CREATE INDEX "notes_entity_idx" ON "notes" USING btree ("entity_fk");--> statement-breakpoint
 CREATE INDEX "notes_record_idx" ON "notes" USING btree ("record_id");--> statement-breakpoint
 CREATE INDEX "notes_type_idx" ON "notes" USING btree ("notes_type_fk");--> statement-breakpoint
-CREATE UNIQUE INDEX "staff_invite_pending_unique_idx" ON "staff_invite" USING btree ("store_fk","invitee_email") WHERE deleted_at IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "staff_invite_pending_unique_idx" ON "staff_invite" USING btree ("store_fk","invitee_email") WHERE is_pending = true AND deleted_at IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "plans_is_more_popular_unique_idx" ON "plans" USING btree ("is_more_popular") WHERE is_more_popular = true AND deleted_at IS NULL;--> statement-breakpoint
 CREATE INDEX "plans_plan_type_idx" ON "plans" USING btree ("plan_type_fk");--> statement-breakpoint
+CREATE INDEX "plans_allow_to_upgrade_idx" ON "plans" USING btree ("allow_to_upgrade_fk");--> statement-breakpoint
+CREATE INDEX "plans_allow_to_downgrade_idx" ON "plans" USING btree ("allow_to_downgrade_fk");--> statement-breakpoint
+CREATE INDEX "plan_price_plan_fk_idx" ON "plan_price" USING btree ("plan_fk");--> statement-breakpoint
+CREATE INDEX "plan_price_currency_fk_idx" ON "plan_price" USING btree ("currency_fk");--> statement-breakpoint
+CREATE INDEX "plan_price_frequency_fk_idx" ON "plan_price" USING btree ("frequency_fk");--> statement-breakpoint
+CREATE UNIQUE INDEX "subscription_current_store_unique_idx" ON "subscription" USING btree ("store_fk") WHERE is_current = true AND deleted_at IS NULL;--> statement-breakpoint
+CREATE INDEX "subscription_plan_fk_idx" ON "subscription" USING btree ("plan_fk");--> statement-breakpoint
+CREATE INDEX "subscription_status_fk_idx" ON "subscription" USING btree ("status_fk");--> statement-breakpoint
 CREATE INDEX "subscription_item_subscription_idx" ON "subscription_item" USING btree ("subscription_fk");--> statement-breakpoint
 CREATE INDEX "subscription_item_plan_price_idx" ON "subscription_item" USING btree ("plan_price_fk");--> statement-breakpoint
 CREATE INDEX "audit_logs_created_at_idx" ON "audit_logs" USING btree ("created_at");--> statement-breakpoint
@@ -1901,6 +2026,14 @@ CREATE INDEX "audit_logs_user_idx" ON "audit_logs" USING btree ("user_fk");--> s
 CREATE INDEX "audit_logs_store_idx" ON "audit_logs" USING btree ("store_fk");--> statement-breakpoint
 CREATE INDEX "audit_logs_action_idx" ON "audit_logs" USING btree ("action");--> statement-breakpoint
 CREATE INDEX "audit_logs_store_action_idx" ON "audit_logs" USING btree ("store_fk","action");--> statement-breakpoint
+CREATE INDEX "audit_logs_user_created_at_idx" ON "audit_logs" USING btree ("user_fk","created_at");--> statement-breakpoint
+CREATE INDEX "idempotency_log_processed_idx" ON "idempotency_log" USING btree ("processed_at");--> statement-breakpoint
+CREATE INDEX "idempotency_log_expires_idx" ON "idempotency_log" USING btree ("expires_at");--> statement-breakpoint
 CREATE INDEX "files_entity_idx" ON "files" USING btree ("entity_type","entity_id");--> statement-breakpoint
 CREATE INDEX "files_created_idx" ON "files" USING btree ("created_at");--> statement-breakpoint
-CREATE INDEX "files_created_by_idx" ON "files" USING btree ("created_by");
+CREATE INDEX "files_created_by_idx" ON "files" USING btree ("created_by");--> statement-breakpoint
+CREATE INDEX "rate_limit_entries_expires_at_idx" ON "rate_limit_entries" USING btree ("expires_at");--> statement-breakpoint
+CREATE INDEX "jti_blocklist_expires_idx" ON "jti_blocklist" USING btree ("expires_at");--> statement-breakpoint
+CREATE INDEX "permissions_changelog_user_version_idx" ON "permissions_changelog" USING btree ("user_fk","version_number");--> statement-breakpoint
+CREATE INDEX "revoked_devices_user_device_idx" ON "revoked_devices" USING btree ("user_fk","device_id");--> statement-breakpoint
+CREATE INDEX "revoked_devices_revoked_at_idx" ON "revoked_devices" USING btree ("revoked_at");

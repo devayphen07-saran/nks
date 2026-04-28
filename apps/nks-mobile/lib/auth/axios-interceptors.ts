@@ -13,11 +13,13 @@
  * business logic (refresh queue, mutex, offline session) into mobile-utils.
  */
 
+import { Platform } from "react-native";
 import { API, type AuthResponse } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
 import { sanitizeError } from "../utils/log-sanitizer";
 import { createLogger } from "../utils/logger";
 import { refreshTokenAttempt } from "./refresh-token-attempt";
+import { getDeviceIdentity } from "../device/device-binding";
 
 const log = createLogger("AxiosInterceptors");
 import { tokenMutex } from "./token-mutex";
@@ -43,6 +45,32 @@ let failedQueue: Array<{
 // (hot reload in dev, or React StrictMode double-mounting AuthProvider).
 let _requestInterceptorId: number | null = null;
 let _responseInterceptorId: number | null = null;
+
+// Device header cache — generated once per app session, reused on every request.
+// Avoids SecureStore/crypto I/O on the hot request path.
+let _deviceHeaders: {
+  'X-Device-Type': string;
+  'X-Device-Id': string;
+  'X-Device-Name': string;
+  'X-App-Version': string;
+} | null = null;
+
+async function getDeviceHeaders() {
+  if (_deviceHeaders) return _deviceHeaders;
+  try {
+    const identity = await getDeviceIdentity();
+    _deviceHeaders = {
+      'X-Device-Type': Platform.OS === 'android' ? 'ANDROID' : 'IOS',
+      'X-Device-Id': identity.deviceId,
+      'X-Device-Name': identity.deviceModel,
+      'X-App-Version': identity.appVersion,
+    };
+  } catch {
+    // Non-fatal — backend treats missing X-Device-Type as web client
+    _deviceHeaders = null;
+  }
+  return _deviceHeaders;
+}
 
 function processQueue(error: unknown, token: string | null) {
   failedQueue.forEach(({ resolve, reject }) => {
@@ -102,6 +130,15 @@ export function setupAxiosInterceptors(
       const token = tokenManager.get();
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
+      }
+      // Device identification — required so backend identifies mobile clients
+      // and returns sessionToken in the body (not null as it does for web).
+      const deviceHeaders = await getDeviceHeaders();
+      if (deviceHeaders && config.headers) {
+        config.headers['X-Device-Type'] = deviceHeaders['X-Device-Type'];
+        config.headers['X-Device-Id'] = deviceHeaders['X-Device-Id'];
+        config.headers['X-Device-Name'] = deviceHeaders['X-Device-Name'];
+        config.headers['X-App-Version'] = deviceHeaders['X-App-Version'];
       }
       return config;
     },

@@ -71,11 +71,11 @@ export function PersonalDrawerContent(props: DrawerContentComponentProps) {
   );
 
   const userInitials =
-    user?.name
-      ?.split(" ")
-      .map((name: string) => name[0])
+    [user?.firstName, user?.lastName]
+      .filter(Boolean)
+      .map((n) => n![0])
       .join("")
-      .toUpperCase() ?? "U";
+      .toUpperCase() || "U";
 
   return (
     <DrawerContainer>
@@ -87,7 +87,7 @@ export function PersonalDrawerContent(props: DrawerContentComponentProps) {
               <Avatar initials={userInitials} size={56} shape="circle" />
               <Column gap="xxSmall" style={{ flex: 1 }}>
                 <Typography.H5 weight="bold" numberOfLines={1}>
-                  {user?.name ?? "User"}
+                  {[user?.firstName, user?.lastName].filter(Boolean).join(" ") || "User"}
                 </Typography.H5>
                 <Typography.Caption type="secondary" numberOfLines={1}>
                   {user?.phoneNumber ?? "Personal Account"}

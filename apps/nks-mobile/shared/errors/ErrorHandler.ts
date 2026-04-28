@@ -15,7 +15,7 @@ const BACKEND_ERROR_CODE_MAP: Record<string, ErrorCode> = {
   OTP_SEND_FAILED: ErrorCode.SERVER_ERROR,
 
   // Auth / session
-  AUTH_NO_ADMIN_EXISTS: ErrorCode.AUTH_ERROR,
+  AUTH_NO_ADMIN_EXISTS: ErrorCode.AUTH_NO_ADMIN,
   AUTH_INVALID_CREDENTIALS: ErrorCode.INVALID_CREDENTIALS,
   AUTH_ACCOUNT_LOCKED: ErrorCode.ACCOUNT_LOCKED,
   AUTH_ACCOUNT_DISABLED: ErrorCode.ACCOUNT_DISABLED,
@@ -95,10 +95,11 @@ export class ErrorHandler {
     }
 
     // Plain backend API response object — comes from rejectWithValue(err.response?.data)
-    // Shape: { success: false, code: string, message: string, statusCode?: number }
-    if (typeof error === 'object' && 'code' in error) {
-      const apiErr = error as { code?: string; message?: string; statusCode?: number };
-      const mapped = mapBackendCode(apiErr.code);
+    // Shape: { errorCode: string, message: string, data: null, meta: {...} }
+    // Note: backend uses "errorCode" field (not "code") per ApiResponse.toJSON()
+    if (typeof error === 'object' && ('errorCode' in error || 'code' in error)) {
+      const apiErr = error as { errorCode?: string; code?: string; message?: string; statusCode?: number };
+      const mapped = mapBackendCode(apiErr.errorCode ?? apiErr.code);
       return new AppError(
         mapped ?? ErrorCode.UNKNOWN_ERROR,
         apiErr.message || 'An unexpected error occurred',
@@ -145,7 +146,7 @@ export class ErrorHandler {
       );
     }
 
-    const mapped = mapBackendCode(data?.code as string | undefined);
+    const mapped = mapBackendCode((data?.errorCode ?? data?.code) as string | undefined);
 
     // 400 Bad Request - Validation error
     if (status === 400) {

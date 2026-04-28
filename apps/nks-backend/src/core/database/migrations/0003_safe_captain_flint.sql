@@ -1,2 +1,0 @@
-CREATE INDEX "user_session_refresh_token_hash_idx" ON "user_session" USING btree ("refresh_token_hash");--> statement-breakpoint
-CREATE INDEX "user_session_expires_at_idx" ON "user_session" USING btree ("expires_at");

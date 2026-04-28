@@ -24,7 +24,7 @@ export const VerifyOtpSchema = z
     phone: phoneField.optional(),
     mobile: phoneField.optional(),
     otp: z.string().min(4, 'OTP must be at least 4 digits').max(6, 'OTP must be at most 6 digits'),
-    reqId: z.string().min(1, 'reqId is required'),
+    reqId: z.string().min(1, 'reqId is required').max(128),
   })
   .transform((data, ctx) => {
     const phone = data.phone ?? data.mobile;

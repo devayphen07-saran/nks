@@ -46,20 +46,11 @@ export const createAxiosInstance = (baseUrl: string): AxiosInstance => {
 
       const retryCount = (config as any)._retryCount || 0;
 
-      // 1. Handle 401 Unauthorized — session expired, trigger logout
-      if (response?.status === 401 && !(config as any)._retry) {
-        (config as any)._retry = true;
-        tokenManager.clear();
-        // Notify the store to dispatch setUnauthenticated (callback registered in store.ts)
-        tokenManager.notifyExpired();
-        return Promise.reject(error);
-      }
-
-      // 1b. Handle 403 Forbidden — permissions changed server-side, re-fetch session
-      if (response?.status === 403) {
-        tokenManager.notifyRefresh();
-        return Promise.reject(error);
-      }
+      // 401 and 403 handling is intentionally omitted here.
+      // The app-level interceptor in nks-mobile/lib/auth/axios-interceptors.ts owns
+      // the 401 refresh-queue logic and 403 permission-refresh notification.
+      // Handling 401 here would fire before the app interceptor and trigger immediate
+      // logout instead of allowing the queued refresh to complete.
 
       // 2. Handle 429 Too Many Requests (Exponential Backoff)
       if (response?.status === 429 && retryCount < MAX_RETRY_ATTEMPTS) {

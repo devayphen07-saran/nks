@@ -127,8 +127,8 @@ export type RefreshValidationResult =
 export async function validateTokensBeforeRefresh(
   envelope: SessionEnvelope<AuthResponse> | null,
 ): Promise<RefreshValidationResult> {
-  const refreshToken = envelope?.data?.session?.refreshToken;
-  const refreshExpiresAt = envelope?.data?.session?.refreshExpiresAt;
+  const refreshToken = envelope?.data?.auth?.refreshToken;
+  const refreshExpiresAt = envelope?.data?.auth?.refreshExpiresAt;
 
   if (!refreshToken) {
     return {

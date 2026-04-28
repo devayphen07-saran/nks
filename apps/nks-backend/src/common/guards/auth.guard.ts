@@ -1,4 +1,3 @@
-import * as crypto from 'crypto';
 import { CanActivate, ExecutionContext, Injectable, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
@@ -80,17 +79,12 @@ export class AuthGuard implements CanActivate {
     // completes and applies DB rotation + Set-Cookie headers there.
     // Guard stays a pure validation layer; no cookie writes happen here.
     if (authType === 'cookie') {
-      const isRotateCsrf = !shouldRotate && this.isRotateCsrf(context);
-      authed.sessionContext = {
-        authType: 'cookie',
-        sessionToken: token,
-        sessionId: session.id,
-        csrfSecretOrToken: session.csrfSecret ?? token,
-        shouldRotateSession: shouldRotate,
-        csrfSecretOverride: isRotateCsrf
-          ? crypto.randomBytes(32).toString('hex')
-          : undefined,
-      };
+      authed.sessionContext = this.sessionLifecycle.buildSessionContext(
+        token,
+        session,
+        shouldRotate,
+        !shouldRotate && this.isRotateCsrf(context),
+      );
     }
 
     this.logger.debug({

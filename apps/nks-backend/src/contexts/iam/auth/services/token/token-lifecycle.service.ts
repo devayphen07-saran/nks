@@ -158,28 +158,16 @@ export class TokenLifecycleService {
       );
     }
 
-    // Step 5: Rotate session — BetterAuth issues a new opaque token.
-    // BREAKING: tied to better-auth@^1.6.2 internalAdapter API.
-    // internalAdapter is undocumented. If createSession disappears or changes
-    // signature on a BetterAuth upgrade, this will fail at runtime with no TS error.
-    const ctx = await this.authUtils.getBetterAuthContext();
-    const createdSession = await ctx.internalAdapter.createSession(
-      String(session.userFk),
-    );
-    TokenLifecycleValidator.assertSessionCreated(createdSession);
-
-    const newSession = await this.sessionsRepository.findByToken(
-      createdSession.token,
-    );
-    TokenLifecycleValidator.assertSessionCreated(newSession);
-
-    // Step 6: Generate new refresh token (in-memory only, not yet persisted)
+    // Step 5: Generate new refresh token (in-memory only, not yet persisted).
     const { token: newRefreshToken, tokenHash: newRefreshTokenHash } =
       this.refreshTokenService.generateRefreshToken();
     const newRefreshTokenExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+    const newCsrfSecret = crypto.randomBytes(32).toString('hex');
 
-    // Step 7: Atomically persist the new session + revoke the old refresh token.
+    // Step 6: Rotate refresh token in-place — update the existing session row.
     // Re-validate activeStoreFk — user's role in that store may have been revoked since last login.
+    // CAS: WHERE refreshTokenHash = oldHash ensures a concurrent refresh that already
+    // replaced the hash will cause 0 rows matched → race detected, not theft.
     // IMPORTANT: JWT is signed AFTER this succeeds to prevent orphaned tokens.
     const validatedActiveStoreFk =
       session.activeStoreFk !== null &&
@@ -187,41 +175,32 @@ export class TokenLifecycleService {
         ? session.activeStoreFk
         : null;
 
-    const rotated = await this.sessionsRepository.rotateRefreshToken(
-      newSession.id,
+    const rotated = await this.sessionsRepository.rotateRefreshTokenInPlace(
+      session.id,
+      refreshTokenHash,
       {
         roleHash: currentRoleHash,
-        deviceId: session.deviceId,
-        deviceName: session.deviceName,
-        deviceType: session.deviceType,
-        appVersion: session.appVersion,
         activeStoreFk: validatedActiveStoreFk,
         refreshTokenHash: newRefreshTokenHash,
         refreshTokenExpiresAt: newRefreshTokenExpiresAt,
         accessTokenExpiresAt,
+        csrfSecret: newCsrfSecret,
       },
-      session.id,
     );
 
-    // CAS returned false — another refresh already rotated this token.
-    // This is a legitimate race (e.g. foreground + background refresh),
-    // NOT token theft. Reject so the caller re-reads the current token.
-    // Delete the orphaned BetterAuth session row created in Step 5 to
-    // prevent it from consuming a slot in the session limit.
     if (!rotated) {
       this.logger.warn(
         `Refresh race detected for session ${session.id} — another refresh already completed`,
       );
-      await this.sessionsRepository.delete(newSession.id);
     }
     TokenLifecycleValidator.assertRotationSucceeded(rotated);
 
-    // Step 8: Sign JWT only after session rotation is confirmed in DB.
+    // Step 7: Sign JWT only after rotation is confirmed in DB.
     // Signing before rotation risks an orphaned JWT that passes AuthGuard
     // but has no live session backing it.
     const accessToken = this.jwtConfigService.signToken({
       sub: user.guuid,
-      sid: newSession.guuid,
+      sid: session.guuid,
       jti: crypto.randomUUID(),
       iamUserId: user.iamUserId,
       ...(user.email ? { email: user.email } : {}),
@@ -280,7 +259,7 @@ export class TokenLifecycleService {
           email: user.email,
           phoneNumber: user.phoneNumber,
         },
-        token: newSession.token,
+        token: session.token,
       },
       {
         accessToken: accessToken,
@@ -289,7 +268,7 @@ export class TokenLifecycleService {
         refreshTokenExpiresAt: newRefreshTokenExpiresAt,
       },
       primaryStore ?? null,
-      newSession.guuid,
+      session.guuid,
       accessTokenExpiresAt,
       newRefreshTokenExpiresAt,
       offlineToken,

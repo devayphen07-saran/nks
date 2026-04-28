@@ -2,11 +2,10 @@ import { Module } from '@nestjs/common';
 import { AuthGuard } from './auth.guard';
 import { OwnershipGuard } from './ownership.guard';
 import { AuthModule } from '../../contexts/iam/auth/auth.module';
-import { CsrfTokenService } from '../middleware/csrf-token.service';
+import { CsrfService } from '../csrf.service';
 import { TokenExtractorService } from './services/token-extractor.service';
 import { SessionValidatorService } from './services/session-validator.service';
 import { SessionLifecycleService } from './services/session-lifecycle.service';
-import { CsrfValidationService } from './services/csrf-validation.service';
 
 /**
  * GuardsModule — cross-cutting guards (AuthGuard, OwnershipGuard).
@@ -18,7 +17,7 @@ import { CsrfValidationService } from './services/csrf-validation.service';
  *   AuthPolicyService        — account status + IP change   (from AuthModule)
  *   SessionLifecycleService  — isRotationDue() check only; guard stamps
  *                              _pendingSessionUpdates for SessionRotationInterceptor
- *   CsrfValidationService    — CSRF validate + syncCookie (shared with interceptor)
+ *   CsrfService              — CSRF generate/validate/refresh (single source of truth)
  *
  * Cookie side-effects (DB rotation, Set-Cookie) run in SessionRotationInterceptor
  * after the handler — the guard itself is a pure validation layer.
@@ -30,12 +29,11 @@ import { CsrfValidationService } from './services/csrf-validation.service';
   providers: [
     AuthGuard,
     OwnershipGuard,
-    CsrfTokenService,
-    CsrfValidationService,
+    CsrfService,
     TokenExtractorService,
     SessionValidatorService,
     SessionLifecycleService,
   ],
-  exports: [AuthGuard, OwnershipGuard, CsrfValidationService],
+  exports: [AuthGuard, OwnershipGuard, CsrfService, TokenExtractorService, SessionValidatorService, SessionLifecycleService],
 })
 export class GuardsModule {}

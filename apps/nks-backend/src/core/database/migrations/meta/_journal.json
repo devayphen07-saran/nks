@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1775650469085,
-      "tag": "0000_tiresome_komodo",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1775739045957,
-      "tag": "0001_clear_daimon_hellstrom",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1776710179934,
-      "tag": "0002_schema_audit_fixes_v2",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1776748709731,
-      "tag": "0003_safe_captain_flint",
+      "when": 1777351024451,
+      "tag": "0000_colossal_doctor_octopus",
       "breakpoints": true
     }
   ]

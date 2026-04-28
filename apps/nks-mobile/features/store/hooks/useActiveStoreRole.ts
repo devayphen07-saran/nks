@@ -1,7 +1,7 @@
 import { useSelector } from 'react-redux';
 import type { RootState } from '../../../store';
 import { selectIsSuperAdmin } from '../../../store/auth-slice';
-import { type MenuItem, type RoleCode } from '../constants/drawer-menu-config';
+import { type MenuItem } from '../constants/drawer-menu-config';
 
 /**
  * Provides the active store context for drawer/menu rendering.
@@ -13,7 +13,7 @@ export function useActiveStoreRole() {
   const isSuperAdmin = useSelector(selectIsSuperAdmin);
 
   // Role and menu data will come from the store API response state (to be implemented).
-  const activeRole: RoleCode | undefined = undefined;
+  const activeRole: string | undefined = undefined;
   const activeStoreName: string | undefined = undefined;
   const menuItems: MenuItem[] = [];
 

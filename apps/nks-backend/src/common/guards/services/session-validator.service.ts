@@ -3,7 +3,7 @@ import type { Request } from 'express';
 import { UnauthorizedException } from '../../exceptions';
 import { ErrorCode } from '../../constants/error-codes.constants';
 import { AuthContextService } from '../../../contexts/iam/auth/services/session/auth-context.service';
-import { CsrfValidationService } from './csrf-validation.service';
+import { CsrfService } from '../../csrf.service';
 import type { AuthType } from './token-extractor.service';
 
 type AuthContext = Awaited<ReturnType<AuthContextService['findSessionAuthContext']>>;
@@ -24,7 +24,7 @@ export interface ValidatedSession {
  * 2. Expiry check.
  * 3. Revocation check.
  * 4. User existence check (inner-joined, but guard for type narrowing).
- * 5. CSRF header validation for cookie sessions (delegated to CsrfValidationService).
+ * 5. CSRF header validation for cookie sessions (delegated to CsrfService).
  *
  * Returns ValidatedSession (session + pre-fetched user + roles) or throws; never returns null.
  */
@@ -32,7 +32,7 @@ export interface ValidatedSession {
 export class SessionValidatorService {
   constructor(
     private readonly authContext: AuthContextService,
-    private readonly csrfValidator: CsrfValidationService,
+    private readonly csrf: CsrfService,
   ) {}
 
   async validate(token: string, req: Request, authType: AuthType): Promise<ValidatedSession> {
@@ -52,7 +52,7 @@ export class SessionValidatorService {
     }
 
     if (authType === 'cookie') {
-      this.csrfValidator.validate(req, session.csrfSecret ?? token);
+      this.csrf.validateRequest(req, session.csrfSecret);
     }
 
     return { session, user, roles };

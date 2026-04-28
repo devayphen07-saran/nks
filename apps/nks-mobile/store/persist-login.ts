@@ -41,7 +41,7 @@ export async function persistLogin(
 
     // Validate refresh token format (Issue 9.2)
     const refreshTokenCheck = validateRefreshTokenFormat(
-      authResponse.session?.refreshToken,
+      authResponse.auth?.refreshToken,
     );
     if (!refreshTokenCheck.isValid) {
       throw new Error(`Refresh token invalid: ${refreshTokenCheck.error}`);
@@ -65,10 +65,10 @@ export async function persistLogin(
     // ════════════════════════════════════════════════════════════════════════════
     // IN-MEMORY: Set the session token for immediate use
     // ════════════════════════════════════════════════════════════════════════════
-    const sessionToken = authResponse.session.sessionToken;
-    if (!sessionTokenReg.test(sessionToken)) {
+    const sessionToken = authResponse.auth.sessionToken;
+    if (!sessionToken || !sessionTokenReg.test(sessionToken)) {
       throw new Error(
-        `Session token format invalid: length ${sessionToken.length}`,
+        `Session token missing or format invalid: length ${sessionToken?.length ?? 0}`,
       );
     }
     tokenManager.set(sessionToken);
@@ -80,9 +80,9 @@ export async function persistLogin(
     // ════════════════════════════════════════════════════════════════════════════
     // Persist dual tokens (accessToken, offlineToken, refreshToken) into JWTManager
     const jwtPersistPromise = (async () => {
-      const accessToken = authResponse.session?.jwtToken;
-      const offlineToken = authResponse.offlineToken;
-      const refreshToken = authResponse.session?.refreshToken;
+      const accessToken = authResponse.auth?.accessToken;
+      const offlineToken = authResponse.offline?.token;
+      const refreshToken = authResponse.auth?.refreshToken;
       if (accessToken && offlineToken && refreshToken) {
         await JWTManager.persistTokens({
           accessToken,

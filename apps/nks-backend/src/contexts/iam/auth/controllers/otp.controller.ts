@@ -11,6 +11,7 @@ import type { Request, Response } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { OtpService } from '../services/otp/otp.service';
 import { OtpAuthOrchestrator } from '../services/orchestrators/otp-auth-orchestrator.service';
+import { CsrfService } from '../../../../common/csrf.service';
 import { AuthControllerHelpers } from '../../../../common/utils/auth-helpers';
 import { SendOtpDto, VerifyOtpDto, ResendOtpDto } from '../dto/otp.dto';
 import { VerifyEmailOtpDto } from '../dto/email-verify.dto';
@@ -31,6 +32,7 @@ export class OtpController {
   constructor(
     private readonly otpService: OtpService,
     private readonly otpAuthOrchestrator: OtpAuthOrchestrator,
+    private readonly csrf: CsrfService,
   ) {}
 
   @Post('send')
@@ -58,6 +60,9 @@ export class OtpController {
     const result = await this.otpAuthOrchestrator.verifyOtpAndBuildAuthResponse(dto, deviceInfo);
 
     AuthControllerHelpers.applySessionCookie(res, result);
+    if (result.auth?.sessionToken && !AuthControllerHelpers.isMobile(deviceInfo.deviceType)) {
+      this.csrf.refresh(req, res, result.auth.sessionToken);
+    }
     return AuthControllerHelpers.forClient(result, deviceInfo.deviceType);
   }
 

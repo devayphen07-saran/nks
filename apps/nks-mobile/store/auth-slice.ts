@@ -1,5 +1,5 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
-import { AuthResponse } from "@nks/api-manager";
+import { AuthResponse, SystemRoleCodes } from "@nks/api-manager";
 export interface AuthState {
   isInitializing: boolean;
   isAuthenticated: boolean;
@@ -57,13 +57,13 @@ export const authReducer = authSlice.reducer;
  * Decoded from the jwtToken claims (roles are embedded at login time).
  */
 export const selectIsSuperAdmin = (state: { auth: AuthState }): boolean => {
-  const jwtToken = state.auth.authResponse?.session?.jwtToken;
-  if (!jwtToken) return false;
+  const accessToken = state.auth.authResponse?.auth?.accessToken;
+  if (!accessToken) return false;
   try {
     // JWT uses URL-safe Base64 (- → +, _ → /) — atob() needs standard Base64
-    const raw = jwtToken.split('.')[1];
+    const raw = accessToken.split('.')[1];
     const payload = JSON.parse(atob(raw.replace(/-/g, '+').replace(/_/g, '/'))) as { roles?: string[] };
-    return payload.roles?.includes('SUPER_ADMIN') ?? false;
+    return payload.roles?.includes(SystemRoleCodes.SUPER_ADMIN) ?? false;
   } catch {
     return false;
   }

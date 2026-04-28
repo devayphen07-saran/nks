@@ -1,5 +1,5 @@
 {
-  "id": "699421e6-4b9c-45b1-990a-d6c15d4c934a",
+  "id": "8c3f5659-080c-464f-8f9a-3ab65fbb5a7e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -16,7 +16,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -50,13 +50,20 @@
           "name": "iam_user_id",
           "type": "varchar(64)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "name": {
-          "name": "name",
+        "first_name": {
+          "name": "first_name",
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": true
+        },
+        "last_name": {
+          "name": "last_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
         },
         "email": {
           "name": "email",
@@ -169,9 +176,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "last_active_at": {
-          "name": "last_active_at",
-          "type": "timestamp with time zone",
+        "default_store_fk": {
+          "name": "default_store_fk",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },
@@ -190,10 +197,17 @@
         },
         "permissions_version": {
           "name": "permissions_version",
-          "type": "varchar(20)",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "'v1'"
+          "default": 1
+        },
+        "two_factor_enabled": {
+          "name": "two_factor_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "created_by": {
           "name": "created_by",
@@ -256,6 +270,21 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "users_default_store_idx": {
+          "name": "users_default_store_idx",
+          "columns": [
+            {
+              "expression": "default_store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -330,7 +359,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "users_modified_by_users_id_fk": {
@@ -343,7 +372,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "users_deleted_by_users_id_fk": {
@@ -356,7 +385,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -392,7 +421,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "users_contact_method_chk": {
+          "name": "users_contact_method_chk",
+          "value": "email IS NOT NULL OR phone_number IS NOT NULL"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.user_session": {
@@ -407,7 +441,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -516,9 +550,21 @@
           "primaryKey": false,
           "notNull": false
         },
+        "ip_hash": {
+          "name": "ip_hash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "role_hash": {
           "name": "role_hash",
           "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "jti": {
+          "name": "jti",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
@@ -528,12 +574,30 @@
           "primaryKey": false,
           "notNull": false
         },
+        "revoked_reason": {
+          "name": "revoked_reason",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "is_refresh_token_rotated": {
           "name": "is_refresh_token_rotated",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "last_rotated_at": {
+          "name": "last_rotated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "csrf_secret": {
+          "name": "csrf_secret",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
         }
       },
       "indexes": {
@@ -557,6 +621,36 @@
           "columns": [
             {
               "expression": "token",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "user_session_refresh_token_hash_idx": {
+          "name": "user_session_refresh_token_hash_idx",
+          "columns": [
+            {
+              "expression": "refresh_token_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "user_session_expires_at_idx": {
+          "name": "user_session_expires_at_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -650,7 +744,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -820,7 +914,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -881,6 +975,12 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": false
+        },
+        "req_id": {
+          "name": "req_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -932,7 +1032,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -962,7 +1062,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -997,6 +1097,25 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
+        },
+        "last_attempt_at": {
+          "name": "last_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "consecutive_failures": {
+          "name": "consecutive_failures",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
         }
       },
       "indexes": {
@@ -1005,6 +1124,21 @@
           "columns": [
             {
               "expression": "identifier_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "otp_request_log_expires_at_idx": {
+          "name": "otp_request_log_expires_at_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1043,7 +1177,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -1110,6 +1244,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -1266,6 +1406,36 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "urm_expires_at_idx": {
+          "name": "urm_expires_at_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "urm_assigned_by_idx": {
+          "name": "urm_assigned_by_idx",
+          "columns": [
+            {
+              "expression": "assigned_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1348,7 +1518,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -1436,12 +1606,6 @@
         },
         "registration_number": {
           "name": "registration_number",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "tax_number": {
-          "name": "tax_number",
           "type": "varchar(100)",
           "primaryKey": false,
           "notNull": false
@@ -1534,6 +1698,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "store_parent_store_idx": {
+          "name": "store_parent_store_idx",
+          "columns": [
+            {
+              "expression": "parent_store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1547,7 +1726,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "store_store_legal_type_fk_store_legal_type_id_fk": {
@@ -1612,7 +1791,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "store_modified_by_users_id_fk": {
@@ -1625,7 +1804,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "store_deleted_by_users_id_fk": {
@@ -1638,7 +1817,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -1687,7 +1866,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -1857,10 +2036,10 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "store_user_mapping_designation_fk_code_value_id_fk": {
-          "name": "store_user_mapping_designation_fk_code_value_id_fk",
+        "store_user_mapping_designation_fk_designation_type_id_fk": {
+          "name": "store_user_mapping_designation_fk_designation_type_id_fk",
           "tableFrom": "store_user_mapping",
-          "tableTo": "code_value",
+          "tableTo": "designation_type",
           "columnsFrom": [
             "designation_fk"
           ],
@@ -1921,7 +2100,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "store_user_mapping_active_deleted_consistency": {
+          "name": "store_user_mapping_active_deleted_consistency",
+          "value": "NOT (is_active = true AND deleted_at IS NOT NULL)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.store_documents": {
@@ -1936,7 +2120,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -2121,7 +2305,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "store_documents_modified_by_users_id_fk": {
@@ -2134,7 +2318,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "store_documents_deleted_by_users_id_fk": {
@@ -2147,7 +2331,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -2162,7 +2346,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "store_documents_verified_requires_url": {
+          "name": "store_documents_verified_requires_url",
+          "value": "NOT (is_verified = true AND document_url IS NULL)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.store_operating_hours": {
@@ -2177,7 +2366,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -2382,7 +2571,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "store_operating_hours_modified_by_users_id_fk": {
@@ -2395,7 +2584,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "store_operating_hours_deleted_by_users_id_fk": {
@@ -2408,7 +2597,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -2452,7 +2641,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -2668,7 +2857,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "roles_modified_by_users_id_fk": {
@@ -2681,7 +2870,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "roles_deleted_by_users_id_fk": {
@@ -2694,7 +2883,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -2724,7 +2913,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -2834,6 +3023,26 @@
           "notNull": true,
           "default": false
         },
+        "enable": {
+          "name": "enable",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "entity_type_fk": {
+          "name": "entity_type_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "default_action": {
+          "name": "default_action",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'view'"
+        },
         "created_by": {
           "name": "created_by",
           "type": "bigint",
@@ -2875,6 +3084,38 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "routes_entity_type_idx": {
+          "name": "routes_entity_type_idx",
+          "columns": [
+            {
+              "expression": "entity_type_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "entity_type_fk IS NOT NULL AND deleted_at IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "routes_parent_route_fk_idx": {
+          "name": "routes_parent_route_fk_idx",
+          "columns": [
+            {
+              "expression": "parent_route_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "parent_route_fk IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2884,6 +3125,19 @@
           "tableTo": "routes",
           "columnsFrom": [
             "parent_route_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "routes_entity_type_fk_entity_type_id_fk": {
+          "name": "routes_entity_type_fk_entity_type_id_fk",
+          "tableFrom": "routes",
+          "tableTo": "entity_type",
+          "columnsFrom": [
+            "entity_type_fk"
           ],
           "columnsTo": [
             "id"
@@ -2901,7 +3155,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "routes_modified_by_users_id_fk": {
@@ -2914,7 +3168,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "routes_deleted_by_users_id_fk": {
@@ -2927,7 +3181,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -2942,7 +3196,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "routes_deleted_must_be_disabled": {
+          "name": "routes_deleted_must_be_disabled",
+          "value": "NOT (deleted_at IS NOT NULL AND enable = true)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.role_route_mapping": {
@@ -3100,11 +3359,20 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "role_route_mapping_no_allow_deny_conflict": {
+          "name": "role_route_mapping_no_allow_deny_conflict",
+          "value": "NOT (allow = true AND deny = true)"
+        },
+        "role_route_mapping_crud_requires_allow": {
+          "name": "role_route_mapping_crud_requires_allow",
+          "value": "allow = true OR (can_view = false AND can_create = false AND can_edit = false AND can_delete = false AND can_export = false)"
+        }
+      },
       "isRLSEnabled": false
     },
-    "public.role_entity_permission": {
-      "name": "role_entity_permission",
+    "public.permission_action": {
+      "name": "permission_action",
       "schema": "",
       "columns": {
         "id": {
@@ -3115,7 +3383,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -3165,6 +3433,165 @@
           "notNull": true,
           "default": false
         },
+        "code": {
+          "name": "code",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by": {
+          "name": "modified_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_by": {
+          "name": "deleted_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "permission_action_active_idx": {
+          "name": "permission_action_active_idx",
+          "columns": [
+            {
+              "expression": "is_active",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "is_active = true AND deleted_at IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "permission_action_created_by_users_id_fk": {
+          "name": "permission_action_created_by_users_id_fk",
+          "tableFrom": "permission_action",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "permission_action_modified_by_users_id_fk": {
+          "name": "permission_action_modified_by_users_id_fk",
+          "tableFrom": "permission_action",
+          "tableTo": "users",
+          "columnsFrom": [
+            "modified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "permission_action_deleted_by_users_id_fk": {
+          "name": "permission_action_deleted_by_users_id_fk",
+          "tableFrom": "permission_action",
+          "tableTo": "users",
+          "columnsFrom": [
+            "deleted_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "permission_action_guuid_unique": {
+          "name": "permission_action_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        },
+        "permission_action_code_unique": {
+          "name": "permission_action_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.role_permissions": {
+      "name": "role_permissions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "role_fk": {
           "name": "role_fk",
           "type": "bigint",
@@ -3177,29 +3604,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "can_view": {
-          "name": "can_view",
-          "type": "boolean",
+        "action_fk": {
+          "name": "action_fk",
+          "type": "bigint",
           "primaryKey": false,
-          "notNull": true,
-          "default": false
+          "notNull": true
         },
-        "can_create": {
-          "name": "can_create",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "can_edit": {
-          "name": "can_edit",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "can_delete": {
-          "name": "can_delete",
+        "allowed": {
+          "name": "allowed",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
@@ -3214,8 +3626,24 @@
         }
       },
       "indexes": {
-        "role_entity_permission_role_entity_idx": {
-          "name": "role_entity_permission_role_entity_idx",
+        "role_permissions_role_idx": {
+          "name": "role_permissions_role_idx",
+          "columns": [
+            {
+              "expression": "role_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "is_active = true AND deleted_at IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "role_permissions_role_entity_idx": {
+          "name": "role_permissions_role_entity_idx",
           "columns": [
             {
               "expression": "role_fk",
@@ -3231,60 +3659,16 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "role_entity_permission_role_idx": {
-          "name": "role_entity_permission_role_idx",
-          "columns": [
-            {
-              "expression": "role_fk",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "role_entity_permission_entity_idx": {
-          "name": "role_entity_permission_entity_idx",
-          "columns": [
-            {
-              "expression": "entity_type_fk",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "role_entity_permission_active_idx": {
-          "name": "role_entity_permission_active_idx",
-          "columns": [
-            {
-              "expression": "is_active",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
+          "where": "is_active = true AND deleted_at IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
         }
       },
       "foreignKeys": {
-        "role_entity_permission_role_fk_roles_id_fk": {
-          "name": "role_entity_permission_role_fk_roles_id_fk",
-          "tableFrom": "role_entity_permission",
+        "role_permissions_role_fk_roles_id_fk": {
+          "name": "role_permissions_role_fk_roles_id_fk",
+          "tableFrom": "role_permissions",
           "tableTo": "roles",
           "columnsFrom": [
             "role_fk"
@@ -3295,12 +3679,25 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "role_entity_permission_entity_type_fk_entity_type_id_fk": {
-          "name": "role_entity_permission_entity_type_fk_entity_type_id_fk",
-          "tableFrom": "role_entity_permission",
+        "role_permissions_entity_type_fk_entity_type_id_fk": {
+          "name": "role_permissions_entity_type_fk_entity_type_id_fk",
+          "tableFrom": "role_permissions",
           "tableTo": "entity_type",
           "columnsFrom": [
             "entity_type_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "role_permissions_action_fk_permission_action_id_fk": {
+          "name": "role_permissions_action_fk_permission_action_id_fk",
+          "tableFrom": "role_permissions",
+          "tableTo": "permission_action",
+          "columnsFrom": [
+            "action_fk"
           ],
           "columnsTo": [
             "id"
@@ -3311,24 +3708,30 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "role_entity_permission_guuid_unique": {
-          "name": "role_entity_permission_guuid_unique",
+        "role_permissions_guuid_unique": {
+          "name": "role_permissions_guuid_unique",
           "nullsNotDistinct": false,
           "columns": [
             "guuid"
           ]
         },
-        "role_entity_permission_unique_idx": {
-          "name": "role_entity_permission_unique_idx",
+        "role_permissions_unique_idx": {
+          "name": "role_permissions_unique_idx",
           "nullsNotDistinct": false,
           "columns": [
             "role_fk",
-            "entity_type_fk"
+            "entity_type_fk",
+            "action_fk"
           ]
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "role_permissions_no_allow_deny_conflict": {
+          "name": "role_permissions_no_allow_deny_conflict",
+          "value": "NOT (allowed = true AND deny = true)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.country": {
@@ -3343,7 +3746,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -3467,7 +3870,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "country_modified_by_users_id_fk": {
@@ -3480,7 +3883,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "country_deleted_by_users_id_fk": {
@@ -3493,7 +3896,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -3537,7 +3940,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -3682,7 +4085,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "state_modified_by_users_id_fk": {
@@ -3695,7 +4098,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "state_deleted_by_users_id_fk": {
@@ -3708,7 +4111,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -3738,7 +4141,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -3900,7 +4303,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "district_modified_by_users_id_fk": {
@@ -3913,7 +4316,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "district_deleted_by_users_id_fk": {
@@ -3926,7 +4329,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -3956,7 +4359,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -4030,15 +4433,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "state_fk": {
-          "name": "state_fk",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
         "latitude": {
           "name": "latitude",
-          "type": "numeric(10, 7)",
+          "type": "numeric(9, 7)",
           "primaryKey": false,
           "notNull": false
         },
@@ -4098,21 +4495,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "pincode_state_idx": {
-          "name": "pincode_state_idx",
-          "columns": [
-            {
-              "expression": "state_fk",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -4122,19 +4504,6 @@
           "tableTo": "district",
           "columnsFrom": [
             "district_fk"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "pincode_state_fk_state_id_fk": {
-          "name": "pincode_state_fk_state_id_fk",
-          "tableFrom": "pincode",
-          "tableTo": "state",
-          "columnsFrom": [
-            "state_fk"
           ],
           "columnsTo": [
             "id"
@@ -4152,7 +4521,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "pincode_modified_by_users_id_fk": {
@@ -4165,7 +4534,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "pincode_deleted_by_users_id_fk": {
@@ -4178,7 +4547,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -4208,7 +4577,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -4292,7 +4661,7 @@
           "name": "city_name",
           "type": "varchar(150)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "state_fk": {
           "name": "state_fk",
@@ -4621,7 +4990,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "address_modified_by_users_id_fk": {
@@ -4634,7 +5003,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "address_deleted_by_users_id_fk": {
@@ -4647,7 +5016,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -4677,7 +5046,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -4749,7 +5118,7 @@
           "name": "is_shipping_applicable",
           "type": "boolean",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": true
         },
         "created_by": {
@@ -4783,7 +5152,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "address_type_modified_by_users_id_fk": {
@@ -4796,7 +5165,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "address_type_deleted_by_users_id_fk": {
@@ -4809,7 +5178,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -4846,7 +5215,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -5092,7 +5461,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "commodity_codes_modified_by_users_id_fk": {
@@ -5105,7 +5474,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "commodity_codes_deleted_by_users_id_fk": {
@@ -5118,7 +5487,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -5148,7 +5517,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -5303,7 +5672,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_agencies_modified_by_users_id_fk": {
@@ -5316,7 +5685,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_agencies_deleted_by_users_id_fk": {
@@ -5329,7 +5698,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -5366,7 +5735,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -5515,7 +5884,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_names_modified_by_users_id_fk": {
@@ -5528,7 +5897,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_names_deleted_by_users_id_fk": {
@@ -5541,7 +5910,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -5578,7 +5947,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -5755,7 +6124,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_levels_modified_by_users_id_fk": {
@@ -5768,7 +6137,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_levels_deleted_by_users_id_fk": {
@@ -5781,7 +6150,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -5956,7 +6325,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -6291,7 +6660,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_registrations_modified_by_users_id_fk": {
@@ -6304,7 +6673,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_registrations_deleted_by_users_id_fk": {
@@ -6317,7 +6686,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -6352,7 +6721,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -6451,7 +6820,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_registration_type_modified_by_users_id_fk": {
@@ -6464,7 +6833,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_registration_type_deleted_by_users_id_fk": {
@@ -6477,7 +6846,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -6514,7 +6883,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -6619,7 +6988,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_filing_frequency_modified_by_users_id_fk": {
@@ -6632,7 +7001,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_filing_frequency_deleted_by_users_id_fk": {
@@ -6645,7 +7014,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -6682,7 +7051,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -6781,7 +7150,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_line_status_modified_by_users_id_fk": {
@@ -6794,7 +7163,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_line_status_deleted_by_users_id_fk": {
@@ -6807,7 +7176,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -6844,7 +7213,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -6945,13 +7314,13 @@
         },
         "effective_from": {
           "name": "effective_from",
-          "type": "date",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
         },
         "effective_to": {
           "name": "effective_to",
-          "type": "date",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -7099,7 +7468,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_rate_master_modified_by_users_id_fk": {
@@ -7112,7 +7481,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "tax_rate_master_deleted_by_users_id_fk": {
@@ -7125,7 +7494,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -7172,7 +7541,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -7443,7 +7812,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "daily_tax_summary_modified_by_users_id_fk": {
@@ -7456,7 +7825,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "daily_tax_summary_deleted_by_users_id_fk": {
@@ -7469,7 +7838,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -7941,7 +8310,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -8057,7 +8426,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "code_category_modified_by_users_id_fk": {
@@ -8070,7 +8439,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "code_category_deleted_by_users_id_fk": {
@@ -8083,7 +8452,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -8113,7 +8482,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -8331,7 +8700,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "code_value_modified_by_users_id_fk": {
@@ -8344,7 +8713,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "code_value_deleted_by_users_id_fk": {
@@ -8357,7 +8726,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -8368,6 +8737,72 @@
           "nullsNotDistinct": false,
           "columns": [
             "guuid"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lookup_type": {
+      "name": "lookup_type",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar(150)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "has_table": {
+          "name": "has_table",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "is_custom_table": {
+          "name": "is_custom_table",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "lookup_type_code_unique": {
+          "name": "lookup_type_code_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "code"
           ]
         }
       },
@@ -8387,7 +8822,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -8437,6 +8872,12 @@
           "notNull": true,
           "default": false
         },
+        "lookup_type_fk": {
+          "name": "lookup_type_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
         "code": {
           "name": "code",
           "type": "varchar(30)",
@@ -8474,8 +8915,37 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "lookup_type_fk_idx": {
+          "name": "lookup_type_fk_idx",
+          "columns": [
+            {
+              "expression": "lookup_type_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
+        "lookup_lookup_type_fk_lookup_type_id_fk": {
+          "name": "lookup_lookup_type_fk_lookup_type_id_fk",
+          "tableFrom": "lookup",
+          "tableTo": "lookup_type",
+          "columnsFrom": [
+            "lookup_type_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
         "lookup_created_by_users_id_fk": {
           "name": "lookup_created_by_users_id_fk",
           "tableFrom": "lookup",
@@ -8486,7 +8956,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "lookup_modified_by_users_id_fk": {
@@ -8499,7 +8969,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "lookup_deleted_by_users_id_fk": {
@@ -8512,7 +8982,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -8549,7 +9019,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -8648,7 +9118,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "salutation_type_modified_by_users_id_fk": {
@@ -8661,7 +9131,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "salutation_type_deleted_by_users_id_fk": {
@@ -8674,7 +9144,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -8711,7 +9181,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -8822,7 +9292,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "designation_type_modified_by_users_id_fk": {
@@ -8835,7 +9305,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "designation_type_deleted_by_users_id_fk": {
@@ -8848,7 +9318,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -8885,7 +9355,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -8984,7 +9454,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "store_legal_type_modified_by_users_id_fk": {
@@ -8997,7 +9467,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "store_legal_type_deleted_by_users_id_fk": {
@@ -9010,7 +9480,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -9047,7 +9517,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -9146,7 +9616,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "store_category_modified_by_users_id_fk": {
@@ -9159,7 +9629,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "store_category_deleted_by_users_id_fk": {
@@ -9172,7 +9642,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -9209,7 +9679,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -9320,7 +9790,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "communication_type_modified_by_users_id_fk": {
@@ -9333,7 +9803,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "communication_type_deleted_by_users_id_fk": {
@@ -9346,7 +9816,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -9383,7 +9853,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -9482,7 +9952,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "contact_person_type_modified_by_users_id_fk": {
@@ -9495,7 +9965,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "contact_person_type_deleted_by_users_id_fk": {
@@ -9508,7 +9978,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -9545,7 +10015,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -9644,7 +10114,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "notes_type_modified_by_users_id_fk": {
@@ -9657,7 +10127,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "notes_type_deleted_by_users_id_fk": {
@@ -9670,7 +10140,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -9714,7 +10184,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -9846,7 +10316,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "volumes_modified_by_users_id_fk": {
@@ -9859,7 +10329,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "volumes_deleted_by_users_id_fk": {
@@ -9872,7 +10342,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -9925,7 +10395,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -10024,7 +10494,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "currency_modified_by_users_id_fk": {
@@ -10037,7 +10507,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "currency_deleted_by_users_id_fk": {
@@ -10050,7 +10520,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -10087,7 +10557,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -10192,7 +10662,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "billing_frequency_modified_by_users_id_fk": {
@@ -10205,7 +10675,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "billing_frequency_deleted_by_users_id_fk": {
@@ -10218,7 +10688,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -10255,7 +10725,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -10354,7 +10824,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "plan_type_modified_by_users_id_fk": {
@@ -10367,7 +10837,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "plan_type_deleted_by_users_id_fk": {
@@ -10380,7 +10850,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -10417,7 +10887,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -10485,6 +10955,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "parent_entity_type_fk": {
+          "name": "parent_entity_type_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "default_allow": {
+          "name": "default_allow",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "bigint",
@@ -10506,6 +10989,19 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "entity_type_parent_entity_type_fk_entity_type_id_fk": {
+          "name": "entity_type_parent_entity_type_fk_entity_type_id_fk",
+          "tableFrom": "entity_type",
+          "tableTo": "entity_type",
+          "columnsFrom": [
+            "parent_entity_type_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
         "entity_type_created_by_users_id_fk": {
           "name": "entity_type_created_by_users_id_fk",
           "tableFrom": "entity_type",
@@ -10516,7 +11012,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "entity_type_modified_by_users_id_fk": {
@@ -10529,7 +11025,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "entity_type_deleted_by_users_id_fk": {
@@ -10542,7 +11038,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -10579,7 +11075,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -10706,7 +11202,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "notification_status_modified_by_users_id_fk": {
@@ -10719,7 +11215,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "notification_status_deleted_by_users_id_fk": {
@@ -10732,7 +11228,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -10769,7 +11265,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -10837,11 +11333,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "is_pending": {
+          "name": "is_pending",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "is_terminal": {
           "name": "is_terminal",
           "type": "boolean",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": false
         },
         "created_by": {
@@ -10875,7 +11378,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "staff_invite_status_modified_by_users_id_fk": {
@@ -10888,7 +11391,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "staff_invite_status_deleted_by_users_id_fk": {
@@ -10901,7 +11404,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -10938,7 +11441,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -11173,7 +11676,6 @@
             }
           ],
           "isUnique": false,
-          "where": "status_fk IN (SELECT id FROM notification_status WHERE code IN ('PENDING', 'FAILED'))",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -11287,7 +11789,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -11399,7 +11901,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -11563,7 +12065,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -11771,6 +12273,19 @@
         }
       },
       "foreignKeys": {
+        "entity_status_mapping_entity_code_entity_type_code_fk": {
+          "name": "entity_status_mapping_entity_code_entity_type_code_fk",
+          "tableFrom": "entity_status_mapping",
+          "tableTo": "entity_type",
+          "columnsFrom": [
+            "entity_code"
+          ],
+          "columnsTo": [
+            "code"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
         "entity_status_mapping_status_fk_status_id_fk": {
           "name": "entity_status_mapping_status_fk_status_id_fk",
           "tableFrom": "entity_status_mapping",
@@ -11812,7 +12327,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -11936,7 +12451,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "status_modified_by_users_id_fk": {
@@ -11949,7 +12464,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "status_deleted_by_users_id_fk": {
@@ -11962,7 +12477,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -11999,7 +12514,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -12092,7 +12607,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "entity_modified_by_users_id_fk": {
@@ -12105,7 +12620,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "entity_deleted_by_users_id_fk": {
@@ -12118,7 +12633,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -12155,7 +12670,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -12389,6 +12904,36 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "communication_email_idx": {
+          "name": "communication_email_idx",
+          "columns": [
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "communication_phone_idx": {
+          "name": "communication_phone_idx",
+          "columns": [
+            {
+              "expression": "phone_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -12441,7 +12986,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "communication_modified_by_users_id_fk": {
@@ -12454,7 +12999,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "communication_deleted_by_users_id_fk": {
@@ -12467,7 +13012,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -12510,7 +13055,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -12764,7 +13309,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "contact_person_modified_by_users_id_fk": {
@@ -12777,7 +13322,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "contact_person_deleted_by_users_id_fk": {
@@ -12790,7 +13335,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -12805,7 +13350,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "contact_person_designation_required": {
+          "name": "contact_person_designation_required",
+          "value": "designation_fk IS NOT NULL OR designation_free_text IS NOT NULL"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.notes": {
@@ -12820,7 +13370,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -13040,7 +13590,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "notes_modified_by_users_id_fk": {
@@ -13053,7 +13603,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "notes_deleted_by_users_id_fk": {
@@ -13066,7 +13616,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -13096,7 +13646,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -13186,6 +13736,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "is_pending": {
+          "name": "is_pending",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
         "created_by": {
           "name": "created_by",
           "type": "bigint",
@@ -13223,7 +13780,7 @@
             }
           ],
           "isUnique": true,
-          "where": "status_fk = (SELECT id FROM staff_invite_status WHERE code = 'PENDING') AND deleted_at IS NULL",
+          "where": "is_pending = true AND deleted_at IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -13318,7 +13875,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "staff_invite_modified_by_users_id_fk": {
@@ -13331,7 +13888,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "staff_invite_deleted_by_users_id_fk": {
@@ -13344,7 +13901,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -13381,7 +13938,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -13514,11 +14071,57 @@
         }
       },
       "indexes": {
+        "plans_is_more_popular_unique_idx": {
+          "name": "plans_is_more_popular_unique_idx",
+          "columns": [
+            {
+              "expression": "is_more_popular",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "is_more_popular = true AND deleted_at IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "plans_plan_type_idx": {
           "name": "plans_plan_type_idx",
           "columns": [
             {
               "expression": "plan_type_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "plans_allow_to_upgrade_idx": {
+          "name": "plans_allow_to_upgrade_idx",
+          "columns": [
+            {
+              "expression": "allow_to_upgrade_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "plans_allow_to_downgrade_idx": {
+          "name": "plans_allow_to_downgrade_idx",
+          "columns": [
+            {
+              "expression": "allow_to_downgrade_fk",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -13580,7 +14183,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "plans_modified_by_users_id_fk": {
@@ -13593,7 +14196,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "plans_deleted_by_users_id_fk": {
@@ -13606,7 +14209,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -13652,7 +14255,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -13764,7 +14367,53 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "plan_price_plan_fk_idx": {
+          "name": "plan_price_plan_fk_idx",
+          "columns": [
+            {
+              "expression": "plan_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "plan_price_currency_fk_idx": {
+          "name": "plan_price_currency_fk_idx",
+          "columns": [
+            {
+              "expression": "currency_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "plan_price_frequency_fk_idx": {
+          "name": "plan_price_frequency_fk_idx",
+          "columns": [
+            {
+              "expression": "frequency_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "plan_price_plan_fk_plans_id_fk": {
           "name": "plan_price_plan_fk_plans_id_fk",
@@ -13815,7 +14464,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "plan_price_modified_by_users_id_fk": {
@@ -13828,7 +14477,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "plan_price_deleted_by_users_id_fk": {
@@ -13841,7 +14490,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -13871,7 +14520,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -13939,15 +14588,22 @@
           "primaryKey": false,
           "notNull": true
         },
+        "is_current": {
+          "name": "is_current",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "first_invoice_recorded_at": {
           "name": "first_invoice_recorded_at",
-          "type": "date",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
         "trial_end": {
           "name": "trial_end",
-          "type": "date",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -13970,7 +14626,54 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "subscription_current_store_unique_idx": {
+          "name": "subscription_current_store_unique_idx",
+          "columns": [
+            {
+              "expression": "store_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "is_current = true AND deleted_at IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "subscription_plan_fk_idx": {
+          "name": "subscription_plan_fk_idx",
+          "columns": [
+            {
+              "expression": "plan_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "subscription_status_fk_idx": {
+          "name": "subscription_status_fk_idx",
+          "columns": [
+            {
+              "expression": "status_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "subscription_store_fk_store_id_fk": {
           "name": "subscription_store_fk_store_id_fk",
@@ -14021,7 +14724,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "subscription_modified_by_users_id_fk": {
@@ -14034,7 +14737,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "subscription_deleted_by_users_id_fk": {
@@ -14047,7 +14750,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -14077,7 +14780,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -14137,7 +14840,7 @@
           "name": "plan_price_fk",
           "type": "bigint",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "price_mode": {
           "name": "price_mode",
@@ -14148,13 +14851,13 @@
         },
         "effective_from": {
           "name": "effective_from",
-          "type": "date",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
         "effective_to": {
           "name": "effective_to",
-          "type": "date",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -14233,7 +14936,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "subscription_item_created_by_users_id_fk": {
@@ -14246,7 +14949,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "subscription_item_modified_by_users_id_fk": {
@@ -14259,7 +14962,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "subscription_item_deleted_by_users_id_fk": {
@@ -14272,7 +14975,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -14306,6 +15009,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
         },
         "user_fk": {
           "name": "user_fk",
@@ -14488,6 +15197,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "audit_logs_user_created_at_idx": {
+          "name": "audit_logs_user_created_at_idx",
+          "columns": [
+            {
+              "expression": "user_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -14532,6 +15262,84 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "audit_logs_guuid_unique": {
+          "name": "audit_logs_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.idempotency_log": {
+      "name": "idempotency_log",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "processed_at": {
+          "name": "processed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "NOW()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "NOW() + INTERVAL '7 days'"
+        }
+      },
+      "indexes": {
+        "idempotency_log_processed_idx": {
+          "name": "idempotency_log_processed_idx",
+          "columns": [
+            {
+              "expression": "processed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idempotency_log_expires_idx": {
+          "name": "idempotency_log_expires_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -14549,7 +15357,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -14605,13 +15413,6 @@
           "notNull": true,
           "default": true
         },
-        "two_factor_enabled": {
-          "name": "two_factor_enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "created_by": {
           "name": "created_by",
           "type": "bigint",
@@ -14656,7 +15457,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "user_preferences_modified_by_users_id_fk": {
@@ -14669,7 +15470,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "user_preferences_deleted_by_users_id_fk": {
@@ -14682,7 +15483,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -14719,7 +15520,7 @@
         },
         "guuid": {
           "name": "guuid",
-          "type": "varchar(255)",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -14805,7 +15606,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "system_config_modified_by_users_id_fk": {
@@ -14818,7 +15619,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "system_config_deleted_by_users_id_fk": {
@@ -14831,7 +15632,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -14862,20 +15663,41 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "bigint",
+          "type": "bigserial",
           "primaryKey": true,
+          "notNull": true
+        },
+        "guuid": {
+          "name": "guuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
           "notNull": true,
-          "identity": {
-            "type": "always",
-            "name": "files_id_seq",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "9223372036854775807",
-            "cache": "1",
-            "cycle": false
-          }
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "entity_type": {
           "name": "entity_type",
@@ -14919,29 +15741,15 @@
           "primaryKey": false,
           "notNull": false
         },
-        "is_deleted": {
-          "name": "is_deleted",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
         "created_by": {
           "name": "created_by",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true
         },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp with time zone",
+        "modified_by": {
+          "name": "modified_by",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },
@@ -15019,6 +15827,19 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
+        "files_modified_by_users_id_fk": {
+          "name": "files_modified_by_users_id_fk",
+          "tableFrom": "files",
+          "tableTo": "users",
+          "columnsFrom": [
+            "modified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
         "files_deleted_by_users_id_fk": {
           "name": "files_deleted_by_users_id_fk",
           "tableFrom": "files",
@@ -15030,6 +15851,331 @@
             "id"
           ],
           "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "files_guuid_unique": {
+          "name": "files_guuid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "guuid"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.rate_limit_entries": {
+      "name": "rate_limit_entries",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "hits": {
+          "name": "hits",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "window_start": {
+          "name": "window_start",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "rate_limit_entries_expires_at_idx": {
+          "name": "rate_limit_entries_expires_at_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.jti_blocklist": {
+      "name": "jti_blocklist",
+      "schema": "",
+      "columns": {
+        "jti": {
+          "name": "jti",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "jti_blocklist_expires_idx": {
+          "name": "jti_blocklist_expires_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.permissions_changelog": {
+      "name": "permissions_changelog",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "permissions_changelog_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "user_fk": {
+          "name": "user_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_number": {
+          "name": "version_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_code": {
+          "name": "entity_code",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operation": {
+          "name": "operation",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "permissions_changelog_user_version_idx": {
+          "name": "permissions_changelog_user_version_idx",
+          "columns": [
+            {
+              "expression": "user_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "version_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "permissions_changelog_user_fk_users_id_fk": {
+          "name": "permissions_changelog_user_fk_users_id_fk",
+          "tableFrom": "permissions_changelog",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.revoked_devices": {
+      "name": "revoked_devices",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "revoked_devices_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "user_fk": {
+          "name": "user_fk",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "revoked_by": {
+          "name": "revoked_by",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "revoked_devices_user_device_idx": {
+          "name": "revoked_devices_user_device_idx",
+          "columns": [
+            {
+              "expression": "user_fk",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "revoked_devices_revoked_at_idx": {
+          "name": "revoked_devices_revoked_at_idx",
+          "columns": [
+            {
+              "expression": "revoked_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "revoked_devices_user_fk_users_id_fk": {
+          "name": "revoked_devices_user_fk_users_id_fk",
+          "tableFrom": "revoked_devices",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_fk"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "revoked_devices_revoked_by_users_id_fk": {
+          "name": "revoked_devices_revoked_by_users_id_fk",
+          "tableFrom": "revoked_devices",
+          "tableTo": "users",
+          "columnsFrom": [
+            "revoked_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

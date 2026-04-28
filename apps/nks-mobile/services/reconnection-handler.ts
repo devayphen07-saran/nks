@@ -148,7 +148,7 @@ export async function handleReconnection(dispatch: AppDispatch): Promise<void> {
     // ── Step 4: Sync catch-up ──────────────────────────────────────────────
     log.info("Step 4: running sync...");
     try {
-      const storeGuuid = envelope?.data?.session?.defaultStore?.guuid;
+      const storeGuuid = envelope?.data?.context?.defaultStoreGuuid;
 
       if (storeGuuid) {
         await runSync(storeGuuid);

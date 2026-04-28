@@ -28,6 +28,7 @@ import { StoresModule } from '../../organization/stores/stores.module';
     TransactionService,
   ],
   exports: [
+    StoresModule,
     RolesService,
     RolesRepository,
     PermissionsRepository,

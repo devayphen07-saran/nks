@@ -104,7 +104,7 @@ export class SessionService {
   async invalidateSessionByToken(token: string): Promise<void> {
     const session = await this.sessionsRepository.findByToken(token);
     if (!session) return;
-    await this.sessionsRepository.revokeAndDeleteSession(session.id, 'LOGOUT', session.jti ?? undefined);
+    await this.sessionsRepository.revokeSession(session.id, 'LOGOUT', session.jti ?? undefined);
   }
 
   async terminateSession(userId: number, sessionGuuid: string): Promise<void> {
@@ -112,7 +112,7 @@ export class SessionService {
     if (!session) return;
 
     SessionAuthValidator.assertSessionBelongsToUser(session, userId);
-    await this.sessionsRepository.revokeAndDeleteSession(session.id, 'TERMINATED', session.jti ?? undefined);
+    await this.sessionsRepository.revokeSession(session.id, 'TERMINATED', session.jti ?? undefined);
 
     if (session.deviceId) {
       this.revokedDevicesRepository
@@ -133,7 +133,7 @@ export class SessionService {
    */
   async terminateAllSessions(userId: number): Promise<number> {
     const jtis = await this.sessionsRepository.findJtisByUserId(userId);
-    await this.sessionsRepository.revokeAndDeleteAllForUser(userId, 'TERMINATED', jtis);
+    await this.sessionsRepository.revokeAllForUser(userId, 'TERMINATED', jtis);
     this.logger.debug(`All sessions terminated for user ${userId} (${jtis.length} JTIs blocklisted)`);
     return jtis.length;
   }

@@ -5,8 +5,6 @@ import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from '../src/core/database/schema';
-import fs from 'fs';
-import path from 'path';
 
 import {
   seedCountries,
@@ -61,79 +59,6 @@ if (!INIT) {
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool, { schema });
 
-// Location tables are now created by Drizzle migration — no cleanup needed
-
-/**
- * Run SQL migrations from the migrations directory
- */
-async function runMigrations(client: any) {
-  const migrationsDir = path.join(
-    __dirname,
-    '..',
-    'src',
-    'core',
-    'database',
-    'migrations',
-  );
-
-  if (!fs.existsSync(migrationsDir)) {
-    return;
-  }
-
-  const migrationFiles = fs
-    .readdirSync(migrationsDir)
-    .filter((file) => file.endsWith('.sql'))
-    .sort();
-
-  if (migrationFiles.length === 0) {
-    return;
-  }
-
-  console.log('Running database migrations...\n');
-
-  for (const fileName of migrationFiles) {
-    const filePath = path.join(migrationsDir, fileName);
-    try {
-      const sql = fs.readFileSync(filePath, 'utf-8');
-      // Split by Drizzle's statement-breakpoint marker and run each statement individually
-      const statements = sql
-        .split('--> statement-breakpoint')
-        .map((s: string) => s.trim())
-        .filter(Boolean);
-      for (const stmt of statements) {
-        try {
-          await client.query(stmt);
-        } catch (stmtErr: any) {
-          // Skip "already exists" errors for individual statements
-          if (
-            stmtErr.message.includes('already exists') ||
-            stmtErr.code === '42P07' ||
-            stmtErr.code === '42701'
-          ) {
-            // Silently skip
-          } else {
-            throw stmtErr;
-          }
-        }
-      }
-      console.log(`  ${fileName}`);
-    } catch (err: any) {
-      // Skip "already exists" errors
-      if (
-        err.message.includes('already exists') ||
-        err.code === '42P07' ||
-        err.code === '42701'
-      ) {
-        console.log(`  ${fileName} (already applied)`);
-      } else {
-        console.warn(`  ${fileName}: ${err.message}`);
-      }
-    }
-  }
-
-  console.log();
-}
-
 const seeds = [
   { name: 'country', fn: seedCountries },
   { name: 'state', fn: seedStateTable },
@@ -145,10 +70,10 @@ const seeds = [
   { name: 'volumes', fn: seedVolumes },
   { name: 'entity', fn: seedEntities },
   { name: 'system_roles', fn: seedSystemRoles },
-  { name: 'entity_type',             fn: seedEntityTypes },             // ← Must run before permissions
-  { name: 'permission_actions',      fn: seedPermissionActions },        // ← Must run before permissions
-  { name: 'super_admin_permissions', fn: seedSuperAdminPermissions },    // ← Depends on system_roles + entity_type + permission_actions
-  { name: 'store_owner_permissions', fn: seedStoreOwnerPermissions },    // ← Depends on system_roles + entity_type + permission_actions
+  { name: 'entity_type', fn: seedEntityTypes }, // ← Must run before permissions
+  { name: 'permission_actions', fn: seedPermissionActions }, // ← Must run before permissions
+  { name: 'super_admin_permissions', fn: seedSuperAdminPermissions }, // ← Depends on system_roles + entity_type + permission_actions
+  { name: 'store_owner_permissions', fn: seedStoreOwnerPermissions }, // ← Depends on system_roles + entity_type + permission_actions
   { name: 'routes', fn: seedRoutes },
   { name: 'role_route_mapping', fn: seedRoleRouteMappings },
   // Lookup Tables
@@ -165,12 +90,12 @@ const seeds = [
   { name: 'plan_type', fn: seedPlanTypes },
   { name: 'tax_line_status', fn: seedTaxLineStatuses },
   // Statuses (business first so ACTIVE/CANCELED get canonical colors; subscription adds its own codes)
-  { name: 'business_statuses',     fn: seedBusinessStatuses },        // ← Must run before entity_status_mappings
+  { name: 'business_statuses', fn: seedBusinessStatuses }, // ← Must run before entity_status_mappings
   // Subscription System
   { name: 'currencies', fn: seedCurrencies },
   { name: 'subscription_status', fn: seedSubscriptionStatus },
   // Entity status mappings — runs after all status seeds
-  { name: 'entity_status_mappings', fn: seedEntityStatusMappings },   // ← Depends on business_statuses + subscription_status
+  { name: 'entity_status_mappings', fn: seedEntityStatusMappings }, // ← Depends on business_statuses + subscription_status
   // Tax Engine (runs after country — tax_agencies references country)
   { name: 'tax_agencies', fn: seedTaxAgencies },
   { name: 'tax_names', fn: seedTaxNames },
@@ -182,13 +107,6 @@ const seeds = [
 ];
 
 async function seed() {
-  const client = await pool.connect();
-
-  // Run migrations first
-  await runMigrations(client);
-
-  client.release();
-
   console.log('Starting seed...\n');
   let success = 0;
   let failed = 0;

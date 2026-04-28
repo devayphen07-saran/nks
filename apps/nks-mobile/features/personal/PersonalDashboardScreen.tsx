@@ -92,7 +92,7 @@ export function PersonalDashboardScreen() {
         title="Personal"
         leftElement={
           <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.7}>
-            <Avatar initials={user?.name ?? "U"} size={36} />
+            <Avatar initials={(user?.firstName?.[0] ?? "") + (user?.lastName?.[0] ?? "") || "U"} size={36} />
           </TouchableOpacity>
         }
         rightElement={

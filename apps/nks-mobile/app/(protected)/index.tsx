@@ -8,7 +8,7 @@ import { ROUTES } from '../../lib/navigation/routes';
 export default function ProtectedIndex() {
   const authState = useAuthState();
   const isSuperAdmin = useSelector((state: RootState) => selectIsSuperAdmin(state));
-  const defaultStore = authState.authResponse?.session?.defaultStore;
+  const defaultStore = authState.authResponse?.context?.defaultStoreGuuid;
 
   // Mobile app is for store users only — block SUPER_ADMIN accounts
   if (isSuperAdmin) {

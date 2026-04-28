@@ -3,15 +3,17 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { AppValidationPipe } from './common/pipes';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { ApiVersionMiddleware, CsrfMiddleware, CsrfTokenService } from './common/middleware';
+import { ApiVersionMiddleware, CsrfMiddleware } from './common/middleware';
 import { TimeoutInterceptor, ResponseInterceptor, LoggingInterceptor, SessionRotationInterceptor } from './common/interceptors';
-import { CsrfValidationService } from './common/guards/services/csrf-validation.service';
+import { CsrfService } from './common/csrf.service';
+import { SessionRotationService } from './common/interceptors/session-rotation.service';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './core/database/database.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RateLimitingGuard } from './common/guards/rate-limiting.guard';
 import { GuardsModule } from './common/guards/guards.module';
+import { RateLimitingModule } from './common/guards/rate-limiting.module';
 import { AuthModule } from './contexts/iam/auth/auth.module';
 import { RolesModule } from './contexts/iam/roles/roles.module';
 import { RoutesModule } from './contexts/iam/routes/routes.module';
@@ -59,6 +61,7 @@ import { HealthModule } from './core/health/health.module';
     DatabaseModule,
     HealthModule,
     GuardsModule,
+    RateLimitingModule,
     LoggerModule,
     AuditModule,
     PermissionsChangelogModule,
@@ -91,8 +94,8 @@ import { HealthModule } from './core/health/health.module';
      * can remove it — the global guard makes it redundant. Controllers
      * using @UseGuards(AuthGuard, RBACGuard) should slim to @UseGuards(RBACGuard).
      */
-    CsrfTokenService,
-    CsrfValidationService,
+    CsrfService,
+    SessionRotationService,
     { provide: APP_FILTER,      useClass: GlobalExceptionFilter },
     { provide: APP_PIPE,        useClass: AppValidationPipe },
     { provide: APP_GUARD,       useClass: AuthGuard },

@@ -1,32 +1,17 @@
-export type RoleCode = 'STORE_OWNER' | 'MANAGER' | 'CASHIER' | 'DELIVERY' | 'CUSTOMER';
-
+/**
+ * Drawer menu types — shape only.
+ *
+ * Menu items are NOT statically mapped to role codes here.
+ * They are provided at runtime by the backend routes API
+ * (GET /routes/store/:storeId/routes) which returns the exact
+ * screens the authenticated user can access based on their DB-stored
+ * role and permission assignments.
+ *
+ * No role code union, no static ROLE_MENU_MAP — adding a new role or
+ * changing which screens it can access is a DB-only operation.
+ */
 export interface MenuItem {
   label: string;
   iconName: string;
   route: string;
 }
-
-export const ROLE_MENU_MAP: Record<RoleCode, MenuItem[]> = {
-  STORE_OWNER: [
-    { label: 'Dashboard', iconName: 'LayoutDashboard', route: 'store' },
-    { label: 'Products', iconName: 'Package', route: 'products' },
-    { label: 'Orders', iconName: 'ShoppingCart', route: 'orders' },
-    { label: 'Staff', iconName: 'Users', route: 'staff' },
-    { label: 'Settings', iconName: 'Settings', route: 'settings' },
-  ],
-  MANAGER: [
-    { label: 'Dashboard', iconName: 'LayoutDashboard', route: 'store' },
-    { label: 'Products', iconName: 'Package', route: 'products' },
-    { label: 'Orders', iconName: 'ShoppingCart', route: 'orders' },
-  ],
-  CASHIER: [
-    { label: 'POS', iconName: 'CreditCard', route: 'pos' },
-    { label: 'Orders', iconName: 'ShoppingCart', route: 'orders' },
-  ],
-  DELIVERY: [
-    { label: 'Deliveries', iconName: 'Truck', route: 'deliveries' },
-  ],
-  CUSTOMER: [
-    { label: 'Dashboard', iconName: 'LayoutDashboard', route: 'store' },
-  ],
-};

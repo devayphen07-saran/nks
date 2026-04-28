@@ -51,7 +51,7 @@ export class AuthContextService {
    * Remaining sessions are cleaned up by SessionRevocationListener off the hot path.
    */
   revokeCurrentSession(sessionId: number, reason: string, jti?: string): Promise<void> {
-    return this.sessionsRepository.revokeAndDeleteSession(sessionId, reason, jti);
+    return this.sessionsRepository.revokeSession(sessionId, reason, jti);
   }
 
   /**

@@ -16,7 +16,8 @@ export interface LoginRequest {
 }
 
 export interface RegisterRequest {
-  name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   password: string;
 }
@@ -24,34 +25,48 @@ export interface RegisterRequest {
 // ─── Response DTOs ────────────────────────────────────────────────────────────
 
 export interface AuthUserResponse {
-  id: string;
   guuid: string;
-  name: string | null;
+  iamUserId: string;
+  firstName: string | null;
+  lastName: string | null;
   email: string | null;
   phoneNumber: string | null;
 }
 
-export interface AuthSessionResponse {
+export interface AuthTokenResponse {
   sessionId: string;
-  sessionToken: string;
+  /** Populated for mobile clients (X-Device-Type: ANDROID|IOS); null for web. */
+  sessionToken: string | null;
+  tokenType: 'Bearer';
   expiresAt: string;
   refreshToken: string;
   refreshExpiresAt: string;
-  defaultStore: { id: number; guuid: string } | null;
-  jwtToken?: string;
+  accessToken?: string;
 }
 
+export interface AuthContextResponse {
+  defaultStoreGuuid: string | null;
+}
+
+export interface AuthSyncResponse {
+  cursor: string;
+  lastSyncedAt: string | null;
+  deviceId: string | null;
+}
+
+export interface AuthOfflineResponse {
+  token: string;
+  sessionSignature?: string;
+}
+
+/** @deprecated Renamed to AuthTokenResponse — update imports */
+export type AuthSessionResponse = AuthTokenResponse;
+
 export interface UserRoleEntry {
-  roleCode:
-    | "SUPER_ADMIN"
-    | "USER"
-    | "STORE_OWNER"
-    | "STAFF"
-    | "MANAGER"
-    | "CASHIER"
-    | "DELIVERY"
-    | "CUSTOMER";
+  /** Role code from the roles table — fully DB-driven, not a fixed set. */
+  roleCode: string;
   storeId: number | null;
+  storeGuuid: string | null;
   storeName: string | null;
   isPrimary: boolean;
   assignedAt: string;
@@ -106,10 +121,10 @@ export interface ApiMetadataResponse {
 
 export interface AuthResponse {
   user: AuthUserResponse;
-  session: AuthSessionResponse;
-  offlineToken?: string;
-  /** HMAC-SHA256 of the offline session payload, signed server-side. */
-  offlineSessionSignature?: string;
+  auth: AuthTokenResponse;
+  context: AuthContextResponse;
+  sync: AuthSyncResponse;
+  offline: AuthOfflineResponse | null;
 }
 
 /** Alias kept for backward compatibility with shared libs that imported AuthData. */

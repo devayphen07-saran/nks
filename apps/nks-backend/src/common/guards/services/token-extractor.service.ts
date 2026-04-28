@@ -29,8 +29,20 @@ export class TokenExtractorService {
       });
     }
 
-    if (bearer) return { token: bearer, authType: 'bearer' };
-    if (cookie) return { token: cookie, authType: 'cookie' };
+    // Cap session token length before any DB lookup — prevents hash-computation DoS
+    // on arbitrarily large inputs. Session tokens are 64-char hex; 512 is generous headroom.
+    if (bearer) {
+      if (bearer.length > 512) {
+        throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_TOKEN_INVALID, message: 'No token provided.' });
+      }
+      return { token: bearer, authType: 'bearer' };
+    }
+    if (cookie) {
+      if (cookie.length > 512) {
+        throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_TOKEN_INVALID, message: 'No token provided.' });
+      }
+      return { token: cookie, authType: 'cookie' };
+    }
 
     throw new UnauthorizedException({
       errorCode: ErrorCode.AUTH_TOKEN_INVALID,

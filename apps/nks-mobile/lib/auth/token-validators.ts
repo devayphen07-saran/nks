@@ -37,50 +37,49 @@ export function validateAuthResponse(
   }
 
   // ─── User ────────────────────────────────────────────────────────────────
-  if (!authResponse.user?.id) errors.push("user.id missing");
   if (!authResponse.user?.guuid) errors.push("user.guuid missing");
 
   // ─── Session token ────────────────────────────────────────────────────────
-  if (!authResponse.session?.sessionToken) {
-    errors.push("session.sessionToken missing");
-  } else if (!sessionTokenReg.test(authResponse.session.sessionToken)) {
+  if (!authResponse.auth?.sessionToken) {
+    errors.push("auth.sessionToken missing");
+  } else if (!sessionTokenReg.test(authResponse.auth.sessionToken)) {
     errors.push(
-      `session.sessionToken format invalid (length: ${authResponse.session.sessionToken.length})`,
+      `auth.sessionToken format invalid (length: ${authResponse.auth.sessionToken.length})`,
     );
   }
 
-  if (!authResponse.session?.sessionId)
-    errors.push("session.sessionId missing");
+  if (!authResponse.auth?.sessionId)
+    errors.push("auth.sessionId missing");
 
-  // ─── JWT token (optional) ─────────────────────────────────────────────────
-  if (authResponse.session?.jwtToken) {
-    const parts = authResponse.session.jwtToken.split(".");
+  // ─── Access token (optional) ──────────────────────────────────────────────
+  if (authResponse.auth?.accessToken) {
+    const parts = authResponse.auth.accessToken.split(".");
     if (parts.length !== 3) {
       errors.push(
-        `jwtToken format invalid: expected 3 parts, got ${parts.length}`,
+        `auth.accessToken format invalid: expected 3 parts, got ${parts.length}`,
       );
     } else if (!parts.every((p) => base64UrlReg.test(p))) {
-      errors.push("jwtToken contains invalid characters");
+      errors.push("auth.accessToken contains invalid characters");
     }
   }
 
   // ─── Offline token (optional) ─────────────────────────────────────────────
-  if (authResponse.offlineToken) {
-    const parts = authResponse.offlineToken.split(".");
+  if (authResponse.offline?.token) {
+    const parts = authResponse.offline.token.split(".");
     if (parts.length !== 3) {
       errors.push(
-        `offlineToken format invalid: expected 3 parts, got ${parts.length}`,
+        `offline.token format invalid: expected 3 parts, got ${parts.length}`,
       );
     } else if (!parts.every((p) => base64UrlReg.test(p))) {
-      errors.push("offlineToken contains invalid characters");
+      errors.push("offline.token contains invalid characters");
     }
   }
 
   // ─── Expiry timestamps ────────────────────────────────────────────────────
-  if (!authResponse.session?.expiresAt)
-    errors.push("session.expiresAt missing");
-  if (!authResponse.session?.refreshExpiresAt)
-    errors.push("session.refreshExpiresAt missing");
+  if (!authResponse.auth?.expiresAt)
+    errors.push("auth.expiresAt missing");
+  if (!authResponse.auth?.refreshExpiresAt)
+    errors.push("auth.refreshExpiresAt missing");
 
   // ─── Truncation detection (post-persistence only) ─────────────────────────
   if (

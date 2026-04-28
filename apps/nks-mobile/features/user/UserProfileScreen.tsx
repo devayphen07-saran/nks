@@ -124,7 +124,7 @@ export function UserProfileScreen() {
           <HeroHeader>
             <AvatarContainer>
               <Avatar
-                initials={user?.name?.substring(0, 2) || "U"}
+                initials={(user?.firstName?.[0] ?? "") + (user?.lastName?.[0] ?? "") || "U"}
                 size={100}
                 bgColor={theme.colorPrimary}
                 showBorder
@@ -136,7 +136,7 @@ export function UserProfileScreen() {
 
           <Content>
             <ProfileInfo align="center">
-              <Typography.H4 weight="bold">{user?.name || "N/A"}</Typography.H4>
+              <Typography.H4 weight="bold">{[user?.firstName, user?.lastName].filter(Boolean).join(" ") || "N/A"}</Typography.H4>
               <Typography.Body type="secondary">{user?.email || "Email not linked"}</Typography.Body>
             </ProfileInfo>
 

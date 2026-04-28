@@ -16,6 +16,6 @@ import { RateLimitService } from './services/rate-limit.service';
  */
 @Module({
   providers: [RateLimitingGuard, RateLimitService],
-  exports: [RateLimitingGuard],
+  exports: [RateLimitingGuard, RateLimitService],
 })
 export class RateLimitingModule {}
