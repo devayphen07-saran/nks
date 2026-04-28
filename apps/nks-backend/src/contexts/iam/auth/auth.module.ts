@@ -44,6 +44,7 @@ import { OtpRateLimitService } from './services/otp/otp-rate-limit.service';
 // Token
 import { TokenService } from './services/token/token.service';
 import { TokenLifecycleService } from './services/token/token-lifecycle.service';
+import { TokenTheftDetectionService } from './services/token/token-theft-detection.service';
 import { JtiBlocklistService } from './services/token/jti-blocklist.service';
 
 // Session
@@ -139,6 +140,7 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
     // Token
     TokenService,
     TokenLifecycleService,
+    TokenTheftDetectionService,
     JtiBlocklistService,
 
     // Session

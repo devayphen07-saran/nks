@@ -25,9 +25,7 @@ import {
   ErrorCode,
   errPayload,
 } from '../../../../../common/constants/error-codes.constants';
-import { AuditCommandService } from '../../../../compliance/audit/audit-command.service';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { SessionEvents } from '../../../../../common/events/session.events';
+import { TokenTheftDetectionService } from './token-theft-detection.service';
 
 /**
  * TokenLifecycleService
@@ -50,8 +48,7 @@ export class TokenLifecycleService {
     private readonly roleQuery: RoleQueryService,
     private readonly permissionsService: PermissionsService,
     private readonly authUtils: AuthUtilsService,
-    private readonly auditService: AuditCommandService,
-    private readonly eventEmitter: EventEmitter2,
+    private readonly tokenTheftDetectionService: TokenTheftDetectionService,
   ) {}
 
   async refreshAccessToken(
@@ -83,37 +80,8 @@ export class TokenLifecycleService {
     TokenLifecycleValidator.assertTokenHashValid(isValidToken);
 
     // Step 2b: Theft detection — if token was already rotated, terminate all sessions
-    if (session.refreshTokenRevokedAt !== null) {
-      this.logger.error(
-        `TOKEN THEFT DETECTED: User ${session.userId} reused rotated refresh token. Session ${session.id} compromised.`,
-        {
-          sessionId: session.id,
-          revokedAt: session.refreshTokenRevokedAt,
-          attemptedAt: new Date(),
-        },
-      );
-      // Emit to audit trail — structured log alone is not enough: the audit
-      // table is the security-facing record that compliance tools query.
-      this.auditService.log({
-        action: 'TOKEN_REVOKE',
-        userId: session.userId,
-        description: 'TOKEN THEFT: refresh token reused after rotation — all sessions force-terminated',
-        severity: 'critical',
-        resourceType: 'session',
-        resourceId: session.id,
-        metadata: {
-          sessionId: session.id,
-          revokedAt: session.refreshTokenRevokedAt,
-          reason: 'TOKEN_THEFT_DETECTED',
-        },
-      });
-      // Fan out full session cleanup off the hot path — the compromised session is
-      // already marked (refreshTokenRevokedAt set), so further reuse is rejected
-      // before the listener fires. Other sessions are cleaned up asynchronously.
-      this.eventEmitter.emit(SessionEvents.REVOKE_ALL_FOR_USER, {
-        userId: session.userId,
-        reason: 'TOKEN_REUSE',
-      });
+    const theftDetected = this.tokenTheftDetectionService.detectAndHandleTheft(session);
+    if (theftDetected) {
       TokenLifecycleValidator.assertNotCompromised(
         session.refreshTokenRevokedAt,
       );
