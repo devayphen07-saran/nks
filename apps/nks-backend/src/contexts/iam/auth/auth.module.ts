@@ -65,6 +65,7 @@ import { AuthPolicyService } from './services/guard/auth-policy.service';
 import { SessionRevocationListener } from './listeners/session-revocation.listener';
 
 // Flows / orchestrators
+import { AuthFlowOrchestratorService } from './services/orchestrators/auth-flow-orchestrator.service';
 import { OtpAuthOrchestrator } from './services/orchestrators/otp-auth-orchestrator.service';
 import { PasswordAuthService } from './services/flows/password-auth.service';
 import { OnboardingService } from './services/flows/onboarding.service';
@@ -157,7 +158,8 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
     // Listeners
     SessionRevocationListener,
 
-    // Flows
+    // Flows / Orchestrators
+    AuthFlowOrchestratorService,
     OtpAuthOrchestrator,
     PasswordAuthService,
     OnboardingService,

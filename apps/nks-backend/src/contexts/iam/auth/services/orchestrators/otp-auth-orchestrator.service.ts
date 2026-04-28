@@ -1,9 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { OtpService } from '../otp/otp.service';
 import { UserCreationService } from '../flows/user-creation.service';
-import { SessionCommandService } from '../session/session-command.service';
-import { TokenService } from '../token/token.service';
-import { executeAuthFlow } from './auth-flow-orchestrator.service';
+import { AuthFlowOrchestratorService } from './auth-flow-orchestrator.service';
 import { VerifyOtpDto } from '../../dto/otp.dto';
 import type { AuthResponseEnvelope } from '../../dto';
 
@@ -12,8 +10,7 @@ export class OtpAuthOrchestrator {
   constructor(
     private readonly otpService: OtpService,
     private readonly userCreationService: UserCreationService,
-    private readonly sessionService: SessionCommandService,
-    private readonly tokenService: TokenService,
+    private readonly authFlow: AuthFlowOrchestratorService,
   ) {}
 
   async verifyOtpAndBuildAuthResponse(
@@ -29,6 +26,6 @@ export class OtpAuthOrchestrator {
   ): Promise<AuthResponseEnvelope> {
     await this.otpService.verifyOtp(dto);
     const user = await this.userCreationService.findOrCreateByPhone(dto.phone);
-    return executeAuthFlow(user, deviceInfo, this.sessionService, this.tokenService);
+    return this.authFlow.execute(user, deviceInfo);
   }
 }

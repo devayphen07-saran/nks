@@ -27,9 +27,4 @@ export type PartialRoute = {
   /** Mirrors entity_type.default_allow — true means VIEW is granted without an explicit role_permissions row. Null when no entity is bound. */
   defaultAllow: boolean | null;
   hasAccess?: boolean;
-  canView?: boolean;
-  canCreate?: boolean;
-  canEdit?: boolean;
-  canDelete?: boolean;
-  canExport?: boolean;
 };

@@ -8,40 +8,27 @@ import type { SessionUser } from '../auth/interfaces/session-user.interface';
 import type { PartialRoute } from './dto/routes.interface';
 
 /**
- * Derives all capability flags from entity permissions — the single source of truth.
+ * Sets hasAccess per route from entity permissions.
  *
- * Route permissions (role_route_mapping) control only whether a route appears in
- * the navigation tree (allow = true). Capability flags are always determined by
- * role_permissions, keeping the UI and API consistent: a user who cannot call
- * the API for an entity will also see all capability flags as false for that route.
- *
- * Routes with no entity binding (entityTypeFk = null) are always accessible
- * (hasAccess: true, canView: true) — they are structural routes (dashboard,
- * settings) that have no corresponding API entity to check permissions against.
+ * Routes with no entity binding (entityTypeFk = null) are always accessible —
+ * they are structural routes (dashboard, settings) with no API entity to check.
+ * Routes with defaultAllow = true grant access without an explicit permission row.
  */
 function annotateRoutePermissions(
   routes: PartialRoute[],
   permMap: Map<number, Set<string>>,
 ): PartialRoute[] {
   return routes.map((r) => {
-    // No entity binding — structural route (dashboard, settings shell). Always accessible.
     if (r.entityTypeFk === null) {
-      return { ...r, hasAccess: true, canView: true, canCreate: false, canEdit: false, canDelete: false, canExport: false };
+      return { ...r, hasAccess: true };
     }
-    // Entity is universally readable (defaultAllow = true) — grant VIEW without an explicit role_permissions row.
-    // CRUD remains false: default-allow is blanket VIEW only, not write access.
     if (r.defaultAllow) {
-      return { ...r, hasAccess: true, canView: true, canCreate: false, canEdit: false, canDelete: false, canExport: false };
+      return { ...r, hasAccess: true };
     }
     const actions = permMap.get(r.entityTypeFk);
     return {
       ...r,
       hasAccess: actions?.has((r.defaultAction ?? 'VIEW').toUpperCase()) ?? false,
-      canView:   actions?.has('VIEW')   ?? false,
-      canCreate: actions?.has('CREATE') ?? false,
-      canEdit:   actions?.has('EDIT')   ?? false,
-      canDelete: actions?.has('DELETE') ?? false,
-      canExport: actions?.has('EXPORT') ?? false,
     };
   });
 }

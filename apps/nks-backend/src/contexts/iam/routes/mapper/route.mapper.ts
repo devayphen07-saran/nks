@@ -18,11 +18,6 @@ export class RouteMapper {
       fullPath: route.fullPath,
       sortOrder: route.sortOrder ?? 0,
       hasAccess: route.hasAccess ?? true,
-      canView: route.canView ?? false,
-      canCreate: route.canCreate ?? false,
-      canEdit: route.canEdit ?? false,
-      canDelete: route.canDelete ?? false,
-      canExport: route.canExport ?? false,
       children: [],
     };
   }

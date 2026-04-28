@@ -6,9 +6,7 @@ import { SanitizerValidator } from '../../../../../common/validators/sanitizer.v
 import { PasswordAuthValidator } from '../../validators';
 import { LoginDto, RegisterDto } from '../../dto';
 import type { AuthResponseEnvelope } from '../../dto';
-import { executeAuthFlow } from '../orchestrators/auth-flow-orchestrator.service';
-import { SessionCommandService } from '../session/session-command.service';
-import { TokenService } from '../token/token.service';
+import { AuthFlowOrchestratorService } from '../orchestrators/auth-flow-orchestrator.service';
 import { PasswordService } from '../security/password.service';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -53,8 +51,7 @@ export class PasswordAuthService {
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly passwordService: PasswordService,
-    private readonly sessionService: SessionCommandService,
-    private readonly tokenService: TokenService,
+    private readonly authFlow: AuthFlowOrchestratorService,
     private readonly roleQuery: RoleQueryService,
     private readonly roleMutation: RoleMutationService,
     private readonly auditService: AuditCommandService,
@@ -107,7 +104,7 @@ export class PasswordAuthService {
       severity: 'info',
     });
 
-    return executeAuthFlow(user, deviceInfo, this.sessionService, this.tokenService);
+    return this.authFlow.execute(user, deviceInfo);
   }
 
   async register(
@@ -154,7 +151,7 @@ export class PasswordAuthService {
       resourceId: user.id,
     });
 
-    return executeAuthFlow(user, deviceInfo, this.sessionService, this.tokenService);
+    return this.authFlow.execute(user, deviceInfo);
   }
 
   async isSuperAdminSeeded(): Promise<boolean> {

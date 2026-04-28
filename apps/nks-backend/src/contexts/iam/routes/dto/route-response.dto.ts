@@ -18,11 +18,6 @@ const RouteBaseSchema = z.object({
   fullPath: z.string().describe('Full path including parent paths'),
   sortOrder: z.number().describe('Display order'),
   hasAccess: z.boolean().describe('Entity-level permission check passed for this route'),
-  canView: z.boolean().describe('Can view this route'),
-  canCreate: z.boolean().describe('Can create within this route'),
-  canEdit: z.boolean().describe('Can edit within this route'),
-  canDelete: z.boolean().describe('Can delete within this route'),
-  canExport: z.boolean().describe('Can export within this route'),
 });
 
 // Recursive tree schema — children are the same shape

@@ -47,11 +47,6 @@ export type RouteRow = {
   defaultAction: string | null;
   defaultAllow: boolean | null;
   hasAccess?: boolean;
-  canView?: boolean;
-  canCreate?: boolean;
-  canEdit?: boolean;
-  canDelete?: boolean;
-  canExport?: boolean;
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────
