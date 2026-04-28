@@ -40,7 +40,7 @@ export class IdempotencyCleanupScheduler implements OnModuleInit, OnModuleDestro
       );
     }, intervalMs);
 
-    this.logger.info(`Idempotency cleanup scheduled every ${intervalMs}ms`);
+    this.logger.log(`Idempotency cleanup scheduled every ${intervalMs}ms`);
     // Run once on startup to clean up any backlog
     this._runCleanup().catch((err) =>
       this.logger.error('Initial idempotency cleanup failed:', err),
@@ -51,7 +51,7 @@ export class IdempotencyCleanupScheduler implements OnModuleInit, OnModuleDestro
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
-      this.logger.info('Idempotency cleanup scheduler stopped');
+      this.logger.log('Idempotency cleanup scheduler stopped');
     }
   }
 

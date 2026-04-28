@@ -39,12 +39,15 @@ export class SyncAccessValidator {
    * push derives it from `req.user.activeStoreId` (the JWT session).
    * Without this check a user who belongs to two stores can pull from Store A
    * while their session routes pushes to Store B, corrupting cross-store state.
+   *
+   * However, allow pulls when session has no activeStoreId (user just logged in
+   * and is selecting their first store). Once activeStoreId is set, enforce matching.
    */
   static assertPullStoreMatchesSession(
     resolvedStoreId: number,
     sessionActiveStoreId: number | null,
   ): void {
-    if (sessionActiveStoreId === null || resolvedStoreId !== sessionActiveStoreId) {
+    if (sessionActiveStoreId !== null && resolvedStoreId !== sessionActiveStoreId) {
       throw new ForbiddenException(errPayload(ErrorCode.SYNC_STORE_ACCESS_DENIED));
     }
   }

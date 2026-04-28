@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef } from "react";
+import { useSelector } from "react-redux";
 import * as SplashScreen from "expo-splash-screen";
 import NetInfo from "@react-native-community/netinfo";
 import type { AuthResponse } from "@nks/api-manager";
@@ -7,7 +8,11 @@ import { setCredentials } from "../../store/auth-slice";
 import { initializeAuth } from "../../store/initialize-auth";
 import { setupAxiosInterceptors } from "./axios-interceptors";
 import { handleReconnection } from "../../services/reconnection-handler";
-import { setActiveStoreGuuid, runPeriodicSync, runSync } from "../sync/sync-engine";
+import {
+  setActiveStoreGuuid,
+  runPeriodicSync,
+  runSync,
+} from "../sync/sync-engine";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("AuthProvider");
@@ -31,6 +36,9 @@ const PERIODIC_SYNC_INTERVAL_MS = 5 * 60 * 1_000; // 5 minutes
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const dispatch = useRootDispatch();
   const { isInitializing, isAuthenticated, authResponse } = useReduxAuth();
+  const activeStoreGuuidFromSlice = useSelector(
+    (state: any) => state.store?.activeStoreGuuid
+  );
   const splashHidden = useRef(false);
   const wasOffline = useRef(false);
   // Refs so NetInfo / interval callbacks always see current values without
@@ -74,8 +82,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setActiveStoreGuuid(storeGuuid);
 
-    if (prevStoreGuuidRef.current !== null && prevStoreGuuidRef.current !== storeGuuid) {
-      log.info(`[Auth] Store switched ${prevStoreGuuidRef.current} → ${storeGuuid}, triggering sync`);
+    if (
+      prevStoreGuuidRef.current !== null &&
+      prevStoreGuuidRef.current !== storeGuuid
+    ) {
+      log.info(
+        `[Auth] Store switched ${prevStoreGuuidRef.current} → ${storeGuuid}, triggering sync`,
+      );
       runSync(storeGuuid).catch((err) => {
         log.error("[Auth] Post-store-switch sync failed:", err);
       });
@@ -83,6 +96,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     prevStoreGuuidRef.current = storeGuuid;
   }, [isAuthenticated, authResponse]);
+
+  // Trigger sync when store is selected via setActiveStore (from store slice).
+  // This handles the case where user selects a store from the UI.
+  useEffect(() => {
+    if (!isAuthenticated || !activeStoreGuuidFromSlice) return;
+
+    setActiveStoreGuuid(activeStoreGuuidFromSlice);
+    log.info(
+      `[Auth] Store selected from UI: ${activeStoreGuuidFromSlice}, triggering sync`,
+    );
+    runSync(activeStoreGuuidFromSlice).catch((err) => {
+      log.error("[Auth] Post-store-select sync failed:", err);
+    });
+  }, [isAuthenticated, activeStoreGuuidFromSlice]);
 
   // Periodic full sync: pull + push every 5 minutes while authenticated.
   // runPeriodicSync is a no-op when no active store is set or sync is running.

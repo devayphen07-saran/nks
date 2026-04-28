@@ -12,11 +12,8 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import type { AuthenticatedRequest } from '../../common/guards/auth.guard';
 import { RBACGuard } from '../../common/guards/rbac.guard';
-import { RequireEntityPermission } from '../../common/decorators/require-entity-permission.decorator';
-import { EntityResource } from '../../common/decorators/entity-resource.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { RateLimit } from '../../common/decorators/rate-limit.decorator';
-import { EntityCodes, PermissionActions } from '../../common/constants/entity-codes.constants';
 import { SyncService, type ChangesResponse, type PushResponse } from './sync.service';
 import {
   SyncPushDto,
@@ -30,7 +27,6 @@ import {
 @ApiTags('Sync')
 @Controller('sync')
 @UseGuards(RBACGuard)
-@EntityResource(EntityCodes.SYNC)
 @ApiBearerAuth()
 export class SyncController {
   constructor(private readonly syncService: SyncService) {}
@@ -47,12 +43,11 @@ export class SyncController {
 
   @Get('changes')
   @RateLimit(60)
-  @RequireEntityPermission({ action: PermissionActions.VIEW })
   @ResponseMessage('Sync changes fetched')
   @ApiOperation({
     summary: 'Fetch sync changes since cursor',
     description:
-      'Returns paginated list of changed rows for offline-first sync. Mobile polls this endpoint, applies changes locally, and stores the nextCursors.',
+      'Returns paginated list of changed rows for offline-first sync. Mobile polls this endpoint, applies changes locally, and stores the nextCursors. Authorization is enforced by verifyStoreMembership, not RBAC — all authenticated users can sync if they belong to the store.',
   })
   async getChanges(
     @Req() req: AuthenticatedRequest,
@@ -72,7 +67,6 @@ export class SyncController {
 
   @Post('push')
   @RateLimit(30)
-  @RequireEntityPermission({ action: PermissionActions.CREATE })
   @ResponseMessage('Sync push processed')
   @ApiOperation({
     summary: 'Push offline mutations from mobile',

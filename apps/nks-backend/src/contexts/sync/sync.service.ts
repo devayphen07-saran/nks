@@ -58,6 +58,8 @@ function sanitizeOpData(
 /**
  * Single source of truth for pull-sync tables.
  * Adding a new table: add one entry here — handler, mapper, and SUPPORTED_TABLES stay in sync.
+ *
+ * NOTE: Only include tables that mobile clients have handlers for. Currently only state and district.
  */
 const TABLE_REGISTRY = {
   state: {
@@ -77,15 +79,6 @@ const TABLE_REGISTRY = {
       limit: number,
     ) => repo.getDistrictChanges(cursorMs, cursorId, limit),
     map: SyncDataMapper.buildDistrictChange,
-  },
-  routes: {
-    fetch: (
-      repo: SyncRepository,
-      cursorMs: number,
-      cursorId: number,
-      limit: number,
-    ) => repo.getRouteChanges(cursorMs, cursorId, limit),
-    map: SyncDataMapper.buildRouteChange,
   },
 } as const;
 
@@ -236,6 +229,10 @@ export class SyncService {
       .map((t) => t.trim())
       .filter((t) => SUPPORTED_TABLES.has(t));
 
+    this.logger.debug(
+      `SYNC: requested tables="${tablesCsv}", supported="${[...SUPPORTED_TABLES].join(',')}",filtered=[${requestedTables.join(',')}]`,
+    );
+
     // Fetch limit+1 rows per table to detect hasMore without a separate COUNT.
     const fetchLimit = limit + 1;
 
@@ -256,6 +253,7 @@ export class SyncService {
     let hasMore = false;
 
     for (const { table, rows } of fetched) {
+      this.logger.debug(`SYNC: table="${table}" returned ${rows.length} rows (fetchLimit=${fetchLimit})`);
       if (rows.length > fetchLimit - 1) hasMore = true;
       const slice = rows.slice(0, limit);
       const { map } = TABLE_REGISTRY[table];

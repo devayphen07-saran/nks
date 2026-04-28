@@ -1,13 +1,15 @@
-import React from "react";
+import React, { useState } from "react";
 import styled from "styled-components/native";
 import { Column, Typography, LucideIcon, Header } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
 import { useNavigation } from "expo-router";
 import type { DrawerNavigationProp } from "@react-navigation/drawer";
+import { DebugDatabaseScreen } from "@/features/debug/DebugDatabaseScreen";
 
 export default function StoreHomeScreen() {
   const { theme } = useMobileTheme();
   const navigation = useNavigation<DrawerNavigationProp<Record<string, undefined>>>();
+  const [showDebug, setShowDebug] = useState(false);
 
   return (
     <Container>
@@ -15,8 +17,13 @@ export default function StoreHomeScreen() {
         title="Home"
         leftElement={
           <MenuButton onPress={() => navigation.openDrawer()}>
-            <LucideIcon name="Menu" size={24} color={theme.colorWhite} />
+            <LucideIcon name="Menu" size={24} />
           </MenuButton>
+        }
+        rightElement={
+          <DebugButton onPress={() => setShowDebug(true)}>
+            <LucideIcon name="Database" size={20} />
+          </DebugButton>
         }
       />
       <Content>
@@ -28,6 +35,8 @@ export default function StoreHomeScreen() {
           </Column>
         </PlaceholderCard>
       </Content>
+
+      <DebugDatabaseScreen visible={showDebug} onClose={() => setShowDebug(false)} />
     </Container>
   );
 }
@@ -53,4 +62,9 @@ const PlaceholderCard = styled(Column)`
 const MenuButton = styled.TouchableOpacity`
   padding: 8px;
   margin-left: -8px;
+`;
+
+const DebugButton = styled.TouchableOpacity`
+  padding: 8px;
+  margin-right: -8px;
 `;
