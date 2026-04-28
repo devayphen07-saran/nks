@@ -104,23 +104,17 @@ export class RoleMapper {
       canCreate: boolean;
       canEdit: boolean;
       canDelete: boolean;
-      canExport?: boolean;
-      canApprove?: boolean;
-      canArchive?: boolean;
       deny?: boolean;
     }>,
   ): Record<string, EntityPermission> {
     return perms.reduce(
       (acc, perm) => {
         acc[perm.entityCode] = {
-          canView:    perm.canView,
-          canCreate:  perm.canCreate,
-          canEdit:    perm.canEdit,
-          canDelete:  perm.canDelete,
-          canExport:  perm.canExport  ?? false,
-          canApprove: perm.canApprove ?? false,
-          canArchive: perm.canArchive ?? false,
-          deny:       perm.deny ?? false,
+          canView:   perm.canView,
+          canCreate: perm.canCreate,
+          canEdit:   perm.canEdit,
+          canDelete: perm.canDelete,
+          deny:      perm.deny ?? false,
         };
         return acc;
       },
@@ -142,29 +136,13 @@ export class RoleMapper {
     for (const perms of allPermissions) {
       for (const [entityCode, perm] of Object.entries(perms)) {
         if (!result[entityCode]) {
-          result[entityCode] = {
-            canView:    false,
-            canCreate:  false,
-            canEdit:    false,
-            canDelete:  false,
-            canExport:  false,
-            canApprove: false,
-            canArchive: false,
-            deny:       false,
-          };
+          result[entityCode] = { canView: false, canCreate: false, canEdit: false, canDelete: false, deny: false };
         }
-
-        // Union: if ANY role grants, user has it
-        result[entityCode].canView    = result[entityCode].canView    || perm.canView;
-        result[entityCode].canCreate  = result[entityCode].canCreate  || perm.canCreate;
-        result[entityCode].canEdit    = result[entityCode].canEdit    || perm.canEdit;
-        result[entityCode].canDelete  = result[entityCode].canDelete  || perm.canDelete;
-        result[entityCode].canExport  = result[entityCode].canExport  || perm.canExport;
-        result[entityCode].canApprove = result[entityCode].canApprove || perm.canApprove;
-        result[entityCode].canArchive = result[entityCode].canArchive || perm.canArchive;
-
-        // DENY: if ANY role denies, deny is true (overrides all)
-        result[entityCode].deny = (result[entityCode].deny || perm.deny) ?? false;
+        result[entityCode].canView   = result[entityCode].canView   || perm.canView;
+        result[entityCode].canCreate = result[entityCode].canCreate || perm.canCreate;
+        result[entityCode].canEdit   = result[entityCode].canEdit   || perm.canEdit;
+        result[entityCode].canDelete = result[entityCode].canDelete || perm.canDelete;
+        result[entityCode].deny      = (result[entityCode].deny || perm.deny) ?? false;
       }
     }
 

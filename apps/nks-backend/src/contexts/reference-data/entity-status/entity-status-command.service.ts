@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EntityStatusRepository } from './repositories/entity-status.repository';
 import { StatusQueryService } from '../status/status-query.service';
 import { AuditCommandService } from '../../compliance/audit/audit-command.service';
@@ -8,6 +8,8 @@ import type { AssignStatusDto, EntityStatusResponse } from './dto/entity-status.
 
 @Injectable()
 export class EntityStatusCommandService {
+  private readonly logger = new Logger(EntityStatusCommandService.name);
+
   constructor(
     private readonly repository:   EntityStatusRepository,
     private readonly statusQuery:  StatusQueryService,

@@ -136,13 +136,14 @@ export class PermissionsChangelogService {
     const rows = await this.db
       .select({
         entityCode: schema.entityType.code,
-        actionCode: schema.permissionAction.code,
-        allowed:    schema.rolePermissions.allowed,
+        canView:    schema.rolePermissions.canView,
+        canCreate:  schema.rolePermissions.canCreate,
+        canEdit:    schema.rolePermissions.canEdit,
+        canDelete:  schema.rolePermissions.canDelete,
         deny:       schema.rolePermissions.deny,
       })
       .from(schema.rolePermissions)
       .innerJoin(schema.entityType, eq(schema.rolePermissions.entityTypeFk, schema.entityType.id))
-      .innerJoin(schema.permissionAction, eq(schema.rolePermissions.actionFk, schema.permissionAction.id))
       .where(
         and(
           eq(schema.rolePermissions.roleFk, roleId),
@@ -151,14 +152,15 @@ export class PermissionsChangelogService {
         ),
       );
 
-    // Collapse action rows into one perms object per entityCode
-    const map = new Map<string, Record<string, boolean>>();
-    for (const row of rows) {
-      const existing = map.get(row.entityCode) ?? {};
-      existing[row.actionCode] = row.allowed && !row.deny;
-      map.set(row.entityCode, existing);
-    }
-    return Array.from(map.entries()).map(([entityCode, perms]) => ({ entityCode, perms }));
+    return rows.map((row) => ({
+      entityCode: row.entityCode,
+      perms: row.deny ? {} : {
+        VIEW:   row.canView,
+        CREATE: row.canCreate,
+        EDIT:   row.canEdit,
+        DELETE: row.canDelete,
+      },
+    }));
   }
 
   /** Write changelog entries for all entity codes, bumping version once per entry. */

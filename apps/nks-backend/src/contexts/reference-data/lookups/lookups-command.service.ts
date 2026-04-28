@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { NotFoundException, BadRequestException, ForbiddenException } from '../../../common/exceptions';
 import { LookupsRepository } from './repositories/lookups.repository';
 import { AuditCommandService } from '../../compliance/audit/audit-command.service';
@@ -8,6 +8,8 @@ import type { CreateLookupValueDto, UpdateLookupValueDto } from './dto/admin-loo
 
 @Injectable()
 export class LookupsCommandService {
+  private readonly logger = new Logger(LookupsCommandService.name);
+
   constructor(
     private readonly repository: LookupsRepository,
     private readonly auditCommand: AuditCommandService,

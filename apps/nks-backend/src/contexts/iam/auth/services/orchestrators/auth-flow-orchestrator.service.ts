@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SessionCommandService } from '../session/session-command.service';
 import { TokenService } from '../token/token.service';
 import type { AuthResponseEnvelope } from '../../dto';
@@ -26,6 +26,8 @@ export interface AuthUserContext {
  */
 @Injectable()
 export class AuthFlowOrchestratorService {
+  private readonly logger = new Logger(AuthFlowOrchestratorService.name);
+
   constructor(
     private readonly sessions: SessionCommandService,
     private readonly tokens: TokenService,

@@ -1,10 +1,18 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PermissionsRepository } from './repositories/role-permissions.repository';
+import type { EntityPermission } from './dto/role-response.dto';
 import type {
   EntityPermissionAction,
   EntityPermissionScope,
 } from '../../../common/decorators/require-entity-permission.decorator';
+
+const ACTION_FIELD: Record<string, keyof EntityPermission> = {
+  VIEW: 'canView',
+  CREATE: 'canCreate',
+  EDIT: 'canEdit',
+  DELETE: 'canDelete',
+};
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -75,7 +83,10 @@ class PermissionCache {
       const id = Number(part);
       if (!Number.isNaN(id)) {
         let keys = this.roleIdToKeys.get(id);
-        if (!keys) { keys = new Set(); this.roleIdToKeys.set(id, keys); }
+        if (!keys) {
+          keys = new Set();
+          this.roleIdToKeys.set(id, keys);
+        }
         keys.add(key);
       }
     }
@@ -138,13 +149,17 @@ class PermissionCache {
  */
 @Injectable()
 export class PermissionEvaluatorService {
+  private readonly logger = new Logger(PermissionEvaluatorService.name);
   private readonly cache: PermissionCache;
 
   constructor(
     private readonly rolePermissionsRepository: PermissionsRepository,
     configService: ConfigService,
   ) {
-    const ttlMs = configService.get<number>('PERMISSION_CACHE_TTL_MS', 5 * 60_000);
+    const ttlMs = configService.get<number>(
+      'PERMISSION_CACHE_TTL_MS',
+      5 * 60_000,
+    );
     this.cache = new PermissionCache(ttlMs);
   }
 
@@ -168,13 +183,17 @@ export class PermissionEvaluatorService {
     if (cached !== undefined) return cached;
 
     const permissions =
-      await this.rolePermissionsRepository.getEntityPermissionsForRoleIds(roleIds);
+      await this.rolePermissionsRepository.getEntityPermissionsForRoleIds(
+        roleIds,
+      );
 
     const entityPerms = permissions[request.entityCode];
+    const field = ACTION_FIELD[request.action.toUpperCase()];
     const result =
       !!entityPerms &&
       !entityPerms.deny &&
-      entityPerms.actions[request.action.toUpperCase()] === true;
+      !!field &&
+      entityPerms[field] === true;
 
     this.cache.set(cacheKey, result);
     return result;

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { UserPreferences } from '../../../core/database/schema/user-preferences';
 import { UserPreferencesValidator } from './validators';
 import { AuthorizationValidator } from '../../../common/validators/authorization.validator';
@@ -6,6 +6,8 @@ import { UserPreferencesRepository } from './repositories/user-preferences.repos
 
 @Injectable()
 export class UserPreferencesService {
+  private readonly logger = new Logger(UserPreferencesService.name);
+
   constructor(
     private readonly userPreferencesRepository: UserPreferencesRepository,
   ) {}

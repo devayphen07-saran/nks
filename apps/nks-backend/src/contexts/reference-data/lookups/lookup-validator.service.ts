@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { BadRequestException } from '../../../common/exceptions';
 import { ErrorCode, errPayload } from '../../../common/constants/error-codes.constants';
 import { LookupsRepository } from './repositories/lookups.repository';
@@ -27,6 +27,8 @@ export interface LookupFkPair {
  */
 @Injectable()
 export class LookupValidatorService {
+  private readonly logger = new Logger(LookupValidatorService.name);
+
   constructor(private readonly repository: LookupsRepository) {}
 
   /** Throws BadRequestException if the guuid does not exist as an active value under typeCode. */

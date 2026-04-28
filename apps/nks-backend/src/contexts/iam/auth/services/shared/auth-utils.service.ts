@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectAuth } from '../../decorators/inject-auth.decorator';
 import type { Auth } from '../../config/better-auth';
 import { RoleQueryService } from '../../../roles/role-query.service';
@@ -31,6 +31,7 @@ interface BetterAuthInternal {
  */
 @Injectable()
 export class AuthUtilsService {
+  private readonly logger = new Logger(AuthUtilsService.name);
   private readonly roleIdCache = new Map<string, number | null>();
 
   constructor(

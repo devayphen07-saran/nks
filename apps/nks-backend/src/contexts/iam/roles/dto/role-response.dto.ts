@@ -9,9 +9,6 @@ export interface EntityPermission {
   canCreate: boolean;
   canEdit: boolean;
   canDelete: boolean;
-  canExport: boolean;
-  canApprove: boolean;
-  canArchive: boolean;
   deny?: boolean;
 }
 
@@ -36,35 +33,11 @@ export interface RoleEntityPermissions {
   [entityCode: string]: EntityPermission;
 }
 
-/**
- * Dynamic permission entry for a single entity in the new role_permissions table.
- * `actions` is an open map: any action code returned by the DB is present.
- * `deny = true` means all grants for this entity are suppressed.
- */
-export interface DynamicEntityPermissionEntry {
-  /** action code (uppercase) → allowed flag. */
-  actions: Record<string, boolean>;
-  deny: boolean;
-}
-
-/**
- * Dynamic permission map returned by RolePermissionsRepository.
- * Keyed by entity code (e.g. 'USER', 'INVOICE').
- */
-export interface DynamicEntityPermissions {
-  [entityCode: string]: DynamicEntityPermissionEntry;
-}
-
 export interface RoutePermission {
   routeGuuid: string;
   routePath: string;
   routeName: string;
   routeScope: string | null;
-  canView: boolean;
-  canCreate: boolean;
-  canEdit: boolean;
-  canDelete: boolean;
-  canExport: boolean;
 }
 
 const RoleResponseSchema = z.object({
@@ -88,11 +61,6 @@ export interface RouteWithPermissionsRow {
   routeScope: string;
   isPublic: boolean;
   sortOrder: number | null;
-  canView: boolean;
-  canCreate: boolean;
-  canEdit: boolean;
-  canDelete: boolean;
-  canExport: boolean;
 }
 
 // ─── Repository Row Types ────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { RolesRepository } from './repositories/roles.repository';
 import { PermissionsRepository } from './repositories/role-permissions.repository';
 import { RolesValidator } from './validators';
@@ -27,6 +27,8 @@ import type { PaginatedResult } from '../../../common/utils/paginated-result';
  */
 @Injectable()
 export class RoleQueryService {
+  private readonly logger = new Logger(RoleQueryService.name);
+
   constructor(
     private readonly rolesRepository: RolesRepository,
     private readonly rolePermissionsRepository: PermissionsRepository,

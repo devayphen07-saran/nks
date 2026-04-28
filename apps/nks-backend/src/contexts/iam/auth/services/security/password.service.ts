@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PasswordValidator } from '../../../../../common/validators/password.validator';
 
@@ -8,6 +8,7 @@ import { PasswordValidator } from '../../../../../common/validators/password.val
  */
 @Injectable()
 export class PasswordService {
+  private readonly logger = new Logger(PasswordService.name);
   static readonly BCRYPT_ROUNDS = 12;
 
   /**

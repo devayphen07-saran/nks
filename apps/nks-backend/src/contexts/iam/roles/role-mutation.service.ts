@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../../../core/database/schema';
 import { RolesRepository } from './repositories/roles.repository';
@@ -19,6 +19,8 @@ type Db = NodePgDatabase<typeof schema>;
  */
 @Injectable()
 export class RoleMutationService {
+  private readonly logger = new Logger(RoleMutationService.name);
+
   constructor(private readonly rolesRepository: RolesRepository) {}
 
   /**

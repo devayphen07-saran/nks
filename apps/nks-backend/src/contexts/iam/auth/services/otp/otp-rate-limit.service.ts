@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { TooManyRequestsException } from '../../../../../common/exceptions';
 import * as crypto from 'crypto';
 import { ConfigService } from '@nestjs/config';
@@ -24,6 +24,7 @@ import { OtpRateLimitRepository } from '../../repositories/otp-rate-limit.reposi
  */
 @Injectable()
 export class OtpRateLimitService {
+  private readonly logger = new Logger(OtpRateLimitService.name);
   private readonly MAX_REQUESTS_PER_HOUR = 5;
   private readonly WINDOW_DURATION_MS = 60 * 60 * 1000; // 1 hour
   private readonly ROW_TTL_MS = 24 * 60 * 60 * 1000; // 24h — hard-delete cleanup TTL

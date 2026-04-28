@@ -167,11 +167,6 @@ async function main() {
           roleFk: superAdminRole.id,
           routeFk: routeId,
           allow: true,
-          canView: true,
-          canCreate: true,
-          canEdit: true,
-          canDelete: true,
-          canExport: true,
         });
         console.log(`  🔐 [MAPPED]  SUPER_ADMIN → ${routeData.routePath}`);
       } else {

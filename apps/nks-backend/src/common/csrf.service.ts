@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AppConfigService } from '../config/app-config.service';
 import { ForbiddenException } from './exceptions';
@@ -25,6 +25,7 @@ const CSRF_UNSAFE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
  */
 @Injectable()
 export class CsrfService {
+  private readonly logger = new Logger(CsrfService.name);
   private readonly csrfHmacSecret: string;
 
   constructor(private readonly appConfig: AppConfigService) {

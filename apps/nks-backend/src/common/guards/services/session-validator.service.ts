@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { Request } from 'express';
 import { UnauthorizedException } from '../../exceptions';
 import { ErrorCode } from '../../constants/error-codes.constants';
@@ -30,6 +30,8 @@ export interface ValidatedSession {
  */
 @Injectable()
 export class SessionValidatorService {
+  private readonly logger = new Logger(SessionValidatorService.name);
+
   constructor(
     private readonly authContext: AuthContextService,
     private readonly csrf: CsrfService,

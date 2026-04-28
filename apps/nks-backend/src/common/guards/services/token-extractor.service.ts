@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { Request } from 'express';
 import { BadRequestException, UnauthorizedException } from '../../exceptions';
 import { ErrorCode } from '../../constants/error-codes.constants';
@@ -12,6 +12,8 @@ export type AuthType = 'cookie' | 'bearer';
  */
 @Injectable()
 export class TokenExtractorService {
+  private readonly logger = new Logger(TokenExtractorService.name);
+
   extract(req: Request): { token: string; authType: AuthType } {
     const authHeader = req.headers['authorization'];
     const bearer =

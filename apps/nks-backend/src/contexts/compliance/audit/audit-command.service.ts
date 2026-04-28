@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuditEvents } from '../../../common/events/audit.events';
 import type { NewAuditLog } from '../../../core/database/schema/audit-log';
@@ -19,6 +19,8 @@ export interface AuditLogEntry {
 
 @Injectable()
 export class AuditCommandService {
+  private readonly logger = new Logger(AuditCommandService.name);
+
   constructor(private readonly eventEmitter: EventEmitter2) {}
 
   log(entry: AuditLogEntry): void {

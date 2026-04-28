@@ -117,7 +117,7 @@ export class RolesRepository extends BaseRepository {
       .where(this.activeRoleMappingCondition(userId));
   }
 
-  /** Get route permissions (path + CRUD flags) for a single role ID. */
+  /** Get route list for a single role ID. */
   async findRoutePermissionsByRoleId(
     roleId: number,
   ): Promise<RoutePermission[]> {
@@ -127,11 +127,6 @@ export class RolesRepository extends BaseRepository {
         routePath: schema.routes.routePath,
         routeName: schema.routes.routeName,
         routeScope: schema.routes.routeScope,
-        canView: schema.roleRouteMapping.canView,
-        canCreate: schema.roleRouteMapping.canCreate,
-        canEdit: schema.roleRouteMapping.canEdit,
-        canDelete: schema.roleRouteMapping.canDelete,
-        canExport: schema.roleRouteMapping.canExport,
       })
       .from(schema.roleRouteMapping)
       .innerJoin(
@@ -148,7 +143,7 @@ export class RolesRepository extends BaseRepository {
       .orderBy(schema.routes.routeScope, schema.routes.sortOrder);
   }
 
-  /** Get all allowed routes (with CRUD flags) for a set of role IDs. */
+  /** Get all allowed routes for a set of role IDs. */
   async findRoutesByRoleIds(
     roleIds: number[],
   ): Promise<RouteWithPermissionsRow[]> {
@@ -164,11 +159,6 @@ export class RolesRepository extends BaseRepository {
         routeScope: schema.routes.routeScope,
         isPublic: schema.routes.isPublic,
         sortOrder: schema.routes.sortOrder,
-        canView: schema.roleRouteMapping.canView,
-        canCreate: schema.roleRouteMapping.canCreate,
-        canEdit: schema.roleRouteMapping.canEdit,
-        canDelete: schema.roleRouteMapping.canDelete,
-        canExport: schema.roleRouteMapping.canExport,
       })
       .from(schema.roleRouteMapping)
       .innerJoin(

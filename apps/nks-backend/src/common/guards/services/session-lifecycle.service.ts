@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { AUTH_CONSTANTS } from '../../constants/app-constants';
 import type { SessionUpdateContext } from '../session-context';
 
@@ -18,6 +18,8 @@ type ContextInput = { id: number; csrfSecret: string };
  */
 @Injectable()
 export class SessionLifecycleService {
+  private readonly logger = new Logger(SessionLifecycleService.name);
+
   isRotationDue(session: RotationInput): boolean {
     const lastRotated = session.lastRotatedAt ?? session.createdAt;
     return Date.now() - lastRotated.getTime() >= AUTH_CONSTANTS.SESSION.ROTATION_INTERVAL_SECONDS * 1000;

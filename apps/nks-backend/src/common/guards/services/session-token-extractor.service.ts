@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { Request } from 'express';
 import { BadRequestException, UnauthorizedException } from '../../exceptions';
 import { ErrorCode } from '../../constants/error-codes.constants';
@@ -19,6 +19,8 @@ export interface ExtractedToken {
  */
 @Injectable()
 export class SessionTokenExtractorService {
+  private readonly logger = new Logger(SessionTokenExtractorService.name);
+
   extract(req: Request): ExtractedToken {
     const authHeader = req.headers['authorization'];
     const bearer =

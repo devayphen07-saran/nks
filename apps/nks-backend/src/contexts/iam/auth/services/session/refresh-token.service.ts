@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
 
 /**
@@ -10,6 +10,8 @@ import * as crypto from 'crypto';
  */
 @Injectable()
 export class RefreshTokenService {
+  private readonly logger = new Logger(RefreshTokenService.name);
+
   /**
    * Generate new refresh token (fully opaque).
    * Used during token rotation to create the next refresh token.

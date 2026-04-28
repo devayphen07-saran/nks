@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { NotFoundException } from '../../../common/exceptions';
 import { LookupsRepository } from './repositories/lookups.repository';
 import { CodeValueMapper, LookupMapper, AdminLookupMapper } from './mapper/lookups.mapper';
@@ -20,6 +20,8 @@ import type {
 
 @Injectable()
 export class LookupsQueryService {
+  private readonly logger = new Logger(LookupsQueryService.name);
+
   constructor(private readonly repository: LookupsRepository) {}
 
   // ── Public lookup endpoints ───────────────────────────────────────────────

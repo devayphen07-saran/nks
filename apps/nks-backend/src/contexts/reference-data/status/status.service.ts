@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { StatusRepository } from './repositories/status.repository';
 import { StatusMapper } from './mapper/status.mapper';
 import { AuditService } from '../../compliance/audit/audit.service';
@@ -15,6 +15,8 @@ import type { Status } from '../../../core/database/schema/entity-system/status/
 
 @Injectable()
 export class StatusService {
+  private readonly logger = new Logger(StatusService.name);
+
   constructor(
     private readonly repository: StatusRepository,
     private readonly auditService: AuditService,

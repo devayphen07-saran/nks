@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InternalServerException } from '../../../../../common/exceptions';
 import { OnboardingValidator } from '../../validators';
 import { OnboardingCompleteDto, OnboardingCompleteResponseDto } from '../../dto';
@@ -21,6 +21,8 @@ import { PasswordService } from '../security/password.service';
  */
 @Injectable()
 export class OnboardingService {
+  private readonly logger = new Logger(OnboardingService.name);
+
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly authProviderRepository: AuthProviderRepository,
