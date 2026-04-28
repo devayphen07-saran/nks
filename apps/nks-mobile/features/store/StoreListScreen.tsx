@@ -1,8 +1,9 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   ListRenderItem,
   TouchableOpacity,
   ActivityIndicator,
+  AppState,
 } from "react-native";
 import { router, useNavigation } from "expo-router";
 import { ROUTES } from "../../lib/navigation/routes";
@@ -49,6 +50,7 @@ export function StoreListScreen() {
   const authState = useAuthState();
   const user = authState.authResponse?.user;
   const navigation = useNavigation();
+  const appStateRef = useRef(AppState.currentState);
 
   const [myStores, setMyStores] = useState<Store[]>([]);
   const [invitedStores, setInvitedStores] = useState<Store[]>([]);
@@ -81,6 +83,21 @@ export function StoreListScreen() {
   useEffect(() => {
     fetchStores();
   }, [fetchStores]);
+
+  // Retry stores fetch when app returns to foreground (e.g., after connection restored)
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (appStateRef.current !== "active" && state === "active") {
+        // App returned to foreground — retry if previous fetch had an error
+        if (fetchError) {
+          fetchStores();
+        }
+      }
+      appStateRef.current = state;
+    });
+
+    return () => subscription.remove();
+  }, [fetchError, fetchStores]);
 
   const displayStores =
     filter === "all"
