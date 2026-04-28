@@ -3,7 +3,7 @@
 **Stack:** React Native (Expo) mobile app + NestJS backend
 **Use case:** Mobile POS that must work fully offline and reconcile with the server when connectivity returns.
 
-**Version:** 2.0 — incorporates fixes for the pull-overwrite bug, `last_pushed_at` wiring, per-entity cursor trade-offs, endpoint/algorithm alignment, and SQLite concurrency notes.
+**Version:** 3.0 — adds web client architecture: dual API surface, shared domain services, corrected audit columns (`created_by_user_id` + `last_modified_by_user_id` + `audit_log`), web conflict handling, and three non-negotiable rules for keeping mobile pull in sync with web writes.
 
 ---
 
@@ -24,6 +24,7 @@
 13. [Mobile Sync Manager Structure](#13-mobile-sync-manager-structure)
 14. [Monitoring and Observability](#14-monitoring-and-observability)
 15. [Checklist Before Going Live](#15-checklist-before-going-live)
+16. [Adding a Web Client](#16-adding-a-web-client)
 
 ---
 
@@ -1158,6 +1159,15 @@ Security:
 
 ---
 
+## Changelog from v2
+
+- **Section 16 added — web client architecture** (16.1–16.12). Covers dual API surface, shared domain services, corrected DB columns, web conflict handling, NestJS module restructure, authentication differences, and three non-negotiable rules.
+- **Column recommendations corrected** — previous v2 draft over-specified four columns (`created_by_source`, `last_modified_by_source`, `last_modified_at`, `last_modified_by_user_id`). Correct minimal set is two: `created_by_user_id` + `last_modified_by_user_id`. Source tracking handled by `created_by_device IS NULL` (existing) or `audit_log` table (new).
+- **`audit_log` table introduced** (Section 16.2) as the correct solution for full audit trail — replaces scattered source columns on domain rows.
+- **Cross-client conflict scenario C documented** (Section 16.9) — web deletes a product that mobile is using offline; requires validation in `SalesSyncService.apply`.
+
+---
+
 ## Changelog from v1
 
 - **Pull algorithm now guards against overwriting unsynced local rows** (Section 7.3). Before upserting any server row, the pull worker checks the local row's `sync_status`; if it's `pending`, `syncing`, or `failed`, the server row is skipped. The same guard applies to server-side deletions.
@@ -1168,3 +1178,389 @@ Security:
 - **Section 1 adds a 9th principle** making the "local unsynced edits win during pull" rule explicit.
 - **Failure table extended** with the "pull interrupted between entities" case (Section 10.1, 11.4).
 - **Conflict resolution flow updated** to mark the domain row's `sync_status = 'failed'` so subsequent pulls don't overwrite the user's pending edit (Section 9.5).
+
+---
+
+## 16. Adding a Web Client
+
+### 16.1 Mental Model Shift
+
+The backend currently serves one type of client:
+
+- **Mobile** — offline-first, outbox pattern, talks to `/sync/push` and `/sync/pull`.
+
+Adding:
+
+- **Web** — always online, no outbox, no local DB. Talks to standard REST/CRUD endpoints.
+
+**Key insight: the web client is not a sync client.** It is a normal online app talking to a normal online API. The two clients use different API surfaces but the same database and same domain logic.
+
+```
+┌─────────────┐         ┌─────────────┐
+│  Mobile App │         │   Web App   │
+│ (offline)   │         │  (online)   │
+└──────┬──────┘         └──────┬──────┘
+       │                        │
+       │ /sync/push             │ /api/v1/customers (CRUD)
+       │ /sync/pull             │ /api/v1/sales
+       │                        │ /api/v1/products
+       ▼                        ▼
+┌─────────────────────────────────────┐
+│         NestJS Backend              │
+│  ┌────────────┐    ┌─────────────┐  │
+│  │ SyncModule │    │  ApiModule  │  │
+│  └─────┬──────┘    └──────┬──────┘  │
+│        │                   │        │
+│        └────────┬──────────┘        │
+│                 ▼                   │
+│        Shared Domain Services       │
+│        (SalesService, etc.)         │
+│                 │                   │
+│                 ▼                   │
+│           PostgreSQL                │
+└─────────────────────────────────────┘
+```
+
+Both clients hit the same domain services under the hood. Only the API layer differs.
+
+---
+
+### 16.2 Database Columns — Minimal, Justified
+
+**Do not add** `created_by_source`, `last_modified_by_source`, or `last_modified_at` — they are either inferable from existing columns or duplicates of `updated_at`.
+
+**Add these two columns to every domain table:**
+
+| Column | Type | Purpose |
+|---|---|---|
+| `created_by_user_id` | UUID FK → users | Who created the row |
+| `last_modified_by_user_id` | UUID FK → users | Who last edited the row |
+
+Keep `created_by_device` (already exists) — `NULL` means the row came from web; set means mobile.
+
+**Do not change:** `version`, `updated_at`, `deleted_at`, `tenant_id`/`store_id`, `processed_operations` (mobile-only).
+
+**If full audit is needed — build one `audit_log` table, not scattered columns:**
+
+```sql
+CREATE TABLE audit_log (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  entity_type     TEXT NOT NULL,       -- 'customer', 'product', 'sale'
+  entity_id       UUID NOT NULL,
+  action          TEXT NOT NULL,       -- 'create', 'update', 'delete'
+  actor_user_id   UUID NOT NULL,
+  actor_source    TEXT NOT NULL,       -- 'mobile', 'web', 'system'
+  actor_device_id TEXT,                -- set if mobile
+  changes         JSONB,               -- { before: {...}, after: {...} }
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  tenant_id       UUID NOT NULL
+);
+
+CREATE INDEX idx_audit_entity ON audit_log(entity_type, entity_id, created_at);
+CREATE INDEX idx_audit_actor  ON audit_log(actor_user_id, created_at);
+```
+
+Write to `audit_log` inside the same transaction as every domain change. Use a TypeORM subscriber/listener so it is automatic — not manual in every service.
+
+This gives full history, before/after diffs, and filterable reports without polluting every domain row.
+
+---
+
+### 16.3 The Critical Rule: Web Must Bump `updated_at` and `version`
+
+Every web write must:
+
+1. Set `updated_at = NOW()`
+2. Increment `version` by 1
+3. Set `last_modified_by_user_id = <user>`
+
+**Why:** the mobile pull API uses `updated_at` as its cursor. If a web edit does not bump `updated_at`, mobile devices will never see the change — silently out of sync forever.
+
+The safest approach: route both web and mobile writes through the same domain service. The version increment and timestamp update live in one place.
+
+```typescript
+// shared service used by BOTH sync and CRUD modules
+@Injectable()
+export class CustomersService {
+  async update(
+    id: string,
+    payload: Partial<Customer>,
+    expectedVersion: number,
+    actor: { source: 'mobile' | 'web'; userId: string; deviceId?: string },
+  ): Promise<Customer> {
+    return this.dataSource.transaction(async (tx) => {
+      const current = await tx.findOne(Customer, { where: { id } });
+      if (!current) throw new NotFoundException();
+
+      if (current.version !== expectedVersion) {
+        throw new ConflictException({ server_state: current });
+      }
+
+      const updated = {
+        ...current,
+        ...payload,
+        version: current.version + 1,
+        updated_at: new Date(),
+        last_modified_by_user_id: actor.userId,
+      };
+      await tx.save(Customer, updated);
+      return updated;
+    });
+  }
+}
+```
+
+- Web controller calls `customersService.update(id, body, body.version, { source: 'web', userId: req.user.id })`.
+- Mobile sync handler calls the same method with `{ source: 'mobile', userId: ..., deviceId: ... }`.
+
+---
+
+### 16.4 New Web CRUD Endpoints
+
+Web needs a standard REST API. Do not route it through `/sync/push` — that endpoint is designed for mobile's batching, idempotency, and ordering requirements. Web has none of those problems.
+
+**Resources (per entity: customers, products, categories, taxes, payment methods):**
+
+```
+GET    /api/v1/<resource>        # list, paginated, filterable
+GET    /api/v1/<resource>/:id    # single record
+POST   /api/v1/<resource>        # create
+PATCH  /api/v1/<resource>/:id    # update with version check
+DELETE /api/v1/<resource>/:id    # soft delete
+```
+
+**Sales (mostly read-only from web):**
+
+```
+GET    /api/v1/sales
+GET    /api/v1/sales/:id
+POST   /api/v1/sales/:id/refund
+POST   /api/v1/sales/:id/void
+```
+
+**Inventory:**
+
+```
+GET    /api/v1/inventory
+GET    /api/v1/inventory/movements
+POST   /api/v1/inventory/adjustments
+POST   /api/v1/inventory/transfers
+```
+
+**Reports (web-only):**
+
+```
+GET    /api/v1/reports/daily-sales
+GET    /api/v1/reports/sales-by-product
+GET    /api/v1/reports/sales-by-cashier
+GET    /api/v1/reports/inventory-valuation
+GET    /api/v1/reports/tax-summary
+GET    /api/v1/reports/end-of-day/:date
+```
+
+**Admin / Settings (web-only):**
+
+```
+GET    /api/v1/users
+POST   /api/v1/users
+PATCH  /api/v1/users/:id
+GET    /api/v1/devices
+POST   /api/v1/devices/:id/revoke
+GET    /api/v1/sync-status
+GET    /api/v1/audit-log
+```
+
+`/api/v1/sync-status` is especially valuable — shows the manager which devices have pending queues, last synced time, and failure counts.
+
+**PATCH request/response shape:**
+
+```json
+PATCH /api/v1/customers/cust-uuid-a
+{ "version": 3, "name": "Ravi Kumar", "phone": "9876543210" }
+
+→ 200: { "id": "cust-uuid-a", "version": 4, "name": "Ravi Kumar", "updated_at": "..." }
+→ 409: { "error": "version_mismatch", "server_state": { "version": 5, ... } }
+```
+
+---
+
+### 16.5 How Mobile Picks Up Web Changes
+
+No changes needed to the existing pull flow — it just works.
+
+1. Web: `PATCH /api/v1/products/p1` → backend bumps `updated_at`, increments `version`.
+2. Mobile next pull: `GET /sync/pull?since=<last_pulled_at>&entity=products` — server returns the row because `updated_at > since`.
+3. Mobile applies the update (skipping it if there is a local pending edit on that row).
+
+The pull endpoint does not care which client created the change.
+
+---
+
+### 16.6 How Web Picks Up Mobile Changes
+
+No mechanism needed. Web is always online and stateless.
+
+1. Mobile pushes 50 offline sales via `/sync/push`.
+2. Manager opens web dashboard → `GET /api/v1/sales?date=...` → sees all 50 immediately.
+
+**Optional real-time:** if the web dashboard needs to update live without a reload, add a WebSocket / SSE channel:
+
+```
+WS /api/v1/realtime?store_id=...
+  → { type: 'sale.created', data: {...} }
+  → { type: 'product.updated', data: {...} }
+```
+
+For most POS dashboards a 30-second auto-refresh is sufficient and simpler.
+
+---
+
+### 16.7 NestJS Module Restructure
+
+```
+src/
+├── sync/                           # Mobile-only API
+│   ├── sync.module.ts
+│   ├── sync.controller.ts          # POST /sync/push, GET /sync/pull
+│   ├── sync.service.ts
+│   └── idempotency.service.ts
+│
+├── api/                            # Web-only REST API
+│   ├── api.module.ts
+│   ├── customers.controller.ts
+│   ├── sales.controller.ts
+│   ├── products.controller.ts
+│   ├── inventory.controller.ts
+│   ├── reports.controller.ts
+│   ├── admin.controller.ts
+│   └── realtime.gateway.ts         # optional WebSocket
+│
+├── domain/                         # Shared business logic
+│   ├── customers/
+│   │   └── customers.service.ts    # called by BOTH sync and api
+│   ├── sales/
+│   │   └── sales.service.ts
+│   ├── products/
+│   │   └── products.service.ts
+│   └── inventory/
+│       └── inventory.service.ts
+│
+└── auth/
+    ├── mobile-jwt.guard.ts         # /sync/* — mobile JWT + device_id
+    └── web-jwt.guard.ts            # /api/v1/* — web JWT, HttpOnly cookie
+```
+
+`domain/*` services are the only place that touches the database. Both `sync/*` and `api/*` are thin translation layers. Business rules (price calculation, inventory deduction, tax) live in one place and cannot diverge.
+
+---
+
+### 16.8 Authentication — Two Flows, One Signing Key
+
+| | Mobile | Web |
+|---|---|---|
+| Token type | Long-lived JWT + refresh token | Short-lived JWT, refresh via cookie |
+| Identifier | User + `device_id` | User + browser session |
+| Storage | Secure storage (Keychain / Keystore) | HttpOnly cookie |
+| Audience (`aud`) | `'mobile'` | `'web'` |
+| Typical role | Cashier | Manager / Admin |
+
+Same JWT signing key, different `aud` claims. Each guard validates its own audience.
+
+```typescript
+@Controller('sync')
+@UseGuards(MobileJwtGuard, DeviceContextGuard)
+export class SyncController { ... }
+
+@Controller('api/v1')
+@UseGuards(WebJwtGuard, RolesGuard)
+export class CustomersController { ... }
+```
+
+---
+
+### 16.9 Cross-Client Conflict Scenarios
+
+**A. Web edits while mobile is offline** ✅ Already handled
+
+Mobile pushes with `expected_version = 3`, server is at `version = 4` (web edit). Returns `conflict`. Mobile shows conflict UI.
+
+**B. Mobile pushes a sale, web sees it instantly** ✅ Trivially works
+
+Both clients share the same DB. No extra work needed.
+
+**C. Web deletes a product mobile is using offline** ⚠️ New — needs explicit handling
+
+Mobile pushes a sale referencing a product that was soft-deleted on web. Add validation in `SalesSyncService.apply`: verify all referenced products exist and `deleted_at IS NULL`. If not: return `rejected` with reason `product_not_available`. Mobile moves the sale to `failed_operations` and alerts the cashier.
+
+**D. Web changes price while mobile has unsynced sales** ✅ Safe by design
+
+Sale line items must store `price_at_time_of_sale` — a copied value, never a live FK to the current product price. Web price changes do not retroactively rewrite historical sales. If your schema does not do this, fix it before launch: retroactive price rewrites are a financial reporting disaster.
+
+---
+
+### 16.10 Updated Architecture Diagram
+
+```
+┌──────────────────┐         ┌──────────────────┐
+│   Mobile App     │         │     Web App      │
+│  (React Native)  │         │  (React / Next)  │
+│  Offline-first   │         │   Online-only    │
+└────────┬─────────┘         └────────┬─────────┘
+         │                            │
+         │ /sync/push                 │ /api/v1/*
+         │ /sync/pull                 │ (REST CRUD)
+         │ (chunked, idempotent)      │ optional: WS /realtime
+         ▼                            ▼
+┌──────────────────────────────────────────────┐
+│              NestJS Backend                  │
+│                                              │
+│   ┌────────────┐         ┌─────────────┐    │
+│   │   Sync     │         │     API     │    │
+│   │  Module    │         │   Module    │    │
+│   │ (mobile)   │         │   (web)     │    │
+│   └─────┬──────┘         └──────┬──────┘    │
+│         └────────────┬──────────┘            │
+│                      ▼                       │
+│           ┌─────────────────────┐            │
+│           │   Domain Services   │            │
+│           │  Customers, Sales,  │            │
+│           │ Products, Inventory │            │
+│           └──────────┬──────────┘            │
+│                      ▼                       │
+│                 PostgreSQL                   │
+│           - domain tables                    │
+│             (created_by_user_id,             │
+│              last_modified_by_user_id)       │
+│           - processed_operations (mobile)    │
+│           - audit_log                        │
+└──────────────────────────────────────────────┘
+```
+
+---
+
+### 16.11 Summary Decision Table
+
+| Question | Answer |
+|---|---|
+| Does web use `/sync/push` and `/sync/pull`? | No. Web uses standard REST CRUD. |
+| Does mobile change at all? | No. Mobile sync flow stays exactly as designed. |
+| New DB columns needed? | `created_by_user_id` + `last_modified_by_user_id` only. |
+| What about source tracking (`mobile`/`web`)? | Infer from `created_by_device IS NULL`. Build `audit_log` if you need full history. |
+| Does web need an outbox? | No. Web is online-only; writes go straight to the API. |
+| How does mobile pick up web changes? | Existing `/sync/pull`. Web bumps `updated_at`; mobile sees it next pull. |
+| How does web pick up mobile changes? | Just queries the DB. Mobile-pushed rows are immediately visible. |
+| Do mobile and web share business logic? | Yes — domain services called by both layers. |
+| Real-time on web? | Optional WebSocket / SSE. 30-second polling is fine for most POS dashboards. |
+| Authentication? | Same signing key, different `aud`. Mobile: long-lived JWT + device_id. Web: short-lived + cookie. |
+| New conflict scenario? | Web-deletes-product-mobile-uses → add validation in `SalesSyncService.apply`. |
+| Most critical rule? | Web writes must always bump `updated_at` + `version` via shared domain service. |
+
+---
+
+### 16.12 The Three Non-Negotiable Rules
+
+1. **Both clients write through the same domain services.** Never let the web bypass logic that mobile sync relies on. A web endpoint that updates a row without incrementing `version` or touching `updated_at` will silently break mobile pull.
+
+2. **Every web write bumps `updated_at` and `version`.** This is the mechanism that makes the existing mobile pull cursor work. Miss this once and that device drifts out of sync with no error, no alert, and no easy way to detect it.
+
+3. **Sale line items store price-at-time-of-sale, never a live FK to current product price.** Web price changes must not retroactively rewrite historical sales. This is both a data integrity rule and a regulatory requirement for any POS that issues receipts.
