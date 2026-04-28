@@ -20,7 +20,7 @@ export class AuthQueryService {
       return { active: false, revoked: true, wipe: false };
     }
 
-    const user = await this.authUsersRepository.findById(Number(session.userFk));
+    const user = await this.authUsersRepository.findById(Number(session.userId));
     if (user?.isBlocked) {
       return { active: false, revoked: true, wipe: true };
     }

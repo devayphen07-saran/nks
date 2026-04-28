@@ -3,7 +3,7 @@ import { router } from "expo-router";
 import { phoneSchema } from "../schema/phone";
 import { sendOtp } from "@nks/api-manager";
 import { useRootDispatch } from "../../../store";
-import { ErrorHandler } from "../../../shared/errors";
+import { handleError } from "../../../shared/errors";
 import { OTP_RATE_LIMITS } from '../../../lib/utils/rate-limiter';
 import {
   formatPhoneWithCountryCode,
@@ -71,7 +71,7 @@ export function usePhoneAuth() {
         }
       })
       .catch((error) => {
-        const appError = ErrorHandler.handle(error, {
+        const appError = handleError(error, {
           phone: phone,
           action: "send_otp",
         });

@@ -6,7 +6,7 @@ import { logoutThunk } from "../store/logout-thunk";
 export const useLogout = () => {
   const dispatch = useRootDispatch();
   const authState = useAuthState();
-  const isLoggedIn = !!authState.authResponse;
+  const isLoggedIn = authState.isAuthenticated;
 
   const logout = useCallback(
     async (onSuccess?: () => void) => {

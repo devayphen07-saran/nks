@@ -35,9 +35,9 @@ export const createCodeValue = CREATE_CODE_VALUE.generateAsyncThunk<
 >("codes/createValue");
 
 export const updateCodeValue = UPDATE_CODE_VALUE.generateAsyncThunk<
-  UpdateCodeValueRequest & { id: number }
+  UpdateCodeValueRequest & { guuid: string }
 >("codes/updateValue");
 
 export const deleteCodeValue = DELETE_CODE_VALUE.generateAsyncThunk<{
-  id: number;
+  guuid: string;
 }>("codes/deleteValue");

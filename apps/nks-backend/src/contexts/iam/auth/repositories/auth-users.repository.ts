@@ -57,8 +57,9 @@ export class AuthUsersRepository extends BaseRepository {
   /**
    * Find user by email
    */
-  async findByEmail(email: string): Promise<DbUser | null> {
-    const [user] = await this.db
+  async findByEmail(email: string, tx?: Db): Promise<DbUser | null> {
+    const conn = tx ?? this.db;
+    const [user] = await conn
       .select()
       .from(schema.users)
       .where(and(eq(schema.users.email, email), isNull(schema.users.deletedAt)))
@@ -84,7 +85,7 @@ export class AuthUsersRepository extends BaseRepository {
       .innerJoin(
         schema.userAuthProvider,
         and(
-          eq(schema.userAuthProvider.userFk, schema.users.id),
+          eq(schema.userAuthProvider.userId, schema.users.id),
           eq(schema.userAuthProvider.providerId, 'email'),
         ),
       )
@@ -207,8 +208,9 @@ export class AuthUsersRepository extends BaseRepository {
   /**
    * Mark email as verified
    */
-  async verifyEmail(userId: number): Promise<void> {
-    await this.db
+  async verifyEmail(userId: number, tx?: Db): Promise<void> {
+    const conn = tx ?? this.db;
+    await conn
       .update(schema.users)
       .set({ emailVerified: true })
       .where(eq(schema.users.id, userId));
@@ -487,7 +489,7 @@ export class AuthUsersRepository extends BaseRepository {
         // Step 2: Create auth provider (only if provider data supplied)
         if (authProviderData) {
           await tx.insert(schema.userAuthProvider).values({
-            userFk: created.id,
+            userId: created.id,
             providerId: authProviderData.providerId,
             accountId: authProviderData.accountId,
             password: authProviderData.password,

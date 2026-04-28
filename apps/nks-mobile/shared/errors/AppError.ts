@@ -14,7 +14,6 @@ import { ErrorCode, ErrorContext, ERROR_MESSAGES } from "../types/errors";
  */
 export class AppError extends Error {
   public readonly code: ErrorCode;
-  public readonly message: string;
   public readonly statusCode?: number;
   public readonly context: ErrorContext;
 
@@ -24,13 +23,11 @@ export class AppError extends Error {
     statusCode?: number,
     context: ErrorContext = {},
   ) {
-    // Use provided message or fall back to default
     const finalMessage = message || ERROR_MESSAGES[code];
 
     super(finalMessage);
     this.name = "AppError";
     this.code = code;
-    this.message = finalMessage;
     this.statusCode = statusCode;
     this.context = context;
 

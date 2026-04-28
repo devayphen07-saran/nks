@@ -31,3 +31,6 @@ export const OTP_EXPIRY_MS = 15 * 60 * 1000;
 
 /** Retention window for revoked session rows (days) — purged by the cleanup scheduler. */
 export const REVOKED_SESSION_RETENTION_DAYS = 30;
+
+/** Maximum OTP verification attempts before the record is locked. */
+export const OTP_MAX_ATTEMPTS = 5;

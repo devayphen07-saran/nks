@@ -21,7 +21,7 @@ export class AuthProviderRepository extends BaseRepository {
       .from(schema.userAuthProvider)
       .where(
         and(
-          eq(schema.userAuthProvider.userFk, userId),
+          eq(schema.userAuthProvider.userId, userId),
           eq(schema.userAuthProvider.providerId, providerId),
         ),
       )
@@ -41,7 +41,7 @@ export class AuthProviderRepository extends BaseRepository {
       .from(schema.userAuthProvider)
       .where(
         and(
-          eq(schema.userAuthProvider.userFk, userId),
+          eq(schema.userAuthProvider.userId, userId),
           eq(schema.userAuthProvider.providerId, providerId),
         ),
       )
@@ -72,13 +72,12 @@ export class AuthProviderRepository extends BaseRepository {
     providerId: number,
     isVerified: boolean,
     verifiedAt?: Date,
+    tx?: Db,
   ): Promise<void> {
-    await this.db
+    const conn = tx ?? this.db;
+    await conn
       .update(schema.userAuthProvider)
-      .set({
-        isVerified,
-        verifiedAt: verifiedAt ?? new Date(),
-      })
+      .set({ isVerified, verifiedAt: verifiedAt ?? new Date() })
       .where(eq(schema.userAuthProvider.id, providerId));
   }
 }

@@ -55,6 +55,13 @@ export class SessionValidatorService {
       this.csrf.validateRequest(req, session.csrfSecret);
     }
 
+    if (authType === 'bearer' && session.deviceId) {
+      const requestDeviceId = (req.headers['x-device-id'] as string | undefined) ?? null;
+      if (requestDeviceId && requestDeviceId !== session.deviceId) {
+        throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_SESSION_EXPIRED, message: 'Device changed — please re-authenticate.' });
+      }
+    }
+
     return { session, user, roles };
   }
 }

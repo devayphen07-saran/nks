@@ -188,8 +188,12 @@ export class OtpRepository extends BaseRepository {
     return otp ?? null;
   }
 
-  async markAsUsedByReqId(reqId: string): Promise<void> {
-    await this.db
+  /**
+   * CAS mark-as-used by reqId: only flips is_used when currently false.
+   * Returns true if this call won the race, false if a concurrent call already claimed it.
+   */
+  async markAsUsedByReqId(reqId: string): Promise<boolean> {
+    const rows = await this.db
       .update(schema.otpVerification)
       .set({ isUsed: true })
       .where(
@@ -197,6 +201,8 @@ export class OtpRepository extends BaseRepository {
           eq(schema.otpVerification.reqId, reqId),
           eq(schema.otpVerification.isUsed, false),
         ),
-      );
+      )
+      .returning({ id: schema.otpVerification.id });
+    return rows.length > 0;
   }
 }

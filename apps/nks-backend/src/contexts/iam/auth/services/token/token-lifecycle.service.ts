@@ -85,7 +85,7 @@ export class TokenLifecycleService {
     // Step 2b: Theft detection — if token was already rotated, terminate all sessions
     if (session.refreshTokenRevokedAt !== null) {
       this.logger.error(
-        `TOKEN THEFT DETECTED: User ${session.userFk} reused rotated refresh token. Session ${session.id} compromised.`,
+        `TOKEN THEFT DETECTED: User ${session.userId} reused rotated refresh token. Session ${session.id} compromised.`,
         {
           sessionId: session.id,
           revokedAt: session.refreshTokenRevokedAt,
@@ -96,7 +96,7 @@ export class TokenLifecycleService {
       // table is the security-facing record that compliance tools query.
       this.auditService.log({
         action: 'TOKEN_REVOKE',
-        userId: session.userFk,
+        userId: session.userId,
         description: 'TOKEN THEFT: refresh token reused after rotation — all sessions force-terminated',
         severity: 'critical',
         resourceType: 'session',
@@ -111,7 +111,7 @@ export class TokenLifecycleService {
       // already marked (refreshTokenRevokedAt set), so further reuse is rejected
       // before the listener fires. Other sessions are cleaned up asynchronously.
       this.eventEmitter.emit(SessionEvents.REVOKE_ALL_FOR_USER, {
-        userId: session.userFk,
+        userId: session.userId,
         reason: 'TOKEN_REUSE',
       });
       TokenLifecycleValidator.assertNotCompromised(
@@ -131,8 +131,8 @@ export class TokenLifecycleService {
 
     // Step 4: Fetch permissions + user in parallel
     const [permissions, user] = await Promise.all([
-      this.permissionsService.getUserPermissions(session.userFk),
-      this.authUsersRepository.findEmailAndGuuid(session.userFk),
+      this.permissionsService.getUserPermissions(session.userId),
+      this.authUsersRepository.findEmailAndGuuid(session.userId),
     ]);
 
     if (!user?.guuid) {
@@ -154,7 +154,7 @@ export class TokenLifecycleService {
       session.roleHash !== null && currentRoleHash !== session.roleHash;
     if (permissionsChanged) {
       this.logger.warn(
-        `Permissions changed for user ${session.userFk} during token refresh (session ${session.id}). Client will receive permissionsChanged=true.`,
+        `Permissions changed for user ${session.userId} during token refresh (session ${session.id}). Client will receive permissionsChanged=true.`,
       );
     }
 
@@ -188,12 +188,16 @@ export class TokenLifecycleService {
       },
     );
 
+    // assertRotationSucceeded throws if rotated === false.
+    // JWT is signed below only after this line confirms the DB row was updated —
+    // no orphaned token possible. The warn log is intentionally kept before the
+    // throw so the race is observable in logs before the request is rejected.
     if (!rotated) {
       this.logger.warn(
         `Refresh race detected for session ${session.id} — another refresh already completed`,
       );
     }
-    TokenLifecycleValidator.assertRotationSucceeded(rotated);
+    TokenLifecycleValidator.assertRotationSucceeded(rotated); // throws if false
 
     // Step 7: Sign JWT only after rotation is confirmed in DB.
     // Signing before rotation risks an orphaned JWT that passes AuthGuard
@@ -225,7 +229,7 @@ export class TokenLifecycleService {
     const primaryStore =
       storeOwnerRoleId && validatedDefaultStoreId
         ? await this.roleQuery.findPrimaryStoreForUser(
-            session.userFk,
+            session.userId,
             storeOwnerRoleId,
           )
         : null;
@@ -246,12 +250,12 @@ export class TokenLifecycleService {
       OFFLINE_JWT_EXPIRATION,
     );
 
-    this.logger.log(`Session rotated for user ${session.userFk}`);
+    this.logger.log(`Session rotated for user ${session.userId}`);
 
     const envelope = AuthMapper.buildAuthResponseEnvelope(
       {
         user: {
-          id: session.userFk,
+          id: session.userId,
           guuid: user.guuid,
           iamUserId: user.iamUserId,
           firstName: user.firstName,

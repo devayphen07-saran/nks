@@ -30,10 +30,26 @@ export class SessionTokenExtractorService {
     const cookie = cookies[AuthControllerHelpers.SESSION_COOKIE_NAME] ?? null;
 
     if (bearer && cookie) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.BAD_REQUEST,
-        message: 'Use Bearer token or session cookie — not both.',
-      });
+      // Mobile clients (iOS/Android) maintain a global HTTP cookie jar — the
+      // nks_session cookie set at login is automatically included in every
+      // subsequent request alongside the explicit Authorization header.
+      // CSRF attacks require a browser context; mobile apps with an explicit
+      // Bearer header are not vulnerable, so we prefer Bearer and ignore the
+      // cookie rather than rejecting the request.
+      const deviceType = req.headers['x-device-type'];
+      const isMobile =
+        deviceType === 'IOS' ||
+        deviceType === 'ANDROID' ||
+        deviceType === 'ios' ||
+        deviceType === 'android';
+
+      if (!isMobile) {
+        throw new BadRequestException({
+          errorCode: ErrorCode.BAD_REQUEST,
+          message: 'Use Bearer token or session cookie — not both.',
+        });
+      }
+      // Mobile: fall through to Bearer branch below
     }
 
     if (bearer) return { token: bearer, authType: 'bearer' };

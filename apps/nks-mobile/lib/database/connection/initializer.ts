@@ -79,15 +79,38 @@ async function _runInit(): Promise<void> {
   try {
     await _openAndConfigure(encryptionKey);
   } catch (err) {
-    if (state.wasWiped) {
-      // Database was wiped due to corruption — retry once with a clean file.
-      // All handles were already closed inside _openAndConfigure before the throw.
-      log.warn('Retrying initialization after corruption wipe...');
+    // Two wipe-and-retry paths:
+    // 1. Integrity check failed (wasWiped=true) — DB file is corrupted.
+    // 2. Migration failed — DB is in a partially-applied state (e.g. a migration
+    //    was edited after being applied, leaving some tables present but the
+    //    tracking record absent). Wipe and re-migrate on a clean file.
+    if (state.wasWiped || _isMigrationError(err)) {
+      if (!state.wasWiped) {
+        // Migration failure: close the handle and delete the file ourselves.
+        await state.rawSqlite?.closeAsync().catch(() => {});
+        await SQLite.deleteDatabaseAsync(DB_NAME).catch(() => {});
+        state.rawSqlite = null;
+        state.drizzleDb = null;
+        log.warn('Migration failed — wiping database and retrying with clean file');
+      } else {
+        log.warn('Retrying initialization after corruption wipe...');
+      }
       await _openAndConfigure(encryptionKey);
       return;
     }
     throw err;
   }
+}
+
+/** Returns true when the error is a Drizzle migration failure (table already exists etc.) */
+function _isMigrationError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message;
+  return (
+    msg.includes('Failed to run the query') ||
+    msg.includes('already exists') ||
+    msg.includes('SQLITE_ERROR')
+  );
 }
 
 async function _openAndConfigure(encryptionKey: string): Promise<void> {

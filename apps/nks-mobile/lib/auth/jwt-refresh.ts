@@ -13,6 +13,8 @@
  */
 
 import { AppState, type AppStateStatus } from "react-native";
+import type { AuthResponse } from "@nks/api-manager";
+import { tokenManager } from "@nks/mobile-utils";
 import { JWTManager } from "./jwt-manager";
 import { refreshTokenAttempt } from "./refresh-token-attempt";
 import { isTokenExpired } from "./token-expiry";
@@ -26,6 +28,8 @@ const REFRESH_THRESHOLD_MS = 3 * 60 * 1000;
 let _isRefreshing = false;
 /** Tracks the active AppState subscription so repeated registrations don't stack. */
 let _activeUnregister: (() => void) | null = null;
+/** Callback to sync Redux after a successful proactive refresh. */
+let _onSuccess: ((authResponse: AuthResponse) => void) | null = null;
 
 function needsRefresh(): boolean {
   const raw = JWTManager.getRawAccessToken();
@@ -59,6 +63,16 @@ export async function tryProactiveRefresh(): Promise<void> {
     }
     if (result.success) {
       log.info("Proactive refresh succeeded");
+      if (_onSuccess) {
+        try {
+          const envelope = await tokenManager.loadSession<AuthResponse>();
+          if (envelope?.data) {
+            _onSuccess(envelope.data);
+          }
+        } catch (syncErr) {
+          log.debug("Redux sync after proactive refresh failed:", syncErr);
+        }
+      }
     } else {
       log.warn("Proactive refresh returned false (network/server error)");
     }
@@ -79,7 +93,11 @@ export async function tryProactiveRefresh(): Promise<void> {
  * Safe to call multiple times — removes the previous listener first.
  * Returns the unregister function (same as unregisterProactiveRefresh).
  */
-export function registerProactiveRefresh(): () => void {
+export function registerProactiveRefresh(
+  onSuccess?: (authResponse: AuthResponse) => void,
+): () => void {
+  _onSuccess = onSuccess ?? null;
+
   // Remove any existing listener before creating a new one
   if (_activeUnregister) {
     _activeUnregister();
@@ -134,6 +152,7 @@ export function unregisterProactiveRefresh(): void {
  */
 export function resetRefreshState(): void {
   _isRefreshing = false;
+  _onSuccess = null;
   if (_activeUnregister) {
     _activeUnregister();
   }

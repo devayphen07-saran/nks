@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { router, useNavigation } from "expo-router";
+import { ROUTES } from "../../lib/navigation/routes";
 import { DrawerActions } from "@react-navigation/native";
 import styled from "styled-components/native";
 import {
@@ -19,6 +20,7 @@ import {
   Column,
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
+import { setActiveStore } from "@nks/state-manager";
 import { useRootDispatch, useAuthState } from "../../store";
 import { getMyStores } from "@nks/api-manager";
 import {
@@ -29,6 +31,7 @@ import {
   FilterButtonText,
   LoadingCard,
 } from "../shared/list-screen-styles";
+import { handleError } from "../../shared/errors";
 
 interface Store {
   id: number;
@@ -68,8 +71,9 @@ export function StoreListScreen() {
         setMyStores(data?.myStores ?? []);
         setInvitedStores(data?.invitedStores ?? []);
       })
-      .catch(() => {
-        setFetchError("Failed to load stores. Pull down to retry.");
+      .catch((err) => {
+        const appError = handleError(err, { action: "fetch_stores" });
+        setFetchError(appError.getUserMessage());
       })
       .finally(() => setIsLoading(false));
   }, [dispatch]);
@@ -91,9 +95,10 @@ export function StoreListScreen() {
       s.storeCode?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  const handleSelectStore = useCallback(async (_store: Store) => {
-    router.replace("/(protected)/(store)/store");
-  }, []);
+  const handleSelectStore = useCallback((store: Store) => {
+    dispatch(setActiveStore({ guuid: store.guuid, name: store.storeName }));
+    router.replace(ROUTES.STORE_HOME);
+  }, [dispatch]);
 
   const handleCreateStore = useCallback(() => {
     router.push("/(protected)/(store)/setup");

@@ -1,6 +1,7 @@
 import type { AuthResponse } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
 import { sessionTokenReg } from "@nks/utils";
+import { jwtDecode } from "jwt-decode";
 import { syncServerTime } from '../lib/utils/server-time';
 import { setCredentials, logout } from "./auth-slice";
 import { clearAuthState } from "./clear-auth-state";
@@ -11,6 +12,8 @@ import {
 } from '../lib/auth/token-validators';
 import { sanitizeError } from '../lib/utils/log-sanitizer';
 import { JWTManager } from '../lib/auth/jwt-manager';
+import { offlineSession } from '../lib/auth/offline-session';
+import { seedSyncStateFromAuth } from '../lib/sync/sync-engine';
 import { createLogger } from '../lib/utils/logger';
 import type { AppDispatch } from "./index";
 
@@ -39,7 +42,6 @@ export async function persistLogin(
       throw new Error(`Invalid auth response: ${validation.errors.join(", ")}`);
     }
 
-    // Validate refresh token format (Issue 9.2)
     const refreshTokenCheck = validateRefreshTokenFormat(
       authResponse.auth?.refreshToken,
     );
@@ -47,7 +49,6 @@ export async function persistLogin(
       throw new Error(`Refresh token invalid: ${refreshTokenCheck.error}`);
     }
 
-    // Analyze storage usage (Issue 1.1)
     const storageAnalysis = analyzeStorageUsage(authResponse);
     log.info(
       `Session valid. Size: ${storageAnalysis.sizeBytes}b (${storageAnalysis.usagePercent}%)`,
@@ -96,17 +97,38 @@ export async function persistLogin(
     });
 
     const syncPromise = syncServerTime()
-      .then(() => {
-        log.info("Server time synced");
-      })
-      .catch((err) => {
-        log.warn("Server time sync failed (non-critical):", sanitizeError(err));
+      .then(() => log.info("Server time synced"))
+      .catch((err) => log.warn("Server time sync failed (non-critical):", sanitizeError(err)));
+
+    const offlineSessionPromise = (async () => {
+      const offlineToken = authResponse.offline?.token;
+      const userGuuid = authResponse.user?.guuid;
+      if (!offlineToken || !userGuuid) return;
+
+      let roles: string[] = [];
+      try {
+        const decoded = jwtDecode<{ roles?: string[] }>(offlineToken);
+        roles = decoded.roles ?? [];
+      } catch {
+        // Empty roles OK — updated on next token refresh
+      }
+
+      await offlineSession.create({
+        userGuuid,
+        storeGuuid: authResponse.context?.defaultStoreGuuid ?? null,
+        storeName: '',
+        roles,
+        offlineToken,
+        signature: authResponse.offline?.sessionSignature,
+        deviceId: authResponse.sync?.deviceId ?? undefined,
       });
+      log.info("Offline session created");
+    })().catch((err) => log.warn("Offline session create failed (non-critical):", sanitizeError(err)));
 
-    // Offline session is created after store API responds (store selection flow),
-    // not at login — store API provides accurate per-store roles + numeric storeId.
+    const syncSeedPromise = seedSyncStateFromAuth(authResponse.sync?.lastSyncedAt ?? null)
+      .catch((err) => log.warn("Sync state seed failed (non-critical):", sanitizeError(err)));
 
-    await Promise.allSettled([jwtPersistPromise, syncPromise]);
+    await Promise.allSettled([jwtPersistPromise, syncPromise, offlineSessionPromise, syncSeedPromise]);
 
     // ════════════════════════════════════════════════════════════════════════════
     // STATE: Update Redux store

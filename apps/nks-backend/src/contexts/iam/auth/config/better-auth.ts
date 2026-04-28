@@ -105,9 +105,14 @@ export const getAuth = (
         userRoles: { type: 'string', required: false }, // JSON array of roles
         primaryRole: { type: 'string', required: false }, // Primary role code
 
-        // Note: roleHash and accessToken are handled separately in auth.service.ts
-        // They are not defined here to avoid Better Auth insertion conflicts
-        // Instead, they are UPDATEd after session creation
+        // csrfSecret must be declared so BetterAuth inserts '' (NOT NULL constraint).
+        // SessionBootstrapService.updateByToken overwrites it with the real HMAC secret
+        // immediately after session creation. The empty-string placeholder is live
+        // during the window between createSession() and updateByToken() — if a request
+        // arrives in that window, CSRF validation will fail rather than silently pass.
+        csrfSecret: { type: 'string', required: false, defaultValue: '' },
+
+        // Note: roleHash is handled separately — UPDATEd after session creation.
       },
       expiresIn: 60 * 60 * 24 * 7, // 7 days (aligned with refresh token expiry)
       updateAge: 60 * 60 * 24, // refresh if older than 1 day

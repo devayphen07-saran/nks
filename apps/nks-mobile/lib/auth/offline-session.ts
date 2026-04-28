@@ -10,7 +10,7 @@
  * Mobile stores the server-provided signature but cannot regenerate it.
  */
 
-import { v4 as uuidv4 } from "uuid";
+import * as ExpoCrypto from "expo-crypto";
 import {
   saveSecureItem,
   getSecureItem,
@@ -41,10 +41,10 @@ const OFFLINE_SESSION_DURATION_MS = THREE_DAYS_MS;
 export interface OfflineSession {
   /** Unique identifier for this offline session (UUID) — used in outbox audit trail */
   id: string;
-  /** User ID from auth response */
-  userId: number;
-  /** Store ID selected during login */
-  storeId: number;
+  /** User GUUID from auth response */
+  userGuuid: string;
+  /** Store GUUID selected during login (null when no store is active) */
+  storeGuuid: string | null;
   /** Store name for UI display */
   storeName: string;
   /** User roles from auth response */
@@ -88,11 +88,30 @@ export interface StatusMessage {
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 /**
- * Check if an offline session is still valid (not expired)
+ * Check if an offline session is still valid (not expired).
+ *
+ * Validity is determined exclusively from the offline JWT's `exp` claim
+ * (RS256-signed by the server, updated on every token refresh).
+ * A session without a valid JWT is considered invalid — there is no fallback.
+ *
+ * `offlineValidUntil` is kept for two purposes only:
+ *   1. Included in the server-side HMAC payload submitted on sync push.
+ *   2. UI display in `getStatusMessage()` (hours remaining).
+ * It must not be mutated locally — doing so invalidates the server's HMAC check.
  */
 export function isSessionValid(session: OfflineSession | null): boolean {
-  if (!session) return false;
-  return session.offlineValidUntil > Date.now();
+  if (!session?.offlineToken) return false;
+
+  try {
+    const parts = session.offlineToken.split('.');
+    if (parts.length !== 3) return false;
+    const payload = JSON.parse(
+      atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
+    ) as { exp?: number };
+    return typeof payload.exp === 'number' && payload.exp * 1000 > Date.now();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -142,7 +161,7 @@ export function isRolesStale(session: OfflineSession | null): {
  * Full cryptographic verification (re-computing the HMAC) happens server-side
  * whenever the session payload is submitted in a sync or auth call.
  */
-export function verifySessionIntegrity(session: OfflineSession): boolean {
+export function isSessionSignaturePresent(session: OfflineSession): boolean {
   if (!session.signature) {
     log.warn("No server-provided signature — session may be forged or from an older client");
     return false;
@@ -204,8 +223,8 @@ export const offlineSession = {
    *   in the auth response). If absent (older server), the session is stored unsigned.
    */
   async create(input: {
-    userId: number;
-    storeId: number;
+    userGuuid: string;
+    storeGuuid: string | null;
     storeName: string;
     roles: string[];
     offlineToken: string;
@@ -214,9 +233,9 @@ export const offlineSession = {
   }): Promise<OfflineSession> {
     const now = Date.now();
     const session: OfflineSession = {
-      id: uuidv4(),
-      userId: input.userId,
-      storeId: input.storeId,
+      id: ExpoCrypto.randomUUID(),
+      userGuuid: input.userGuuid,
+      storeGuuid: input.storeGuuid,
       storeName: input.storeName,
       roles: input.roles,
       offlineValidUntil: now + OFFLINE_SESSION_DURATION_MS,
@@ -248,7 +267,7 @@ export const offlineSession = {
 
       const session = JSON.parse(raw) as OfflineSession;
 
-      if (!verifySessionIntegrity(session)) {
+      if (!isSessionSignaturePresent(session)) {
         await deleteSecureItem(OFFLINE_SESSION_KEY);
         return null;
       }
@@ -271,14 +290,18 @@ export const offlineSession = {
   isRolesStale,
 
   /**
-   * Extends offlineValidUntil by 3 days.
-   * Called on every successful token refresh.
-   * Does NOT update the signature — extend is a local time extension only.
+   * Records a successful token refresh without touching `offlineValidUntil`.
+   *
+   * `offlineValidUntil` is included in the server-side HMAC payload submitted
+   * on every sync push. Changing it locally would invalidate that signature.
+   * Session validity is now driven by the offline JWT's own `exp` claim
+   * (updated on every refresh) — `offlineValidUntil` is kept at its original
+   * server-issued value so the HMAC always verifies correctly.
    */
   async extendValidity(session: OfflineSession): Promise<OfflineSession> {
     const updated = {
       ...session,
-      offlineValidUntil: Date.now() + OFFLINE_SESSION_DURATION_MS,
+      lastSyncedAt: Date.now(),
     };
     await saveSecureItem(OFFLINE_SESSION_KEY, JSON.stringify(updated));
     return updated;
@@ -317,9 +340,9 @@ export const offlineSession = {
   },
 
   /**
-   * Verify offline session integrity (signature presence check).
+   * Check that a server-issued signature is present and well-formed (presence check only).
    */
-  verify: verifySessionIntegrity,
+  verify: isSessionSignaturePresent,
 
   /**
    * Get a human-readable status message for UI display.

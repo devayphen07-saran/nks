@@ -1,7 +1,7 @@
 // ─── Route Response ────────────────────────────────────────────────────────
 
 export interface RouteResponse {
-  id: number;
+  guuid: string;
   routePath: string;
   routeName: string;
   description?: string | null;
@@ -10,9 +10,9 @@ export interface RouteResponse {
   routeScope: "admin" | "store";
   isPublic: boolean;
   isHidden: boolean;
-  parentRouteFk?: number | null;
+  parentRouteGuuid?: string | null;
   fullPath: string;
-  sortOrder: number;
+  sortOrder: number | null;
   canView: boolean;
   canCreate: boolean;
   canEdit: boolean;
@@ -23,8 +23,9 @@ export interface RouteResponse {
 
 export interface RouteUserSummary {
   guuid: string;
-  name: string;
-  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
   primaryRole: string | null;
 }
 

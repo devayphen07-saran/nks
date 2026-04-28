@@ -6,7 +6,10 @@
 import { phoneReg, INDIA_DIAL_CODE, PHONE_LENGTH } from "./constants";
 
 export function formatPhoneWithCountryCode(phone: string): string {
-  return INDIA_DIAL_CODE + phone.trim();
+  // Strip any existing +XX or +XXX prefix so this function is safe to call on
+  // already-formatted numbers without producing a double-prefix like ++91...
+  const digits = phone.trim().replace(/^\+\d{1,3}/, '');
+  return INDIA_DIAL_CODE + digits;
 }
 
 export function maskPhone(phone: string): string {

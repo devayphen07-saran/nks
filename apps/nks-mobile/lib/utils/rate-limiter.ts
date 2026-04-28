@@ -42,11 +42,11 @@ export interface RateLimitResult {
 }
 
 interface PersistedState {
-  a: number;  // attempts
-  f: number;  // firstAttemptTime
-  l: number;  // lastAttemptTime
-  k: boolean; // isLocked
-  e: number;  // lockExpiryTime
+  attempts: number;
+  firstAttemptTime: number;
+  lastAttemptTime: number;
+  isLocked: boolean;
+  lockExpiryTime: number;
 }
 
 // ─── Class ───────────────────────────────────────────────────────────────────
@@ -82,12 +82,12 @@ export class RateLimiter {
       const raw = await AsyncStorage.getItem(this.storageKey);
       if (raw) {
         const s: PersistedState = JSON.parse(raw);
-        if (typeof s.a === "number" && s.a >= 0) {
-          this.attempts = s.a;
-          this.firstAttemptTime = s.f;
-          this.lastAttemptTime = s.l;
-          this.isLocked = s.k;
-          this.lockExpiryTime = s.e;
+        if (typeof s.attempts === "number" && s.attempts >= 0) {
+          this.attempts = s.attempts;
+          this.firstAttemptTime = s.firstAttemptTime;
+          this.lastAttemptTime = s.lastAttemptTime;
+          this.isLocked = s.isLocked;
+          this.lockExpiryTime = s.lockExpiryTime;
         }
       }
     } catch {
@@ -101,20 +101,16 @@ export class RateLimiter {
 
   /**
    * Pure read — returns whether the next attempt is allowed.
-   * Does NOT record the attempt. Call `recordAttempt()` separately
+   * Does NOT mutate state. Call `recordAttempt()` separately
    * after the action is actually dispatched.
    */
   check(): RateLimitResult {
     const now = Date.now();
 
-    // Unlock if lock has expired
-    if (this.isLocked && now >= this.lockExpiryTime) {
-      this.clearInternal();
-      this.persist();
-    }
+    // Lock expired — treat as unlocked (cleanup happens in recordAttempt)
+    const effectivelyLocked = this.isLocked && now < this.lockExpiryTime;
 
-    // Still locked
-    if (this.isLocked) {
+    if (effectivelyLocked) {
       const secondsRemaining = Math.ceil((this.lockExpiryTime - now) / 1000);
       return {
         allowed: false,
@@ -126,40 +122,17 @@ export class RateLimiter {
       };
     }
 
-    // Time window elapsed — counters are stale
-    if (this.attempts > 0 && now - this.firstAttemptTime > this.config.timeWindowMs) {
-      this.clearInternal();
-      this.persist();
-    }
+    // Time window elapsed — counters are stale, treat as fresh (cleanup in recordAttempt)
+    const windowExpired =
+      this.attempts > 0 && now - this.firstAttemptTime > this.config.timeWindowMs;
+    const effectiveAttempts = windowExpired ? 0 : this.attempts;
 
-    // Minimum delay between attempts
-    if (
-      this.config.minDelayBetweenAttemptsMs &&
-      this.lastAttemptTime > 0 &&
-      now - this.lastAttemptTime < this.config.minDelayBetweenAttemptsMs
-    ) {
-      const secondsRemaining = Math.ceil(
-        (this.config.minDelayBetweenAttemptsMs - (now - this.lastAttemptTime)) /
-          1000,
-      );
-      return {
-        allowed: false,
-        attemptsRemaining: this.config.maxAttempts - this.attempts,
-        secondsUntilReset: secondsRemaining,
-        message: `Please wait ${secondsRemaining}s before trying again.`,
-      };
-    }
-
-    // Max attempts reached — engage lock
-    if (this.attempts >= this.config.maxAttempts) {
+    // Max attempts reached (lock will be engaged in recordAttempt)
+    if (effectiveAttempts >= this.config.maxAttempts) {
       const lockDuration = Math.max(
         this.config.timeWindowMs - (now - this.firstAttemptTime),
-        60_000, // minimum 1 minute
+        60_000,
       );
-      this.isLocked = true;
-      this.lockExpiryTime = now + lockDuration;
-      this.persist();
-
       const secondsRemaining = Math.ceil(lockDuration / 1000);
       return {
         allowed: false,
@@ -171,9 +144,28 @@ export class RateLimiter {
       };
     }
 
-    // Allowed
-    const attemptsRemaining = this.config.maxAttempts - this.attempts;
-    return { allowed: true, attemptsRemaining, secondsUntilReset: 0 };
+    // Minimum delay between attempts
+    if (
+      this.config.minDelayBetweenAttemptsMs &&
+      this.lastAttemptTime > 0 &&
+      now - this.lastAttemptTime < this.config.minDelayBetweenAttemptsMs
+    ) {
+      const secondsRemaining = Math.ceil(
+        (this.config.minDelayBetweenAttemptsMs - (now - this.lastAttemptTime)) / 1000,
+      );
+      return {
+        allowed: false,
+        attemptsRemaining: this.config.maxAttempts - effectiveAttempts,
+        secondsUntilReset: secondsRemaining,
+        message: `Please wait ${secondsRemaining}s before trying again.`,
+      };
+    }
+
+    return {
+      allowed: true,
+      attemptsRemaining: this.config.maxAttempts - effectiveAttempts,
+      secondsUntilReset: 0,
+    };
   }
 
   /**
@@ -182,11 +174,30 @@ export class RateLimiter {
    */
   recordAttempt(): void {
     const now = Date.now();
+
+    // Flush stale state before recording
+    if (this.isLocked && now >= this.lockExpiryTime) {
+      this.clearInternal();
+    } else if (this.attempts > 0 && now - this.firstAttemptTime > this.config.timeWindowMs) {
+      this.clearInternal();
+    }
+
     if (this.attempts === 0) {
       this.firstAttemptTime = now;
     }
     this.lastAttemptTime = now;
     this.attempts++;
+
+    // Engage lock if threshold crossed
+    if (this.attempts >= this.config.maxAttempts) {
+      const lockDuration = Math.max(
+        this.config.timeWindowMs - (now - this.firstAttemptTime),
+        60_000,
+      );
+      this.isLocked = true;
+      this.lockExpiryTime = now + lockDuration;
+    }
+
     this.persist();
   }
 
@@ -224,11 +235,11 @@ export class RateLimiter {
   /** Fire-and-forget write to AsyncStorage. */
   private persist(): void {
     const state: PersistedState = {
-      a: this.attempts,
-      f: this.firstAttemptTime,
-      l: this.lastAttemptTime,
-      k: this.isLocked,
-      e: this.lockExpiryTime,
+      attempts: this.attempts,
+      firstAttemptTime: this.firstAttemptTime,
+      lastAttemptTime: this.lastAttemptTime,
+      isLocked: this.isLocked,
+      lockExpiryTime: this.lockExpiryTime,
     };
     AsyncStorage.setItem(this.storageKey, JSON.stringify(state)).catch((err: unknown) => {
       log.warn("Failed to persist rate limiter state:", err);

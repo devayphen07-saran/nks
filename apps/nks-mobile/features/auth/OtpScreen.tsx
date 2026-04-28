@@ -170,7 +170,7 @@ export function OtpScreen() {
               </Column>
 
               {/* ─── Resend ─── */}
-              <ResendRow gap={6} align="center" justify="center">
+              <Row gap={6} align="center" justify="center">
                 <Typography.Body color={theme.colorTextSecondary}>
                   Didn't receive the OTP?
                 </Typography.Body>
@@ -194,7 +194,7 @@ export function OtpScreen() {
                     </Typography.Body>
                   </ResendButton>
                 )}
-              </ResendRow>
+              </Row>
 
               {/* ─── Verify Button ─── */}
               <Button
@@ -286,8 +286,6 @@ const OtpDigit = styled(Typography.H3)`
   font-size: 24px;
   color: ${({ theme }) => theme.colorText};
 `;
-
-const ResendRow = styled(Row)``;
 
 const ResendButton = styled.TouchableOpacity`
   padding-top: ${({ theme }) => theme.sizing.xxSmall}px;

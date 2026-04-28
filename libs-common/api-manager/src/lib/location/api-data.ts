@@ -19,7 +19,7 @@ export const GET_DISTRICTS_BY_STATE: APIData = new APIData(
 // ─── Pincodes ──────────────────────────────────────────────────────────────
 
 export const GET_PINCODES_BY_DISTRICT: APIData = new APIData(
-  "location/districts/:districtId/pincodes",
+  "location/districts/:districtGuuid/pincodes",
   APIMethod.GET,
   { public: true },
 );

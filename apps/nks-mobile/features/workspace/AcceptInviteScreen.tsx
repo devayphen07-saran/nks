@@ -52,7 +52,7 @@ export function AcceptInviteScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Hero $topInset={insets.top}>
-            <HeroContent gap="xSmall" align="center">
+            <Column gap="xSmall" align="center">
               <LogoRow gap="small" align="center">
                 <LogoCircle>
                   <LucideIcon
@@ -65,7 +65,7 @@ export function AcceptInviteScreen() {
                   NKS
                 </Typography.H4>
               </LogoRow>
-            </HeroContent>
+            </Column>
           </Hero>
 
           <PageContent gap="large">
@@ -168,8 +168,6 @@ const Hero = styled.View<{ $topInset: number }>`
   justify-content: flex-start;
   overflow: hidden;
 `;
-
-const HeroContent = styled(Column)``;
 
 const LogoRow = styled(Row)`
   align-self: flex-start;

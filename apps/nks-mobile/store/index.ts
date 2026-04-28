@@ -2,8 +2,8 @@ import { configureStore } from "@reduxjs/toolkit";
 import { useDispatch, useSelector } from "react-redux";
 import { storeSlice } from "@nks/state-manager";
 import { tokenManager } from "@nks/mobile-utils";
-import { authReducer } from "./auth-slice";
-import { setUnauthenticated } from "./auth-slice";
+import { API } from "@nks/api-manager";
+import { authReducer, logout } from "./auth-slice";
 import { refreshSession } from "./refresh-session";
 import { JWTManager } from '../lib/auth/jwt-manager';
 import { offlineSession } from '../lib/auth/offline-session';
@@ -36,15 +36,16 @@ export const useAuthUser = () =>
 // times in quick succession (e.g. two simultaneous 401 responses).
 let _logoutInProgress = false;
 
-// HIGH FIX #2: Make logout atomic — clear storage BEFORE updating Redux state
-// Prevents race condition where Redux is cleared but SecureStore still has old token
 tokenManager.onExpired(async () => {
   if (_logoutInProgress) return;
   _logoutInProgress = true;
 
   try {
-    // Clear all auth state — we skip the backend signOut call because the
-    // session is already expired/invalid (that's why onExpired fired).
+    // Best-effort backend signOut so the server-side session is explicitly
+    // invalidated and appears in audit logs. Fire-and-forget — if the token
+    // is already rejected by the server the call will 401, which is fine.
+    API.post("/auth/logout").catch(() => {});
+
     tokenManager.clear();
     await tokenManager.clearSession();
     await offlineSession.clear();
@@ -59,7 +60,7 @@ tokenManager.onExpired(async () => {
   }
 
   // Only dispatch after storage is definitely cleared
-  store.dispatch(setUnauthenticated());
+  store.dispatch(logout());
 });
 
 // 403 → permissions changed server-side → silently re-fetch a fresh session

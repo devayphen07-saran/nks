@@ -1,13 +1,11 @@
 // ─── Code Category DTOs ───────────────────────────────────────────────────
 
 export interface CodeCategoryResponse {
-  id: number;
+  guuid: string;
   code: string;
-  title: string;
-  description?: string;
+  name: string;
+  description: string | null;
   isSystem: boolean;
-  isActive: boolean;
-  sortOrder?: number;
 }
 
 export type CodeCategoriesListResponse = CodeCategoryResponse[];
@@ -16,17 +14,13 @@ export type CodeCategorySingleResponse = CodeCategoryResponse;
 // ─── Code Value DTOs ──────────────────────────────────────────────────────
 
 export interface CodeValueResponse {
-  id: number;
-  categoryId: number;
-  categoryCode: string;
+  guuid: string;
   code: string;
-  title: string;
-  description?: string;
-  sortOrder?: number;
+  label: string;
+  description: string | null;
+  sortOrder: number | null;
   isSystem: boolean;
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
+  storeGuuid: string | null;
 }
 
 export type CodeValuesListResponse = CodeValueResponse[];
@@ -36,20 +30,21 @@ export type CodeValueSingleResponse = CodeValueResponse;
 
 export interface CreateCodeCategoryRequest {
   code: string;
-  title: string;
+  name: string;
   description?: string;
 }
 
 export interface CreateCodeValueRequest {
   code: string;
-  title: string;
+  label: string;
   description?: string;
   sortOrder?: number;
+  storeGuuid?: string;
 }
 
 export interface UpdateCodeValueRequest {
   code?: string;
-  title?: string;
+  label?: string;
   description?: string;
   sortOrder?: number;
 }

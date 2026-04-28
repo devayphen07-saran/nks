@@ -1,7 +1,6 @@
 /**
  * Device Binding / Session Pinning
  * Binds authentication tokens to device identity to prevent token theft exploitation.
- * ✅ CRITICAL FIX #6.1: Device binding now uses HMAC-SHA256 signature to prevent spoofing
  * Uses Expo-compatible modules — works in both Expo Go and development builds.
  */
 
@@ -31,7 +30,6 @@ export interface DeviceIdentity {
   appVersion: string;
   timestamp: number;
   hash: string;
-  /** ✅ HMAC signature prevents device binding spoofing (Issue 6.1) */
   signature: string;
 }
 
@@ -56,7 +54,6 @@ export async function getStableDeviceId(): Promise<string> {
 /**
  * Gets device identity for token binding.
  * Uses expo-device and expo-application (works in Expo Go).
- * ✅ NEW: Generates HMAC-SHA256 signature to prevent device binding spoofing
  */
 export async function getDeviceIdentity(): Promise<DeviceIdentity> {
   const deviceId = await getStableDeviceId();
@@ -98,7 +95,6 @@ export async function getDeviceIdentity(): Promise<DeviceIdentity> {
 /**
  * Formats device identity for sending in API requests.
  * Server uses this to validate token requests come from expected device.
- * ✅ NOW includes signature for tamper detection
  */
 export function formatDeviceBindingForRequest(
   identity: DeviceIdentity,
@@ -109,7 +105,7 @@ export function formatDeviceBindingForRequest(
     osVersion: identity.osVersion,
     appVersion: identity.appVersion,
     hash: identity.hash,
-    signature: identity.signature, // ✅ HMAC signature for verification
+    signature: identity.signature,
   };
 }
 

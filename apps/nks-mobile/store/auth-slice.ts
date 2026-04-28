@@ -26,11 +26,6 @@ const authSlice = createSlice({
       state.isAuthenticated = false;
       state.authResponse = null;
     },
-    setUnauthenticated: (state) => {
-      state.isInitializing = false;
-      state.isAuthenticated = false;
-      state.authResponse = null;
-    },
   },
   extraReducers: (builder) => {
     builder
@@ -38,8 +33,7 @@ const authSlice = createSlice({
         state.isInitializing = true;
       })
       .addCase("auth/bootstrap/fulfilled", () => {
-        // isInitializing is set to false by setCredentials or setUnauthenticated
-        // dispatched inside the thunk
+        // isInitializing is set to false by setCredentials or logout dispatched inside the thunk
       })
       .addCase("auth/bootstrap/rejected", (state) => {
         state.isInitializing = false;
@@ -49,23 +43,34 @@ const authSlice = createSlice({
   },
 });
 
-export const { setCredentials, logout, setUnauthenticated } = authSlice.actions;
+export const { setCredentials, logout } = authSlice.actions;
 export const authReducer = authSlice.reducer;
 
 /**
  * Derived selector — true when the authenticated user has the SUPER_ADMIN role.
- * Decoded from the jwtToken claims (roles are embedded at login time).
+ *
+ * Primary source: `auth.accessToken` JWT payload (roles are embedded at issuance
+ * and kept fresh by the proactive refresh cycle).
+ *
+ * Fallback: if the access token is absent (edge case — old session format before
+ * accessToken was added to the response schema) we return false safely rather
+ * than throwing, which would prevent the app from rendering.
  */
 export const selectIsSuperAdmin = (state: { auth: AuthState }): boolean => {
   const accessToken = state.auth.authResponse?.auth?.accessToken;
-  if (!accessToken) return false;
-  try {
-    // JWT uses URL-safe Base64 (- → +, _ → /) — atob() needs standard Base64
-    const raw = accessToken.split('.')[1];
-    const payload = JSON.parse(atob(raw.replace(/-/g, '+').replace(/_/g, '/'))) as { roles?: string[] };
-    return payload.roles?.includes(SystemRoleCodes.SUPER_ADMIN) ?? false;
-  } catch {
-    return false;
-  }
-};
 
+  if (accessToken) {
+    try {
+      // JWT uses URL-safe Base64 (- → +, _ → /) — atob() needs standard Base64
+      const raw = accessToken.split(".")[1];
+      const payload = JSON.parse(
+        atob(raw.replace(/-/g, "+").replace(/_/g, "/")),
+      ) as { roles?: string[] };
+      return payload.roles?.includes(SystemRoleCodes.SUPER_ADMIN) ?? false;
+    } catch {
+      // malformed JWT — fall through to false
+    }
+  }
+
+  return false;
+};

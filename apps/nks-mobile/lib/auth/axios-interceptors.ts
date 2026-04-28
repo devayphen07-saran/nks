@@ -66,8 +66,15 @@ async function getDeviceHeaders() {
       'X-App-Version': identity.appVersion,
     };
   } catch {
-    // Non-fatal — backend treats missing X-Device-Type as web client
-    _deviceHeaders = null;
+    // Don't cache on failure — retries next request.
+    // X-Device-Type must always be sent; without it the backend treats the
+    // client as web and omits sessionToken from the response, breaking auth.
+    return {
+      'X-Device-Type': Platform.OS === 'android' ? 'ANDROID' : 'IOS',
+      'X-Device-Id': 'unknown',
+      'X-Device-Name': 'Unknown',
+      'X-App-Version': '0.0.0',
+    };
   }
   return _deviceHeaders;
 }
@@ -199,8 +206,12 @@ export function setupAxiosInterceptors(
           }
 
           if (result.success && result.newToken) {
-            // Refresh succeeded — sync Redux state with fresh session data
-            if (onRefreshSuccess) {
+            // Sync Redux state with the fresh session — but only if logout has not
+            // started racing this refresh. If isClearingTokens is true, the logout
+            // thunk will dispatch its own credentials update; calling onRefreshSuccess
+            // here would briefly set authenticated state that the logout immediately
+            // overwrites, causing a stale-SecureStore / authenticated-Redux mismatch.
+            if (onRefreshSuccess && !tokenMutex.isClearingTokens) {
               try {
                 const envelope = await tokenManager.loadSession<AuthResponse>();
                 if (envelope?.data) {

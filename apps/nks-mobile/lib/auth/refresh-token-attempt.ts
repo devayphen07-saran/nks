@@ -6,6 +6,7 @@
 
 import { API, type AuthResponse } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
+import { jwtDecode } from "jwt-decode";
 import { offlineSession } from "./offline-session";
 import { syncServerTime } from "../utils/server-time";
 import { validateTokensBeforeRefresh } from "./token-expiry";
@@ -70,10 +71,8 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
       };
     }
 
-    // ✅ Update in-memory token
     tokenManager.set(newSessionToken);
 
-    // ✅ Update SecureStore session with new tokens
     const updated: AuthResponse = {
       ...envelope.data,
       auth: {
@@ -90,7 +89,6 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
 
     await tokenManager.persistSession(updated);
 
-    // ✅ Sync JWTManager dual tokens after refresh
     if (result?.auth?.accessToken && result?.offline?.token && result?.auth?.refreshToken) {
       await JWTManager.persistTokens({
         accessToken: result.auth.accessToken,
@@ -101,7 +99,6 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
       });
     }
 
-    // ✅ Sync server time (non-critical)
     try {
       await syncServerTime();
     } catch (error) {
@@ -111,18 +108,47 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
       );
     }
 
-    // ✅ Extend offline session validity on successful token refresh
-    // If permissions changed server-side, mark roles stale so the next sync picks them up
+    // When permissions changed, decode the new offline JWT (which the server
+    // already signed with the updated roles) and write those roles into the
+    // offline session — no extra round-trip to /auth/permissions-delta needed.
     try {
       const session = await offlineSession.load();
       if (session) {
-        if (result?.permissionsChanged) {
-          log.warn("[RefreshAttempt] Permissions changed — marking offline session roles stale");
-          await offlineSession.extendValidity({ ...session, lastRoleSyncAt: 0 });
+        const newOfflineToken = result?.offline?.token ?? undefined;
+
+        if (result?.permissionsChanged && newOfflineToken) {
+          try {
+            const decoded = jwtDecode<{ roles?: string[] }>(newOfflineToken);
+            const newRoles = decoded.roles ?? [];
+            await offlineSession.updateRolesAndExtend(session, newRoles, newOfflineToken);
+            log.info("[RefreshAttempt] Offline session roles updated from refreshed offline JWT");
+          } catch (decodeErr) {
+            log.warn("[RefreshAttempt] Failed to decode new offline JWT, marking roles stale:", sanitizeError(decodeErr));
+            await offlineSession.extendValidity({ ...session, lastRoleSyncAt: 0 });
+          }
         } else {
           await offlineSession.extendValidity(session);
         }
         log.info("[RefreshAttempt] Offline session validity extended");
+      } else if (result?.offline?.token && envelope.data?.user?.guuid) {
+        // No offline session exists — create one from the fresh refresh response.
+        // This covers the upgrade path and any cold-start edge case where the
+        // session was deleted (e.g. SecureStore eviction on low-memory Android).
+        let roles: string[] = [];
+        try {
+          roles = jwtDecode<{ roles?: string[] }>(result.offline.token).roles ?? [];
+        } catch { /* empty roles accepted */ }
+
+        await offlineSession.create({
+          userGuuid: envelope.data.user.guuid,
+          storeGuuid: result?.context?.defaultStoreGuuid ?? envelope.data.context?.defaultStoreGuuid ?? null,
+          storeName: '',
+          roles,
+          offlineToken: result.offline.token,
+          signature: result.offline.sessionSignature,
+          deviceId: result?.sync?.deviceId ?? envelope.data.sync?.deviceId ?? undefined,
+        });
+        log.info("[RefreshAttempt] Offline session created from refresh response");
       }
     } catch (error) {
       log.debug(

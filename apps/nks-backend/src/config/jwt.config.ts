@@ -89,6 +89,8 @@ export interface JWK {
   use?: string; // Key use — "sig" for signing
   alg?: string; // Algorithm — "RS256"
   iat?: number; // Issued-at (custom extension for JWKS rotation)
+  pem?: string; // PEM-encoded public key — non-standard extension for mobile clients that
+                // cannot reconstruct PEM from n/e without a native crypto API
 }
 
 export interface JWKSet {
@@ -395,6 +397,7 @@ export class JWTConfigService {
         use: 'sig',
         alg: 'RS256',
         iat: now,
+        pem: this.publicKey,
       },
     ];
 
@@ -406,6 +409,7 @@ export class JWTConfigService {
         use: 'sig',
         alg: 'RS256',
         iat: Math.floor(fallbackKey.rotatedAt.getTime() / 1000),
+        pem: fallbackKey.publicKeyPem,
       });
     }
 

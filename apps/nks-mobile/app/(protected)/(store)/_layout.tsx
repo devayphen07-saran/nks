@@ -1,8 +1,40 @@
-import React from "react";
+import { useEffect } from "react";
+import { Redirect } from "expo-router";
 import { Drawer } from "expo-router/drawer";
+import { useSegments } from "expo-router";
+import { useSelector } from "react-redux";
+import { setActiveStore } from "@nks/state-manager";
+import { useRootDispatch, useAuthState } from "../../../store";
+import type { RootState } from "../../../store";
 import { StoreDrawerContent } from "@/features/store/StoreDrawerContent";
+import { ROUTES } from "../../../lib/navigation/routes";
+
+// Screens accessible without a store being selected
+const STORE_FREE_SCREENS = ["list", "setup"];
 
 export default function StoreLayout() {
+  const dispatch = useRootDispatch();
+  const authState = useAuthState();
+  const activeStoreGuuid = useSelector((s: RootState) => s.store.activeStoreGuuid);
+  const defaultStoreGuuid = authState.authResponse?.context?.defaultStoreGuuid ?? null;
+  const segments = useSegments();
+
+  // Seed Redux from the auth response on first entry so the gate passes
+  // immediately when the user is routed here after login.
+  useEffect(() => {
+    if (!activeStoreGuuid && defaultStoreGuuid) {
+      dispatch(setActiveStore({ guuid: defaultStoreGuuid, name: "" }));
+    }
+  }, [activeStoreGuuid, defaultStoreGuuid, dispatch]);
+
+  // The effective store covers the brief moment before the effect runs
+  const effectiveStore = activeStoreGuuid ?? defaultStoreGuuid;
+  const currentScreen = segments[segments.length - 1] as string;
+
+  if (!effectiveStore && !STORE_FREE_SCREENS.includes(currentScreen)) {
+    return <Redirect href={ROUTES.STORE_LIST} />;
+  }
+
   return (
     <Drawer
       drawerContent={(props) => <StoreDrawerContent {...props} />}
@@ -22,24 +54,6 @@ export default function StoreLayout() {
       />
 
       <Drawer.Screen
-        name="(dashboard)"
-        options={{
-          drawerItemStyle: { display: "none" },
-          title: "Dashboard",
-          headerShown: false,
-        }}
-      />
-
-      <Drawer.Screen
-        name="select"
-        options={{
-          drawerItemStyle: { display: "none" },
-          title: "Select Store",
-          headerShown: false,
-        }}
-      />
-
-      <Drawer.Screen
         name="setup"
         options={{
           drawerItemStyle: { display: "none" },
@@ -49,37 +63,19 @@ export default function StoreLayout() {
       />
 
       <Drawer.Screen
-        name="store"
+        name="(tabs)"
         options={{
           drawerItemStyle: { display: "none" },
-          title: "Store Dashboard",
+          title: "Store",
           headerShown: false,
         }}
       />
 
       <Drawer.Screen
-        name="products"
+        name="profile"
         options={{
           drawerItemStyle: { display: "none" },
-          title: "Products",
-          headerShown: false,
-        }}
-      />
-
-      <Drawer.Screen
-        name="orders"
-        options={{
-          drawerItemStyle: { display: "none" },
-          title: "Orders",
-          headerShown: false,
-        }}
-      />
-
-      <Drawer.Screen
-        name="staff"
-        options={{
-          drawerItemStyle: { display: "none" },
-          title: "Staff",
+          title: "Store Profile",
           headerShown: false,
         }}
       />
@@ -89,24 +85,6 @@ export default function StoreLayout() {
         options={{
           drawerItemStyle: { display: "none" },
           title: "Settings",
-          headerShown: false,
-        }}
-      />
-
-      <Drawer.Screen
-        name="pos"
-        options={{
-          drawerItemStyle: { display: "none" },
-          title: "POS",
-          headerShown: false,
-        }}
-      />
-
-      <Drawer.Screen
-        name="deliveries"
-        options={{
-          drawerItemStyle: { display: "none" },
-          title: "Deliveries",
           headerShown: false,
         }}
       />

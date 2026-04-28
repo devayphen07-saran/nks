@@ -40,11 +40,11 @@ import { JWTConfigService } from '../../../../config/jwt.config';
 import type { SessionUser } from '../interfaces/session-user.interface';
 import {
   AuthFlowUseCase,
-  TokenRefreshUseCase,
   SessionManagementUseCase,
   UserOnboardingUseCase,
   PermissionsQueryUseCase,
 } from '../use-cases';
+import { TokenLifecycleService } from '../services/token/token-lifecycle.service';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -52,7 +52,7 @@ import {
 export class AuthController {
   constructor(
     private readonly authFlow: AuthFlowUseCase,
-    private readonly tokenRefresh: TokenRefreshUseCase,
+    private readonly tokenLifecycle: TokenLifecycleService,
     private readonly sessions: SessionManagementUseCase,
     private readonly onboarding: UserOnboardingUseCase,
     private readonly permissions: PermissionsQueryUseCase,
@@ -127,7 +127,7 @@ export class AuthController {
     const deviceId =
       (req.headers as Record<string, string | undefined>)['x-device-id'] ?? null;
 
-    const result = await this.tokenRefresh.refresh(providedRefreshToken, deviceId);
+    const result = await this.tokenLifecycle.refreshAccessToken(providedRefreshToken, deviceId);
 
     const deviceType =
       (req.headers as Record<string, string | undefined>)['x-device-type'];
@@ -171,7 +171,10 @@ export class AuthController {
     @Req() req: AuthenticatedRequest,
     @Res({ passthrough: true }) res: Response,
   ): Promise<null> {
-    const token = this.parseSessionCookie(req);
+    // Mobile sends token in Authorization: Bearer <token>; web uses httpOnly cookie.
+    const token =
+      this.parseSessionCookie(req) ??
+      (req.headers.authorization?.replace(/^Bearer\s+/i, '') || undefined);
     if (token) {
       await this.sessions.logout(token, req.user.userId);
     }

@@ -133,10 +133,11 @@ export type AuthData = AuthResponse;
 // ─── Profile Completion (unified endpoint for all profile updates) ─────────────
 
 export interface ProfileCompleteRequest {
-  name: string; // Update user name
-  email?: string; // Add/update email (requires password)
-  phoneNumber?: string; // Add/update phone (triggers OTP verification)
-  password?: string; // Set/update password (min 8 chars, required when adding email)
+  firstName: string;
+  lastName: string;
+  email?: string;
+  phoneNumber?: string;
+  password?: string;
 }
 
 export interface ProfileCompleteResponse {
@@ -163,16 +164,21 @@ export interface StoreSelectResponse {
 // ─── Session Management ────────────────────────────────────────────────────
 
 export interface SessionEntry {
-  sessionId: string;
-  deviceName: string;
-  deviceType: "mobile" | "web" | "tablet" | "desktop";
-  lastActivityAt: string;
+  guuid: string;
+  deviceId: string | null;
+  deviceName: string | null;
+  deviceType: string | null;
+  platform: string | null;
+  appVersion: string | null;
   createdAt: string;
   expiresAt: string;
-  ipAddress: string;
 }
 
-export type SessionListResponse = SessionEntry[];
+export interface SessionListResponse {
+  sessions: SessionEntry[];
+  currentSessionId: string | null;
+  total: number;
+}
 
 // ─── Permissions ──────────────────────────────────────────────────────────
 

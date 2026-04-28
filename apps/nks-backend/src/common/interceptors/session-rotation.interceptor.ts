@@ -49,6 +49,10 @@ export class SessionRotationInterceptor implements NestInterceptor {
 
     const res = context.switchToHttp().getResponse<Response>();
 
+    // Skip rotation on error responses — a failed handler (validation error,
+    // permission denied, 5xx) should not consume a rotation slot or write cookies.
+    if (res.statusCode >= 400) return;
+
     if (res.headersSent) {
       this.logger.warn(
         `Session update skipped for "${req.method} ${req.path}" — headers already sent. ` +

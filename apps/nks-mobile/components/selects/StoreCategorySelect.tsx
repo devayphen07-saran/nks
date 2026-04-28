@@ -6,7 +6,7 @@ import {
 import { useStoreCategories } from "@nks/api-manager";
 
 interface StoreCategory {
-  id: number;
+  guuid: string;
   code: string;
   title: string;
 }
@@ -27,7 +27,7 @@ export const StoreCategorySelect = ({
   errorMessage,
 }: Props) => {
   const { data, isLoading } = useStoreCategories();
-  const items: StoreCategory[] = data?.data?.data ?? [];
+  const items: StoreCategory[] = data?.data ?? [];
 
   return (
     <SelectGeneric<StoreCategory>

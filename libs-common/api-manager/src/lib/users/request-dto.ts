@@ -10,7 +10,9 @@ export interface ListUsersParams {
 
 export interface UserItem {
   guuid: string;
-  name: string;
+  iamUserId: string;
+  firstName: string;
+  lastName: string;
   email: string | null;
   emailVerified: boolean;
   phoneNumber: string | null;
@@ -27,19 +29,7 @@ export interface UserItem {
   primaryRole: string | null;
 }
 
-export interface UsersListData {
-  items: UserItem[];
-}
-
-export interface UsersListMeta {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-}
-
 export interface UsersListResponse {
-  data: UsersListData;
+  data: UserItem[];
   message: string;
-  meta: UsersListMeta;
 }

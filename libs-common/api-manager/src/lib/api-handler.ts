@@ -53,8 +53,10 @@ export class APIData {
     if (data) {
       const list = this.path.split("/");
       const updatedData = list.reduce((p, c) => {
-        if (Object.keys(data).find((k) => k === c)) {
-          return `${p}/${data[c as PossibleTypeId]}`;
+        // Support both Express-style `:param` and bare `param` segment names
+        const key = c.startsWith(':') ? c.slice(1) : c;
+        if (Object.keys(data).find((k) => k === key)) {
+          return `${p}/${data[key as PossibleTypeId]}`;
         }
         return `${p}/${c}`;
       });

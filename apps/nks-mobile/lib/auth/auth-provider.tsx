@@ -39,9 +39,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     dispatch(initializeAuth());
   }, [dispatch]);
 
-  // ✅ PHASE 3: Setup Axios interceptors when provider mounts
-  // Moved from store/index.ts for graceful error handling
-  // Interceptors are non-critical for startup, app works without them (though no token refresh)
   useEffect(() => {
     try {
       setupAxiosInterceptors((authResponse: AuthResponse) => {

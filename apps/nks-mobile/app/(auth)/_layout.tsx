@@ -1,13 +1,13 @@
 import { Redirect, Stack } from "expo-router";
 import { useAuthContext } from '../../lib/auth/auth-provider';
+import { LoadingFallback } from "../../components/feedback/LoadingFallback";
 
 export default function AuthLayout() {
   const { isLoggedIn, isLoading } = useAuthContext();
 
-  // If the user is already authenticated, kick them out of the auth stack.
-  if (!isLoading && isLoggedIn) {
-    return <Redirect href="/(protected)" />;
-  }
+  if (isLoading) return <LoadingFallback />;
+
+  if (isLoggedIn) return <Redirect href="/(protected)" />;
 
   return (
     <Stack

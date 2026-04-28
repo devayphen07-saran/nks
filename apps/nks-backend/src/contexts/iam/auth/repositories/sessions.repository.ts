@@ -32,7 +32,7 @@ export class SessionsRepository extends BaseRepository {
   /** Reusable WHERE clause: sessions belonging to userId that have not yet expired. */
   private activeSessionWhere(userId: number) {
     return and(
-      eq(schema.userSession.userFk, userId),
+      eq(schema.userSession.userId, userId),
       gt(schema.userSession.expiresAt, new Date()),
     );
   }
@@ -146,7 +146,7 @@ export class SessionsRepository extends BaseRepository {
       .innerJoin(
         schema.users,
         and(
-          eq(schema.userSession.userFk, schema.users.id),
+          eq(schema.userSession.userId, schema.users.id),
           isNull(schema.users.deletedAt),
         ),
       )
@@ -223,7 +223,7 @@ export class SessionsRepository extends BaseRepository {
     return this.db
       .select()
       .from(schema.userSession)
-      .where(eq(schema.userSession.userFk, userId))
+      .where(eq(schema.userSession.userId, userId))
       .orderBy(asc(schema.userSession.createdAt));
   }
 
@@ -322,7 +322,7 @@ export class SessionsRepository extends BaseRepository {
       .from(schema.userSession)
       .where(
         and(
-          eq(schema.userSession.userFk, userId),
+          eq(schema.userSession.userId, userId),
           isNotNull(schema.userSession.jti),
         ),
       );
@@ -335,7 +335,7 @@ export class SessionsRepository extends BaseRepository {
   async deleteAllForUser(userId: number): Promise<number> {
     const result = await this.db
       .delete(schema.userSession)
-      .where(eq(schema.userSession.userFk, userId));
+      .where(eq(schema.userSession.userId, userId));
 
     return result.rowCount ?? 0;
   }
@@ -519,7 +519,7 @@ export class SessionsRepository extends BaseRepository {
       await tx
         .update(schema.userSession)
         .set({ refreshTokenRevokedAt: new Date(), revokedReason })
-        .where(eq(schema.userSession.userFk, userId));
+        .where(eq(schema.userSession.userId, userId));
     }, { name: 'SessionsRepo.revokeAllForUser' });
   }
 
@@ -536,7 +536,7 @@ export class SessionsRepository extends BaseRepository {
         createdAt: schema.userSession.createdAt,
       })
       .from(schema.userSession)
-      .where(eq(schema.userSession.userFk, userId))
+      .where(eq(schema.userSession.userId, userId))
       .orderBy(asc(schema.userSession.createdAt));
   }
 
@@ -570,7 +570,7 @@ export class SessionsRepository extends BaseRepository {
       const keepIds = tx
         .select({ id: schema.userSession.id })
         .from(schema.userSession)
-        .where(eq(schema.userSession.userFk, userId))
+        .where(eq(schema.userSession.userId, userId))
         .orderBy(desc(schema.userSession.createdAt))
         .limit(maxAllowed - 1);
 
@@ -578,7 +578,7 @@ export class SessionsRepository extends BaseRepository {
         .delete(schema.userSession)
         .where(
           and(
-            eq(schema.userSession.userFk, userId),
+            eq(schema.userSession.userId, userId),
             notInArray(schema.userSession.id, keepIds),
           ),
         );
@@ -605,7 +605,7 @@ export class SessionsRepository extends BaseRepository {
       .where(
         and(
           eq(schema.userSession.id, sessionId),
-          eq(schema.userSession.userFk, userId),
+          eq(schema.userSession.userId, userId),
         ),
       )
       .limit(1);

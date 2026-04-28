@@ -1,27 +1,21 @@
 // ─── Role Response ─────────────────────────────────────────────────────────
 
 export interface RoleResponse {
-  id: number;
+  guuid: string;
   code: string;
   roleName: string;
-  description?: string;
-  storeFk: number;
-  sortOrder?: number;
-  isActive: boolean;
+  description: string | null;
+  sortOrder: number | null;
   isSystem: boolean;
-  createdBy?: number;
-  modifiedBy?: number;
-  deletedBy?: number;
+  storeGuuid: string | null;
+  isActive: boolean;
   createdAt: string;
-  updatedAt: string;
-  deletedAt?: string;
+  updatedAt: string | null;
 }
 
 export interface RolesListResponse {
-  rows: RoleResponse[];
-  total: number;
-  page: number;
-  pageSize: number;
+  data: RoleResponse[];
+  message: string;
 }
 
 // ─── Create Role Request ───────────────────────────────────────────────────
@@ -31,7 +25,7 @@ export interface CreateRoleRequest {
   name: string;
   description?: string;
   sortOrder?: number;
-  storeId: number;
+  storeGuuid: string;
 }
 
 // ─── Update Role Request ───────────────────────────────────────────────────
@@ -40,6 +34,16 @@ export interface UpdateRoleRequest {
   name?: string;
   description?: string;
   sortOrder?: number;
+  storeGuuid?: string;
+  entityPermissions?: Record<string, Record<string, boolean>>;
+  routePermissions?: Array<{
+    routeGuuid: string;
+    canView?: boolean;
+    canCreate?: boolean;
+    canEdit?: boolean;
+    canDelete?: boolean;
+    canExport?: boolean;
+  }>;
 }
 
 // ─── Custom Role Assignment ────────────────────────────────────────────────

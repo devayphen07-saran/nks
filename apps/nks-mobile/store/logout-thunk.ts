@@ -24,7 +24,6 @@ export const logoutThunk = createAsyncThunk<
   void,
   { dispatch: AppDispatch }
 >("auth/logout", async (_, { dispatch }) => {
-  // ✅ CRITICAL FIX #3: Use mutex to prevent concurrent refresh during logout
   await tokenMutex.withClearLock(async () => {
     try {
       // Call sign-out BEFORE clearing the token so the Authorization header is

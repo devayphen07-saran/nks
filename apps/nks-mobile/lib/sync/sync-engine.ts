@@ -37,7 +37,6 @@ const log = createLogger('SyncEngine');
 
 const PUSH_BATCH_SIZE  = 50;
 const PULL_PAGE_SIZE   = 200;
-const SYNC_TIMEOUT_MS  = 25_000; // 5s margin before backend's 30s REQUEST_TIMEOUT_MS
 const PULL_TIMEOUT_MS  = 10_000;
 const PUSH_TIMEOUT_MS  = 20_000;
 
@@ -49,7 +48,7 @@ let _lastSyncedAt: number | null = null;
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ChangesResponse {
-  nextCursor: number;      // max updated_at across all returned changes (Unix ms)
+  nextCursor: string;      // compound "timestampMs:rowId" — e.g. "1713500000000:42"
   hasMore:    boolean;
   changes:    SyncChange[];
 }
@@ -64,8 +63,9 @@ interface PushOperation {
 }
 
 interface PushResponse {
-  processed:   number;     // how many operations the server successfully applied
-  rejected?:   number;     // how many were rejected (invalid signature, etc.)
+  processed: number;
+  rejected:  number;
+  status:    'ok' | 'partial';
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -85,10 +85,7 @@ export async function runSync(storeGuuid: string): Promise<void> {
   try {
     const started = Date.now();
 
-    await Promise.race([
-      _syncWork(storeGuuid),
-      _timeout(SYNC_TIMEOUT_MS, 'Sync timed out after 25s'),
-    ]);
+    await _syncWork(storeGuuid);
 
     _lastSyncedAt = Date.now();
     await syncStateRepository.setValue(SYNC_KEYS.LAST_FULL_SYNC_AT, String(_lastSyncedAt));
@@ -146,6 +143,21 @@ export async function initializeSyncEngine(): Promise<void> {
   }
 }
 
+/**
+ * Seeds lastSyncedAt from the auth response on first login.
+ * No-op if a real sync timestamp already exists or lastSyncedAt is null.
+ */
+export async function seedSyncStateFromAuth(lastSyncedAt: string | null): Promise<void> {
+  if (!lastSyncedAt) return;
+  const existing = await syncStateRepository.getValue(SYNC_KEYS.LAST_FULL_SYNC_AT);
+  if (existing) return;
+  const ms = new Date(lastSyncedAt).getTime();
+  if (!isNaN(ms) && ms > 0) {
+    await syncStateRepository.setValue(SYNC_KEYS.LAST_FULL_SYNC_AT, String(ms));
+    _lastSyncedAt = ms;
+  }
+}
+
 /** Call on logout to clear all module-level sync state */
 export function resetSyncState(): void {
   _syncing      = false;
@@ -190,7 +202,7 @@ async function pullChanges(storeGuuid: string): Promise<void> {
 
   let pageNum      = 0;
   let totalChanges = 0;
-  let currentCursor = minCursor;
+  let currentCursor = `${minCursor}:0`;
 
   while (true) {
     pageNum++;
@@ -200,10 +212,10 @@ async function pullChanges(storeGuuid: string): Promise<void> {
     try {
       const res = await API.get<ChangesResponse>('/sync/changes', {
         params: {
-          cursor:  currentCursor,
-          storeId: storeGuuid,
-          tables:  SYNC_TABLES.join(','),
-          limit:   PULL_PAGE_SIZE,
+          cursor:     currentCursor,
+          storeGuuid: storeGuuid,
+          tables:     SYNC_TABLES.join(','),
+          limit:      PULL_PAGE_SIZE,
         },
         timeout: PULL_TIMEOUT_MS,
       });
@@ -344,8 +356,8 @@ async function pushMutations(): Promise<void> {
     const body: Record<string, unknown> = { operations };
     if (session) {
       body.offlineSession = {
-        userId:            session.userId,
-        storeId:           session.storeId,
+        userGuuid:         session.userGuuid,
+        storeGuuid:        session.storeGuuid,
         roles:             session.roles,
         offlineValidUntil: session.offlineValidUntil,
         signature:         session.signature,
@@ -433,12 +445,6 @@ async function _syncWork(storeGuuid: string): Promise<void> {
   await initializeDatabase();
   await pullChanges(storeGuuid);
   await pushMutations();
-}
-
-function _timeout(ms: number, message: string): Promise<never> {
-  return new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(message)), ms),
-  );
 }
 
 /**

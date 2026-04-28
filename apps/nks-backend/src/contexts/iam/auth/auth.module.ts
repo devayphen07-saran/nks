@@ -72,7 +72,6 @@ import { UserCreationService } from './services/flows/user-creation.service';
 
 // Use cases (Application layer — Controller → UseCase → Service)
 import { AuthFlowUseCase } from './use-cases/auth-flow.use-case';
-import { TokenRefreshUseCase } from './use-cases/token-refresh.use-case';
 import { SessionManagementUseCase } from './use-cases/session-management.use-case';
 import { UserOnboardingUseCase } from './use-cases/user-onboarding.use-case';
 import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case';
@@ -166,7 +165,6 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
 
     // Use cases
     AuthFlowUseCase,
-    TokenRefreshUseCase,
     SessionManagementUseCase,
     UserOnboardingUseCase,
     PermissionsQueryUseCase,

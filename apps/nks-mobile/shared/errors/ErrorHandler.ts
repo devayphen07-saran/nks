@@ -46,189 +46,124 @@ function mapBackendCode(code: string | undefined): ErrorCode | undefined {
   return code ? BACKEND_ERROR_CODE_MAP[code] : undefined;
 }
 
-/**
- * Centralized error handler that transforms various error types into AppError
- * Used throughout repositories and services to standardize error handling
- *
- * @example
- * try {
- *   await api.post('/auth/send-otp', { phone });
- * } catch (error) {
- *   throw ErrorHandler.handle(error, { phone });
- * }
- */
-export class ErrorHandler {
-  /**
-   * Handle any error type and convert to AppError
-   * Supports: AppError, AxiosError, Error, and unknown types
-   */
-  static handle(error: unknown, context: ErrorContext = {}): AppError {
-    // Already an AppError, just add context and return
-    if (isAppError(error)) {
+function handleAxiosError(error: AxiosError, context: ErrorContext): AppError {
+  const status = error.response?.status;
+  const data = error.response?.data as Record<string, unknown> | undefined;
+
+  if (!error.response) {
+    if (error.code === 'ECONNABORTED') {
       return new AppError(
-        error.code,
-        error.message,
-        error.statusCode,
-        { ...error.context, ...context },
-      );
-    }
-
-    // Axios error (HTTP request failed)
-    if (axios.isAxiosError(error)) {
-      return this.handleAxiosError(error, context);
-    }
-
-    // Standard JavaScript Error
-    if (error instanceof Error) {
-      return this.handleStandardError(error, context);
-    }
-
-    // undefined/null — comes from rejectWithValue(err.response?.data) when
-    // there is no response (network unreachable, CORS, timeout before response)
-    if (error === undefined || error === null) {
-      return new AppError(
-        ErrorCode.NETWORK_ERROR,
-        'Network error. Please check your connection.',
+        ErrorCode.TIMEOUT_ERROR,
+        'Request timed out. Please try again.',
         undefined,
-        context,
+        { ...context, endpoint: error.config?.url },
       );
     }
-
-    // Plain backend API response object — comes from rejectWithValue(err.response?.data)
-    // Shape: { errorCode: string, message: string, data: null, meta: {...} }
-    // Note: backend uses "errorCode" field (not "code") per ApiResponse.toJSON()
-    if (typeof error === 'object' && ('errorCode' in error || 'code' in error)) {
-      const apiErr = error as { errorCode?: string; code?: string; message?: string; statusCode?: number };
-      const mapped = mapBackendCode(apiErr.errorCode ?? apiErr.code);
-      return new AppError(
-        mapped ?? ErrorCode.UNKNOWN_ERROR,
-        apiErr.message || 'An unexpected error occurred',
-        apiErr.statusCode,
-        context,
-      );
-    }
-
-    // Unknown error type
     return new AppError(
-      ErrorCode.UNKNOWN_ERROR,
-      'An unexpected error occurred',
+      ErrorCode.NETWORK_ERROR,
+      'Network error. Please check your connection.',
       undefined,
-      { ...context, errorMessage: String(error) },
+      { ...context, endpoint: error.config?.url },
     );
   }
 
-  /**
-   * Handle axios errors (network, HTTP status codes, etc.)
-   */
-  private static handleAxiosError(
-    error: AxiosError,
-    context: ErrorContext,
-  ): AppError {
-    const status = error.response?.status;
-    const data = error.response?.data as Record<string, any> | undefined;
+  const mapped = mapBackendCode((data?.errorCode ?? data?.code) as string | undefined);
 
-    // Network error (no response from server)
-    if (!error.response) {
-      if (error.code === 'ECONNABORTED') {
-        return new AppError(
-          ErrorCode.TIMEOUT_ERROR,
-          'Request timed out. Please try again.',
-          undefined,
-          { ...context, endpoint: error.config?.url },
-        );
-      }
-
-      return new AppError(
-        ErrorCode.NETWORK_ERROR,
-        'Network error. Please check your connection.',
-        undefined,
-        { ...context, endpoint: error.config?.url },
-      );
-    }
-
-    const mapped = mapBackendCode((data?.errorCode ?? data?.code) as string | undefined);
-
-    // 400 Bad Request - Validation error
-    if (status === 400) {
-      return new AppError(
-        mapped ?? ErrorCode.VALIDATION_ERROR,
-        data?.message || undefined,
-        400,
-        { ...context, field: data?.field },
-      );
-    }
-
-
-    if (status === 401) {
-      return new AppError(mapped ?? ErrorCode.SESSION_EXPIRED, undefined, 401, { ...context });
-    }
-
-    if (status === 403) {
-      return new AppError(mapped ?? ErrorCode.FORBIDDEN, undefined, 403, { ...context });
-    }
-
-    if (status === 404) {
-      return new AppError(mapped ?? ErrorCode.NOT_FOUND, undefined, 404, { ...context });
-    }
-
-    if (status === 409) {
-      return new AppError(mapped ?? ErrorCode.VALIDATION_ERROR, undefined, 409, { ...context });
-    }
-
-    if (status === 429) {
-      return new AppError(ErrorCode.RATE_LIMITED, undefined, 429, { ...context });
-    }
-
-    if (status && status >= 500) {
-      return new AppError(
-        status === 503 ? ErrorCode.SERVICE_UNAVAILABLE : ErrorCode.SERVER_ERROR,
-        undefined,
-        status,
-        { ...context, endpoint: error.config?.url },
-      );
-    }
-
+  if (status === 400) {
     return new AppError(
-      mapped ?? ErrorCode.UNKNOWN_ERROR,
-      data?.message || `HTTP Error ${status || 'Unknown'}`,
+      mapped ?? ErrorCode.VALIDATION_ERROR,
+      data?.message as string | undefined,
+      400,
+      { ...context, field: data?.field },
+    );
+  }
+  if (status === 401) {
+    return new AppError(mapped ?? ErrorCode.SESSION_EXPIRED, undefined, 401, context);
+  }
+  if (status === 403) {
+    return new AppError(mapped ?? ErrorCode.FORBIDDEN, undefined, 403, context);
+  }
+  if (status === 404) {
+    return new AppError(mapped ?? ErrorCode.NOT_FOUND, undefined, 404, context);
+  }
+  if (status === 409) {
+    return new AppError(mapped ?? ErrorCode.VALIDATION_ERROR, undefined, 409, context);
+  }
+  if (status === 429) {
+    return new AppError(ErrorCode.RATE_LIMITED, undefined, 429, context);
+  }
+  if (status && status >= 500) {
+    return new AppError(
+      status === 503 ? ErrorCode.SERVICE_UNAVAILABLE : ErrorCode.SERVER_ERROR,
+      undefined,
       status,
       { ...context, endpoint: error.config?.url },
     );
   }
 
-  /**
-   * Handle standard JavaScript errors
-   */
-  private static handleStandardError(
-    error: Error,
-    context: ErrorContext,
-  ): AppError {
-    // Specific error types
-    if (error.name === 'ValidationError') {
-      return new AppError(
-        ErrorCode.VALIDATION_ERROR,
-        error.message || 'Validation failed',
-        undefined,
-        { ...context },
-      );
-    }
+  return new AppError(
+    mapped ?? ErrorCode.UNKNOWN_ERROR,
+    (data?.message as string | undefined) || `HTTP Error ${status ?? 'Unknown'}`,
+    status,
+    { ...context, endpoint: error.config?.url },
+  );
+}
 
-    if (error.name === 'NetworkError') {
-      return new AppError(
-        ErrorCode.NETWORK_ERROR,
-        error.message || 'Network error occurred',
-        undefined,
-        { ...context },
-      );
-    }
+function handleStandardError(error: Error, context: ErrorContext): AppError {
+  if (error.name === 'ValidationError') {
+    return new AppError(ErrorCode.VALIDATION_ERROR, error.message || 'Validation failed', undefined, context);
+  }
+  if (error.name === 'NetworkError') {
+    return new AppError(ErrorCode.NETWORK_ERROR, error.message || 'Network error occurred', undefined, context);
+  }
+  return new AppError(
+    ErrorCode.UNKNOWN_ERROR,
+    error.message || 'An unexpected error occurred',
+    undefined,
+    { ...context, errorDetails: error.message },
+  );
+}
 
-    // Generic error
+/**
+ * Transforms any error type into an AppError with consistent shape.
+ *
+ * @example
+ * try {
+ *   await api.post('/auth/send-otp', { phone });
+ * } catch (error) {
+ *   throw handleError(error, { phone });
+ * }
+ */
+export function handleError(error: unknown, context: ErrorContext = {}): AppError {
+  if (isAppError(error)) {
+    return new AppError(error.code, error.message, error.statusCode, { ...error.context, ...context });
+  }
+  if (axios.isAxiosError(error)) {
+    return handleAxiosError(error, context);
+  }
+  if (error instanceof Error) {
+    return handleStandardError(error, context);
+  }
+  if (error === undefined || error === null) {
+    return new AppError(ErrorCode.NETWORK_ERROR, 'Network error. Please check your connection.', undefined, context);
+  }
+  if (typeof error === 'object' && ('errorCode' in error || 'code' in error)) {
+    const apiErr = error as { errorCode?: string; code?: string; message?: string; statusCode?: number };
+    const mapped = mapBackendCode(apiErr.errorCode ?? apiErr.code);
     return new AppError(
-      ErrorCode.UNKNOWN_ERROR,
-      error.message || 'An unexpected error occurred',
-      undefined,
-      { ...context, errorDetails: error.message },
+      mapped ?? ErrorCode.UNKNOWN_ERROR,
+      apiErr.message || 'An unexpected error occurred',
+      apiErr.statusCode,
+      context,
     );
   }
-
+  return new AppError(
+    ErrorCode.UNKNOWN_ERROR,
+    'An unexpected error occurred',
+    undefined,
+    { ...context, errorMessage: String(error) },
+  );
 }
+
+/** @deprecated Use `handleError` directly */
+export const ErrorHandler = { handle: handleError };

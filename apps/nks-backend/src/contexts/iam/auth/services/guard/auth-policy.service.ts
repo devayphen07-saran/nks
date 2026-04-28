@@ -76,6 +76,35 @@ export class AuthPolicyService {
   }
 
   /**
+   * Enforces device binding for Bearer (mobile) sessions.
+   *
+   * A session created on a specific device (deviceId stored at login) must not
+   * be accepted from a different device — mitigates session token theft where the
+   * attacker has the token but not the bound device ID.
+   *
+   * Policy: hard-reject (throws 401). Unlike IP changes (which are log-only),
+   * a device mismatch on a device-bound session is not a legitimate scenario.
+   *
+   * No-op when:
+   *   - `sessionDeviceId` is null (session was not device-bound — older sessions)
+   *   - `requestDeviceId` is null (client didn't send X-Device-Id — backward compat)
+   */
+  enforceDeviceBinding(
+    sessionDeviceId: string | null | undefined,
+    requestDeviceId: string | null,
+  ): void {
+    if (!sessionDeviceId || !requestDeviceId) return;
+
+    if (requestDeviceId !== sessionDeviceId) {
+      this.logger.warn('Device mismatch on bearer session — possible token theft');
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.AUTH_SESSION_EXPIRED,
+        message: 'Device changed — please re-authenticate.',
+      });
+    }
+  }
+
+  /**
    * Checks whether the request IP matches the session's recorded IP fingerprint.
    *
    * Policy: log-only (never rejects). Mobile clients legitimately roam across

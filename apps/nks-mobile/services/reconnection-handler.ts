@@ -2,7 +2,8 @@
  * Reconnection Handler — 5-step sequence when device comes back online.
  *
  * Step 1: Revocation check    GET /api/v1/auth/session-status
- *         └── revoked → performRemoteWipe() → clearAllTables()
+ *         └── wipe:true   → performRemoteWipe() → clearAllTables() (token theft)
+ *         └── revoked:true → clear credentials only, keep local DB (remote logout)
  *
  * Step 2: Token refresh       POST /api/auth/refresh-token (via JWTManager)
  *         └── REFRESH_TOKEN_INVALID → logout
@@ -21,7 +22,7 @@
 
 import { tokenManager } from "@nks/mobile-utils";
 import type { AuthResponse } from "@nks/api-manager";
-import { setCredentials, setUnauthenticated } from "../store/auth-slice";
+import { setCredentials, logout } from "../store/auth-slice";
 import { JWTManager } from '../lib/auth/jwt-manager';
 import { offlineSession } from '../lib/auth/offline-session';
 import { clearAllTables } from "../lib/local-db";
@@ -29,11 +30,12 @@ import { runSync } from '../lib/sync/sync-engine';
 import { fetchWithTimeout } from '../lib/utils/fetch-with-timeout';
 import { createLogger } from '../lib/utils/logger';
 import { refreshTokenAttempt } from '../lib/auth/refresh-token-attempt';
+import { getServerBaseUrl } from '../lib/utils/api-base-url';
 import type { AppDispatch } from "../store";
 
 const log = createLogger("ReconnectionHandler");
 
-const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
+const API_BASE = `${getServerBaseUrl()}/api/v1`;
 
 // ─── Remote wipe ─────────────────────────────────────────────────────────────
 
@@ -51,7 +53,7 @@ async function performRemoteWipe(dispatch: AppDispatch): Promise<void> {
   tokenManager.clear();
   await tokenManager.clearSession().catch(() => {});
   await offlineSession.clear().catch(() => {});
-  dispatch(setUnauthenticated());
+  dispatch(logout());
   log.info("Session cleared after remote wipe");
 }
 
@@ -118,9 +120,24 @@ export async function handleReconnection(dispatch: AppDispatch): Promise<void> {
     log.info("Step 1: checking session revocation...");
     const { revoked, wipe } = await checkSessionRevocation();
 
-    if (revoked || wipe) {
+    if (wipe) {
+      // Token theft detected on the backend — all sessions nuked, destroy local data.
+      log.warn("Step 1: remote wipe triggered (token theft)");
       await performRemoteWipe(dispatch);
-      return; // stop — user must re-login
+      return;
+    }
+
+    if (revoked) {
+      // Normal remote logout (e.g. user signed out from web/admin panel).
+      // Clear session credentials only — keep local POS data so a re-login on
+      // the same device can pick up where it left off.
+      log.warn("Step 1: session revoked (remote logout) — clearing credentials only");
+      tokenManager.clear();
+      await tokenManager.clearSession().catch(() => {});
+      await JWTManager.clear();
+      await offlineSession.clear().catch(() => {});
+      dispatch(logout());
+      return;
     }
 
     // ── Step 2: Token refresh ───────────────────────────────────────────────
@@ -128,7 +145,7 @@ export async function handleReconnection(dispatch: AppDispatch): Promise<void> {
     const refreshResult = await refreshTokenAttempt();
     if (refreshResult.shouldLogout === true) {
       log.warn("Refresh token invalid — logging out");
-      dispatch(setUnauthenticated());
+      dispatch(logout());
       return;
     }
     if (!refreshResult.success) {
@@ -137,8 +154,7 @@ export async function handleReconnection(dispatch: AppDispatch): Promise<void> {
 
     // ── Step 3: JWKS refresh ────────────────────────────────────────────────
     log.info("Step 3: refreshing JWKS cache...");
-    const serverBase = API_BASE.replace(/\/api\/v\d+\/?$/, "");
-    await JWTManager.cacheJWKS(serverBase).catch((err) => {
+    await JWTManager.cacheJWKS(getServerBaseUrl()).catch((err) => {
       log.warn("JWKS refresh failed (non-blocking):", err);
     });
 

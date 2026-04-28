@@ -8,7 +8,7 @@ import { APIData, APIMethod } from "../api-handler";
 // 1. Get admin routes for a user (SUPER_ADMIN only)
 // userId in path — typically the logged-in admin's own ID
 export const GET_ADMIN_ROUTES: APIData = new APIData(
-  "routes/admin",
+  "admin/routes",
   APIMethod.GET
 );
 

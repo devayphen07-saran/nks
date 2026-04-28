@@ -30,7 +30,6 @@ export function SetPasswordScreen() {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
 
-  // ✅ Use hook for password setup logic
   const {
     password,
     setPassword,

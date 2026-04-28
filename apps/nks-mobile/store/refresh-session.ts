@@ -29,7 +29,6 @@ export const refreshSession = createAsyncThunk<
   void,
   { dispatch: AppDispatch }
 >("auth/refreshSession", async (_, { dispatch }) => {
-  // ✅ CRITICAL FIX #3: Use mutex to prevent concurrent logout during refresh
   await tokenMutex.withRefreshLock(async () => {
     try {
       // Call the unified refresh function

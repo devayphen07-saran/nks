@@ -3,7 +3,7 @@ import { router } from "expo-router";
 import { passwordSchema } from "../schema/password";
 import { profileComplete } from "@nks/api-manager";
 import { useRootDispatch } from "../../../store";
-import { ErrorHandler } from "../../../shared/errors";
+import { handleError } from "../../../shared/errors";
 
 export function useSetPassword() {
   const dispatch = useRootDispatch();
@@ -30,7 +30,7 @@ export function useSetPassword() {
         router.replace("/(protected)");
       })
       .catch((err) => {
-        const appError = ErrorHandler.handle(err, { action: "set_password" });
+        const appError = handleError(err, { action: "set_password" });
         setErrorMessage(appError.getUserMessage());
       })
       .finally(() => setIsLoading(false));

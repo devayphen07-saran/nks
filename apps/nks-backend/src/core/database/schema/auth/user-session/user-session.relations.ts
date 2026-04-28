@@ -5,7 +5,7 @@ import { users } from '../../auth/users';
 // userSession references users.id (bigint FK).
 export const userSessionRelations = relations(userSession, ({ one }) => ({
   user: one(users, {
-    fields: [userSession.userFk], // user_fk → users.id
+    fields: [userSession.userId], // user_fk → users.id
     references: [users.id],
   }),
 }));

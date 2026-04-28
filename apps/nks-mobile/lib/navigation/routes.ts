@@ -22,5 +22,5 @@ export const ROUTES = {
   // Store
   STORE_LIST: "/(protected)/(store)/list",
   STORE_SETUP: "/(protected)/(store)/setup",
-  STORE_HOME: "/(protected)/(store)/store",
+  STORE_HOME: "/(protected)/(store)/(tabs)/home",
 } as const;

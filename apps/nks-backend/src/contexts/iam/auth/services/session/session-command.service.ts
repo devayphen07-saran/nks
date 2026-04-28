@@ -34,7 +34,7 @@ export class SessionCommandService {
       input.userId,
       AUTH_CONSTANTS.SESSION.MAX_PER_USER,
       {
-        userFk: input.userId,
+        userId: input.userId,
         token: input.token,
         expiresAt: input.expiresAt,
         ipAddress: input.ipAddress,
@@ -74,7 +74,7 @@ export class SessionCommandService {
 
     if (session.deviceId) {
       this.revokedDevicesRepository
-        .revoke(session.userFk, session.deviceId, userId)
+        .revoke(session.userId, session.deviceId, userId)
         .catch((err: unknown) => {
           this.logger.error(
             `Failed to record device revocation for session ${session.id}: ${err instanceof Error ? err.message : String(err)}`,

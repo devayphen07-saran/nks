@@ -131,7 +131,8 @@ export const authSlice = createSlice({
     builder.addCase(getMe.fulfilled, (state, action) => {
       const me = action.payload?.data as Record<string, unknown> | undefined;
       if (state.user && me) {
-        state.user.user.name = (me.name as string) ?? state.user.user.name;
+        state.user.user.firstName = (me.firstName as string | null) ?? state.user.user.firstName;
+        state.user.user.lastName = (me.lastName as string | null) ?? state.user.user.lastName;
         state.user.user.email = (me.email as string) ?? state.user.user.email;
         state.user.user.phoneNumber = (me.phoneNumber as string | null) ?? state.user.user.phoneNumber;
         // roles are no longer in AuthResponse.access — fetched separately via store API

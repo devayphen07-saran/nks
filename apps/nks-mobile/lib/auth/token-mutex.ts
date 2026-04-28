@@ -1,7 +1,6 @@
 /**
  * Token Mutation Mutex
- * Prevents concurrent token refresh and logout operations from causing race conditions
- * ✅ CRITICAL FIX #3: Ensures atomic token state transitions
+ * Prevents concurrent token refresh and logout operations from causing race conditions.
  */
 
 export class TokenMutex {
@@ -41,7 +40,10 @@ export class TokenMutex {
 
   /**
    * Executes a clear operation with mutual exclusion.
-   * Waits for any in-flight refresh to complete before clearing.
+   * Waits for any in-flight refresh to complete before clearing, then sets
+   * isClearing = true so any code that checks isClearingTokens (e.g. the
+   * axios interceptor's onRefreshSuccess callback) can skip stale Redux updates
+   * that would race with the logout action dispatched inside fn().
    */
   async withClearLock<T>(fn: () => Promise<T>): Promise<T> {
     // Wait for any in-flight refresh — swallow its error so logout is never
@@ -50,7 +52,9 @@ export class TokenMutex {
       await this.refreshPromise.catch(() => {});
     }
 
-    // Now perform clear with exclusive access
+    // Mark clearing BEFORE running fn() so the interceptor's onRefreshSuccess
+    // check (isClearingTokens) sees the flag even if it runs as a microtask
+    // immediately after the refresh promise resolves.
     this.isClearing = true;
     this.clearPromise = fn().finally(() => {
       this.isClearing = false;
@@ -58,6 +62,11 @@ export class TokenMutex {
     });
 
     return this.clearPromise as Promise<T>;
+  }
+
+  /** True while a clear (logout) operation holds the lock. */
+  get isClearingTokens(): boolean {
+    return this.isClearing;
   }
 }
 

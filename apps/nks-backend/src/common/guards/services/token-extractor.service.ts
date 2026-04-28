@@ -23,10 +23,20 @@ export class TokenExtractorService {
     const cookie = cookies[AuthControllerHelpers.SESSION_COOKIE_NAME] ?? null;
 
     if (bearer && cookie) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.BAD_REQUEST,
-        message: 'Use Bearer token or session cookie — not both.',
-      });
+      const deviceType = req.headers['x-device-type'];
+      const isMobile =
+        deviceType === 'IOS' ||
+        deviceType === 'ANDROID' ||
+        deviceType === 'ios' ||
+        deviceType === 'android';
+
+      if (!isMobile) {
+        throw new BadRequestException({
+          errorCode: ErrorCode.BAD_REQUEST,
+          message: 'Use Bearer token or session cookie — not both.',
+        });
+      }
+      // Mobile: OS cookie jar auto-attaches nks_session; Bearer takes precedence
     }
 
     // Cap session token length before any DB lookup — prevents hash-computation DoS

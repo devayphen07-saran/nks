@@ -12,7 +12,8 @@ import { OtpRepository } from '../../repositories/otp.repository';
 import { AuthProviderRepository } from '../../repositories/auth-provider.repository';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { MailService } from '../../../../../shared/mail/mail.service';
-import { OTP_EXPIRY_MS } from '../../auth.constants';
+import { OTP_EXPIRY_MS, OTP_MAX_ATTEMPTS } from '../../auth.constants';
+import { TransactionService } from '../../../../../core/database/transaction.service';
 
 /**
  * OTP Hashing Strategy: HMAC-SHA256 (not bcrypt)
@@ -27,7 +28,6 @@ import { OTP_EXPIRY_MS } from '../../auth.constants';
  * - Designed for short-lived tokens
  * - Standard for TOTP/HOTP schemes (RFC 6238)
  */
-const OTP_MAX_ATTEMPTS = 5;
 
 @Injectable()
 export class OtpService {
@@ -42,6 +42,7 @@ export class OtpService {
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
+    private readonly txService: TransactionService,
   ) {
     this.otpHmacSecret = this.configService.getOrThrow<string>('OTP_HMAC_SECRET');
   }
@@ -125,8 +126,13 @@ export class OtpService {
     }
     OtpValidator.assertMsg91VerifySuccess(response);
 
-    // 3. Mark OTP log as used by reqId
-    await this.otpRepository.markAsUsedByReqId(reqId);
+    // 3. CAS mark-as-used — closes the race window between assertOtpNotUsed (in-memory)
+    // and this update. Two concurrent requests both pass the in-memory check; only the
+    // one that wins the DB CAS proceeds. The loser gets OTP_ALREADY_USED.
+    const marked = await this.otpRepository.markAsUsedByReqId(reqId);
+    if (!marked) {
+      OtpValidator.assertOtpNotUsed(true); // throws OTP_ALREADY_USED
+    }
 
     // Return only verification result — user find/create handled by UserCreationService
     return {
@@ -175,56 +181,63 @@ export class OtpService {
     );
 
     OtpValidator.assertOtpFound(otpRecord);
-    OtpValidator.assertOtpNotUsed(otpRecord.isUsed);
     OtpValidator.assertOtpNotExpired(otpRecord.expiresAt);
     OtpValidator.assertAttemptsNotExceeded(otpRecord.attempts, OTP_MAX_ATTEMPTS);
 
-    // Compare provided OTP against the stored HMAC hash (timing-safe comparison)
+    // Claim the OTP atomically before verifying the value.
+    // Two concurrent requests with the correct OTP both pass the in-memory checks
+    // above; the DB CAS here ensures only one proceeds. The loser gets OTP_ALREADY_USED
+    // without ever reaching the hash comparison, closing the TOCTOU window entirely.
+    const marked = await this.otpRepository.markAsUsed(otpRecord.id);
+    if (!marked) {
+      OtpValidator.assertOtpNotUsed(true); // throws OTP_ALREADY_USED
+    }
+
+    // OTP is now claimed. Verify the value against the stored hash.
+    // A wrong code here still consumes the OTP — the user must request a new one.
     const isValid = this.verifyOtpHash(otp, otpRecord.value);
     if (!isValid) {
       await this.otpRepository.incrementAttempts(otpRecord.id);
       OtpValidator.assertOtpValid(isValid);
     }
 
-    // CAS mark-as-used: rejects if a concurrent call already flipped the flag,
-    // closing the race window between hash compare and the update landing.
-    const marked = await this.otpRepository.markAsUsed(otpRecord.id);
-    if (!marked) {
-      OtpValidator.assertOtpNotUsed(true); // throws OTP_ALREADY_USED
-    }
+    // Steps 5-7: find user, upsert auth provider, mark email verified — all atomic.
+    await this.txService.run(async (tx) => {
+      // Find user by email (must exist from registration)
+      const user = await this.authUsersRepository.findByEmail(email, tx);
+      OtpValidator.assertUserFound(user);
+      OtpValidator.assertNotBlocked(user);
 
-    // Find user by email (must exist from registration)
-    const user = await this.authUsersRepository.findByEmail(email);
-    OtpValidator.assertUserFound(user);
-    OtpValidator.assertNotBlocked(user);
+      // Create or update email auth provider
+      const existingProviderId =
+        await this.authProviderRepository.findIdByUserIdAndProvider(
+          user.id,
+          'email',
+          tx,
+        );
 
-    // Create or update email auth provider
-    const existingProviderId =
-      await this.authProviderRepository.findIdByUserIdAndProvider(
-        user.id,
-        'email',
-      );
+      if (existingProviderId) {
+        await this.authProviderRepository.updateVerification(
+          existingProviderId,
+          true,
+          new Date(),
+          tx,
+        );
+      } else {
+        await this.authProviderRepository.create({
+          userId: user.id,
+          providerId: 'email',
+          accountId: email,
+          isVerified: true,
+          verifiedAt: new Date(),
+        }, tx);
+      }
 
-    if (existingProviderId) {
-      await this.authProviderRepository.updateVerification(
-        existingProviderId,
-        true,
-        new Date(),
-      );
-    } else {
-      await this.authProviderRepository.create({
-        userFk: user.id,
-        providerId: 'email',
-        accountId: email,
-        isVerified: true,
-        verifiedAt: new Date(),
-      });
-    }
+      // Mark email as verified in users table
+      await this.authUsersRepository.verifyEmail(user.id, tx);
+    });
 
-    // Mark email as verified in users table
-    await this.authUsersRepository.verifyEmail(user.id);
-
-    // Reset rate limit counter
+    // Reset rate limit counter (outside tx — non-critical, best-effort)
     await this.rateLimitService.resetRequestCount(email);
   }
 

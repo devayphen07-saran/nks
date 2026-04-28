@@ -6,7 +6,7 @@ import {
 import { useStoreLegalTypes } from "@nks/api-manager";
 
 interface StoreLegalType {
-  id: number;
+  guuid: string;
   code: string;
   title: string;
 }
@@ -27,7 +27,7 @@ export const StoreLegalTypeSelect = ({
   errorMessage,
 }: Props) => {
   const { data, isLoading } = useStoreLegalTypes();
-  const items: StoreLegalType[] = data?.data?.data ?? [];
+  const items: StoreLegalType[] = data?.data ?? [];
 
   return (
     <SelectGeneric<StoreLegalType>

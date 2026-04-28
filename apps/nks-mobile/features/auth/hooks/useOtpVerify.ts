@@ -3,13 +3,15 @@ import { router } from "expo-router";
 import { otpSchema } from "../schema/otp";
 import { verifyOtp, otpResend } from "@nks/api-manager";
 import { useRootDispatch } from "../../../store";
+import { setCredentials } from "../../../store/auth-slice";
 import { persistLogin } from "../../../store/persist-login";
-import { ErrorHandler } from "../../../shared/errors";
+import { handleError } from "../../../shared/errors";
 import { OTP_RATE_LIMITS } from '../../../lib/utils/rate-limiter';
 import { OTP_LENGTH, OTP_RESEND_COOLDOWN_SECONDS } from "@nks/utils";
 import { ROUTES } from '../../../lib/navigation/routes';
 import { JWTManager } from '../../../lib/auth/jwt-manager';
 import { registerProactiveRefresh } from '../../../lib/auth/jwt-refresh';
+import { getServerBaseUrl } from '../../../lib/utils/api-base-url';
 import { getPendingOtpSession, clearPendingOtpSession } from "../lib/otp-session";
 
 export function useOtpVerify() {
@@ -27,6 +29,7 @@ export function useOtpVerify() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -53,6 +56,7 @@ export function useOtpVerify() {
     startCountdown();
     return () => {
       clearTimer();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
       clearPendingOtpSession();
     };
   }, [startCountdown, clearTimer]);
@@ -101,19 +105,17 @@ export function useOtpVerify() {
         .then(async (apiResponse) => {
           const authResponse = apiResponse?.data;
 
-          if (authResponse?.session?.sessionToken) {
+          if (authResponse?.auth?.sessionToken) {
             // Reset rate limiter on successful verification
             OTP_RATE_LIMITS.verify.reset();
             clearPendingOtpSession();
             await persistLogin(authResponse, dispatch);
 
             // Cache NKS RS256 JWKS for offline JWT verification (non-critical)
-            const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? "";
-            const serverBase = apiUrl.replace(/\/api\/v\d+\/?$/, "");
-            JWTManager.cacheJWKS(serverBase).catch(() => {});
+            JWTManager.cacheJWKS(getServerBaseUrl()).catch(() => {});
 
             // Register proactive access token refresh on app foreground
-            registerProactiveRefresh();
+            registerProactiveRefresh((authResponse) => dispatch(setCredentials(authResponse)));
 
             router.replace(ROUTES.ACCOUNT_TYPE);
           } else {
@@ -121,7 +123,7 @@ export function useOtpVerify() {
           }
         })
         .catch((err) => {
-          const appError = ErrorHandler.handle(err, {
+          const appError = handleError(err, {
             phone: phone,
             otp: "***",
             action: "verify_otp",
@@ -148,9 +150,13 @@ export function useOtpVerify() {
       setDigits(newDigits);
       setErrorMessage(null);
 
-      // Auto-verify when all 6 digits entered
+      // Auto-verify when all 6 digits entered (debounced to absorb paste/autofill bursts)
       if (cleaned.length === OTP_LENGTH) {
-        handleVerify(cleaned);
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => {
+          debounceRef.current = null;
+          handleVerify(cleaned);
+        }, 300);
       }
     },
     [handleVerify],
@@ -189,7 +195,7 @@ export function useOtpVerify() {
         startCountdown();
       })
       .catch((err) => {
-        const appError = ErrorHandler.handle(err, {
+        const appError = handleError(err, {
           phone: phone,
           action: "resend_otp",
           reqId: reqIdRef.current,

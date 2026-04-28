@@ -38,7 +38,7 @@ export function AccountTypeScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Hero $topInset={insets.top}>
-            <HeroContent gap="xSmall" align="center">
+            <Column gap="xSmall" align="center">
               <LogoRow gap="small" align="center">
                 <LogoCircle>
                   <LucideIcon name="Layers" size={24} color={theme.colorWhite} />
@@ -47,7 +47,7 @@ export function AccountTypeScreen() {
                   NKS
                 </Typography.H4>
               </LogoRow>
-            </HeroContent>
+            </Column>
           </Hero>
 
           <PageContent gap="large">
@@ -165,8 +165,6 @@ const Hero = styled.View<{ $topInset: number }>`
   justify-content: flex-start;
   overflow: hidden;
 `;
-
-const HeroContent = styled(Column)``;
 
 const LogoRow = styled(Row)`
   align-self: flex-start;

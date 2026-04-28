@@ -11,212 +11,132 @@ export interface UpdateSalutationRequest {
 }
 
 export interface SalutationResponse {
-  id: number;
+  guuid: string;
   code: string;
   title: string;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: string;
-  updatedAt: string;
+  description?: string | null;
 }
 
 export interface SalutationsListResponse {
-  data: {
-    data: SalutationResponse[];
-    message: string;
-  };
+  data: SalutationResponse[];
   message: string;
-  status: string;
 }
 
 // ─── Countries ──────────────────────────────────────────────────────────────
 
 export interface CountryResponse {
-  id: number;
+  guuid: string;
   countryCode: string;
   countryName: string;
   dialingCode?: string;
-  description?: string;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: string;
-  updatedAt: string;
+  description?: string | null;
 }
 
 export interface CountriesListResponse {
-  data: {
-    data: CountryResponse[];
-    message: string;
-  };
+  data: CountryResponse[];
   message: string;
-  status: string;
 }
 
 // ─── Address Types ──────────────────────────────────────────────────────────
 
 export interface AddressTypeResponse {
-  id: number;
+  guuid: string;
   code: string;
   title: string;
-  description?: string;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: string;
-  updatedAt: string;
+  description?: string | null;
 }
 
 export interface AddressTypesListResponse {
-  data: {
-    data: AddressTypeResponse[];
-    message: string;
-  };
+  data: AddressTypeResponse[];
   message: string;
-  status: string;
 }
 
 // ─── Communication Types ────────────────────────────────────────────────────
 
 export interface CommunicationTypeResponse {
-  id: number;
+  guuid: string;
   code: string;
   title: string;
-  description?: string;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: string;
-  updatedAt: string;
+  description?: string | null;
+  icon?: string | null;
+  validationRegex?: string | null;
 }
 
 export interface CommunicationTypesListResponse {
-  data: {
-    data: CommunicationTypeResponse[];
-    message: string;
-  };
+  data: CommunicationTypeResponse[];
   message: string;
-  status: string;
 }
 
 // ─── Designations ───────────────────────────────────────────────────────────
 
 export interface DesignationResponse {
-  id: number;
+  guuid: string;
   code: string;
   title: string;
-  description?: string;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: string;
-  updatedAt: string;
+  description?: string | null;
 }
 
 export interface DesignationsListResponse {
-  data: {
-    data: DesignationResponse[];
-    message: string;
-  };
+  data: DesignationResponse[];
   message: string;
-  status: string;
 }
 
 // ─── Store Legal Types ──────────────────────────────────────────────────────
 
 export interface StoreLegalTypeResponse {
-  id: number;
+  guuid: string;
   code: string;
-  name: string;
   title: string;
-  description?: string;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: string;
-  updatedAt: string;
+  description?: string | null;
 }
 
 export interface StoreLegalTypesListResponse {
-  data: {
-    data: StoreLegalTypeResponse[];
-    message: string;
-  };
+  data: StoreLegalTypeResponse[];
   message: string;
-  status: string;
 }
 
 // ─── Store Categories ───────────────────────────────────────────────────────
 
 export interface StoreCategoryResponse {
-  id: number;
+  guuid: string;
   code: string;
-  name: string;
   title: string;
-  description?: string;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: string;
-  updatedAt: string;
+  description?: string | null;
 }
 
 export interface StoreCategoriesListResponse {
-  data: {
-    data: StoreCategoryResponse[];
-    message: string;
-  };
+  data: StoreCategoryResponse[];
   message: string;
-  status: string;
 }
 
 // ─── Currencies ─────────────────────────────────────────────────────────────
 
 export interface CurrencyResponse {
-  id: number;
+  guuid: string;
   code: string;
   symbol?: string;
   title: string;
-  description?: string;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: string;
-  updatedAt: string;
+  description?: string | null;
 }
 
 export interface CurrenciesListResponse {
-  data: {
-    data: CurrencyResponse[];
-    message: string;
-  };
+  data: CurrencyResponse[];
   message: string;
-  status: string;
 }
 
 // ─── Volumes ────────────────────────────────────────────────────────────────
 
 export interface VolumeResponse {
-  id: number;
+  guuid: string;
   code: string;
   title: string;
   unit?: string;
-  description?: string;
-  isActive: boolean;
-  isHidden: boolean;
-  isSystem: boolean;
-  createdAt: string;
-  updatedAt: string;
+  description?: string | null;
 }
 
 export interface VolumesListResponse {
-  data: {
-    data: VolumeResponse[];
-    message: string;
-  };
+  data: VolumeResponse[];
   message: string;
-  status: string;
 }
 
 // ─── Salutations ────────────────────────────────────────────────────────────
