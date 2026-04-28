@@ -137,7 +137,7 @@ export class TokenLifecycleService {
 
     if (!user?.guuid) {
       throw new InternalServerException(
-        'User record missing guuid — cannot sign JWT',
+        errPayload(ErrorCode.INTERNAL_SERVER_ERROR),
       );
     }
 

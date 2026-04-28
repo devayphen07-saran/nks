@@ -154,12 +154,9 @@ export class PermissionsChangelogService {
 
     return rows.map((row) => ({
       entityCode: row.entityCode,
-      perms: row.deny ? {} : {
-        VIEW:   row.canView,
-        CREATE: row.canCreate,
-        EDIT:   row.canEdit,
-        DELETE: row.canDelete,
-      },
+      perms: row.deny
+        ? ({} as Record<string, boolean>)
+        : { VIEW: row.canView, CREATE: row.canCreate, EDIT: row.canEdit, DELETE: row.canDelete },
     }));
   }
 
