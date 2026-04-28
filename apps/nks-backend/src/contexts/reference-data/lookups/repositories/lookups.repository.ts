@@ -1,14 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, and, isNull, or, count, asc, desc } from 'drizzle-orm';
+import { eq, and, isNull, count, asc, desc, sql } from 'drizzle-orm';
 import type { AnyColumn } from 'drizzle-orm/column';
 import { ilikeAny } from '../../../../core/database/query-helpers';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
 import * as schema from '../../../../core/database/schema';
-import { codeValue } from '../../../../core/database/schema/lookups/code-value/code-value.table';
-import { codeCategory } from '../../../../core/database/schema/lookups/code-category/code-category.table';
+import { lookup } from '../../../../core/database/schema/lookups/lookup/lookup.table';
+import { lookupType } from '../../../../core/database/schema/lookups/lookup-type/lookup-type.table';
 import { currency } from '../../../../core/database/schema/lookups/currency/currency.table';
+import { LookupTypeCodes } from '../../../../common/constants/lookup-type-codes.constants';
 import type {
   CreateLookupValueDto,
   UpdateLookupValueDto,
@@ -18,7 +19,7 @@ const DEFAULT_LOOKUP_PAGE_SIZE = 200;
 
 // ─── Row Types ──────────────────────────────────────────────────────────────
 
-type CodeValueRow = {
+type LookupValueRow = {
   id: number;
   guuid: string;
   code: string;
@@ -36,22 +37,31 @@ type CountryRow = typeof schema.country.$inferSelect;
 type CommunicationTypeRow = typeof schema.communicationType.$inferSelect;
 type CurrencyRow = typeof currency.$inferSelect;
 type VolumesRow = typeof schema.volumes.$inferSelect;
-type CodeCategoryWithCount = { code: string; name: string; isSystem: boolean; sortOrder: number | null; valueCount: number };
-type CodeCategoryRef = { id: number; code: string; name: string };
+type LookupTypeWithCount = { code: string; title: string; isSystem: boolean; sortOrder: number | null; valueCount: number };
+type LookupTypeRef = { id: number; code: string; title: string; hasTable: boolean };
 
-/** Columns to select from code_value for generic lookup endpoints */
-const codeValueSelect = {
-  id: codeValue.id,
-  guuid: codeValue.guuid,
-  code: codeValue.code,
-  label: codeValue.label,
-  description: codeValue.description,
-  isActive: codeValue.isActive,
-  isHidden: codeValue.isHidden,
-  isSystem: codeValue.isSystem,
-  sortOrder: codeValue.sortOrder,
-  createdAt: codeValue.createdAt,
-  updatedAt: codeValue.updatedAt,
+type FindOpts = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sortBy?: string;
+  sortOrder?: string;
+  isActive?: boolean;
+};
+
+/** Columns to select from lookup for generic lookup endpoints */
+const lookupValueSelect = {
+  id: lookup.id,
+  guuid: lookup.guuid,
+  code: lookup.code,
+  label: lookup.label,
+  description: lookup.description,
+  isActive: lookup.isActive,
+  isHidden: lookup.isHidden,
+  isSystem: lookup.isSystem,
+  sortOrder: lookup.sortOrder,
+  createdAt: lookup.createdAt,
+  updatedAt: lookup.updatedAt,
 };
 
 @Injectable()
@@ -60,11 +70,11 @@ export class LookupsRepository extends BaseRepository {
 
   private getValueOrderColumn(sortBy: string = 'sortOrder') {
     switch (sortBy) {
-      case 'code':      return codeValue.code;
-      case 'label':     return codeValue.label;
-      case 'createdAt': return codeValue.createdAt;
+      case 'code':      return lookup.code;
+      case 'label':     return lookup.label;
+      case 'createdAt': return lookup.createdAt;
       case 'sortOrder':
-      default:          return codeValue.sortOrder;
+      default:          return lookup.sortOrder;
     }
   }
 
@@ -72,22 +82,22 @@ export class LookupsRepository extends BaseRepository {
     return sortOrder === 'desc' ? desc(column) : asc(column);
   }
 
-  /** Generic — replaces getSalutations / getAddressTypes / getDesignations / getStoreLegalTypes / getStoreCategories. */
-  async getValuesByCategory(categoryCode: string, limit = DEFAULT_LOOKUP_PAGE_SIZE): Promise<CodeValueRow[]> {
+  /** Generic — fetch all active, visible global values for a lookup type code */
+  async getValuesByType(typeCode: string, limit = DEFAULT_LOOKUP_PAGE_SIZE): Promise<LookupValueRow[]> {
     return this.db
-      .select(codeValueSelect)
-      .from(codeValue)
-      .innerJoin(codeCategory, eq(codeValue.categoryFk, codeCategory.id))
+      .select(lookupValueSelect)
+      .from(lookup)
+      .innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id))
       .where(
         and(
-          eq(codeCategory.code, categoryCode),
-          isNull(codeValue.storeFk),
-          eq(codeValue.isActive, true),
-          eq(codeValue.isHidden, false),
-          isNull(codeValue.deletedAt),
+          eq(lookupType.code, typeCode),
+          isNull(lookup.storeFk),
+          eq(lookup.isActive, true),
+          eq(lookup.isHidden, false),
+          isNull(lookup.deletedAt),
         ),
       )
-      .orderBy(codeValue.sortOrder)
+      .orderBy(lookup.sortOrder)
       .limit(limit);
   }
 
@@ -147,132 +157,238 @@ export class LookupsRepository extends BaseRepository {
       .orderBy(schema.volumes.sortOrder);
   }
 
+  async getAddressTypesFromTable(): Promise<{ id: number; guuid: string; code: string; label: string; description: string | null }[]> {
+    return this.db
+      .select({ id: schema.addressType.id, guuid: schema.addressType.guuid, code: schema.addressType.code, label: schema.addressType.label, description: schema.addressType.description })
+      .from(schema.addressType)
+      .where(and(eq(schema.addressType.isActive, true), eq(schema.addressType.isHidden, false), isNull(schema.addressType.deletedAt)))
+      .orderBy(schema.addressType.sortOrder);
+  }
+
+  async getDesignationTypesFromTable(): Promise<{ id: number; guuid: string; code: string; label: string; description: string | null }[]> {
+    return this.db
+      .select({ id: schema.designationType.id, guuid: schema.designationType.guuid, code: schema.designationType.code, label: schema.designationType.label, description: schema.designationType.description })
+      .from(schema.designationType)
+      .where(and(eq(schema.designationType.isActive, true), eq(schema.designationType.isHidden, false), isNull(schema.designationType.deletedAt)))
+      .orderBy(schema.designationType.sortOrder);
+  }
+
   // ── Admin: Lookup Configuration ─────────────────────────────────────────────
 
-  /** All active code categories with a count of their global active values */
-  async findAllCodeCategories(): Promise<CodeCategoryWithCount[]> {
+  /** All active lookup types with a count of their global active values */
+  async findAllLookupTypes(): Promise<LookupTypeWithCount[]> {
     return this.db
       .select({
-        code: codeCategory.code,
-        name: codeCategory.name,
-        isSystem: codeCategory.isSystem,
-        sortOrder: codeCategory.sortOrder,
-        valueCount: count(codeValue.id),
+        code: lookupType.code,
+        title: lookupType.title,
+        isSystem: lookupType.isSystem,
+        sortOrder: lookupType.sortOrder,
+        valueCount: count(lookup.id),
       })
-      .from(codeCategory)
+      .from(lookupType)
       .leftJoin(
-        codeValue,
+        lookup,
         and(
-          eq(codeValue.categoryFk, codeCategory.id),
-          isNull(codeValue.storeFk),
-          eq(codeValue.isActive, true),
-          isNull(codeValue.deletedAt),
+          eq(lookup.lookupTypeFk, lookupType.id),
+          isNull(lookup.storeFk),
+          eq(lookup.isActive, true),
+          isNull(lookup.deletedAt),
         ),
       )
       .where(
-        and(eq(codeCategory.isActive, true), isNull(codeCategory.deletedAt)),
+        and(eq(lookupType.isActive, true), isNull(lookupType.deletedAt)),
       )
-      .groupBy(codeCategory.id)
-      .orderBy(codeCategory.sortOrder, codeCategory.name);
+      .groupBy(lookupType.id)
+      .orderBy(lookupType.sortOrder, lookupType.title);
   }
 
-  /** All non-deleted global values for a category (admin view — supports sortBy, sortOrder, isActive) */
-  async findCodeValuesByCategory(
-    categoryCode: string,
-    opts: { page: number; pageSize: number; search?: string; sortBy?: string; sortOrder?: string; isActive?: boolean },
-  ): Promise<{ rows: CodeValueRow[]; total: number }> {
+  /** All non-deleted global values for a type (admin view — supports sortBy, sortOrder, isActive) */
+  async findLookupValuesByType(
+    typeCode: string,
+    opts: FindOpts,
+  ): Promise<{ rows: LookupValueRow[]; total: number }> {
     const { page, pageSize, search, sortBy = 'sortOrder', sortOrder = 'asc', isActive } = opts;
     const offset = LookupsRepository.toOffset(page, pageSize);
 
     const where = and(
-      eq(codeCategory.code, categoryCode),
-      isNull(codeValue.storeFk),
-      isNull(codeValue.deletedAt),
-      isActive !== undefined ? eq(codeValue.isActive, isActive) : undefined,
-      ilikeAny(search, codeValue.label, codeValue.code),
+      eq(lookupType.code, typeCode),
+      isNull(lookup.storeFk),
+      isNull(lookup.deletedAt),
+      isActive !== undefined ? eq(lookup.isActive, isActive) : undefined,
+      ilikeAny(search, lookup.label, lookup.code),
     );
 
     return this.paginate(
-      this.db.select(codeValueSelect).from(codeValue).innerJoin(codeCategory, eq(codeValue.categoryFk, codeCategory.id)).where(where).orderBy(this.applySortDirection(this.getValueOrderColumn(sortBy), sortOrder)).limit(pageSize).offset(offset),
-      () => this.db.select({ total: count() }).from(codeValue).innerJoin(codeCategory, eq(codeValue.categoryFk, codeCategory.id)).where(where),
+      this.db.select(lookupValueSelect).from(lookup).innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id)).where(where).orderBy(this.applySortDirection(this.getValueOrderColumn(sortBy), sortOrder)).limit(pageSize).offset(offset),
+      () => this.db.select({ total: count() }).from(lookup).innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id)).where(where),
       page, pageSize,
     );
   }
 
-  /** Resolve a code_category row by its code */
-  async findCodeCategoryByCode(code: string): Promise<CodeCategoryRef | null> {
+  /**
+   * Paginated admin view for a dedicated-table lookup type.
+   * Routes to the correct table based on typeCode and maps columns to LookupValueRow.
+   */
+  async findDedicatedLookupValues(
+    typeCode: string,
+    opts: FindOpts,
+  ): Promise<{ rows: LookupValueRow[]; total: number }> {
+    const { page, pageSize, search, sortBy = 'sortOrder', sortOrder = 'asc', isActive } = opts;
+    const offset = LookupsRepository.toOffset(page, pageSize);
+    const dir = sortOrder === 'desc' ? desc : asc;
+
+    // ── Helper for standard tables (code + label + description columns) ──────
+    const standardTable = async (
+      tbl: typeof schema.billingFrequency | typeof schema.communicationType | typeof schema.designationType | typeof schema.entityType | typeof schema.notificationStatus | typeof schema.staffInviteStatus | typeof schema.taxFilingFrequency | typeof schema.addressType,
+    ) => {
+      const t = tbl as typeof schema.billingFrequency;
+      const orderCol = sortBy === 'code' ? t.code : sortBy === 'label' ? t.label : sortBy === 'createdAt' ? t.createdAt : t.sortOrder;
+      const where = and(
+        isNull(t.deletedAt),
+        isActive !== undefined ? eq(t.isActive, isActive) : undefined,
+        ilikeAny(search, t.label, t.code),
+      );
+      return this.paginate(
+        this.db.select({ id: t.id, guuid: t.guuid, code: t.code, label: t.label, description: t.description, isActive: t.isActive, isHidden: t.isHidden, isSystem: t.isSystem, sortOrder: t.sortOrder, createdAt: t.createdAt, updatedAt: t.updatedAt }).from(t as any).where(where).orderBy(dir(orderCol)).limit(pageSize).offset(offset),
+        () => this.db.select({ total: count() }).from(t as any).where(where),
+        page, pageSize,
+      );
+    };
+
+    switch (typeCode) {
+      case LookupTypeCodes.BILLING_FREQUENCY:
+        return standardTable(schema.billingFrequency);
+
+      case LookupTypeCodes.COMMUNICATION_TYPE:
+        return standardTable(schema.communicationType);
+
+      case LookupTypeCodes.DESIGNATION_TYPE:
+        return standardTable(schema.designationType);
+
+      case LookupTypeCodes.ENTITY_TYPE:
+        return standardTable(schema.entityType);
+
+      case LookupTypeCodes.NOTIFICATION_STATUS:
+        return standardTable(schema.notificationStatus);
+
+      case LookupTypeCodes.STAFF_INVITE_STATUS:
+        return standardTable(schema.staffInviteStatus);
+
+      case LookupTypeCodes.TAX_FILING_FREQUENCY:
+        return standardTable(schema.taxFilingFrequency);
+
+      case LookupTypeCodes.ADDRESS_TYPE:
+        return standardTable(schema.addressType);
+
+      case LookupTypeCodes.CURRENCY: {
+        const t = schema.currency;
+        const orderCol = sortBy === 'code' ? t.code : sortBy === 'label' ? t.symbol : sortBy === 'createdAt' ? t.createdAt : t.sortOrder;
+        const where = and(
+          isNull(t.deletedAt),
+          isActive !== undefined ? eq(t.isActive, isActive) : undefined,
+          ilikeAny(search, t.symbol, t.code),
+        );
+        return this.paginate(
+          this.db.select({ id: t.id, guuid: t.guuid, code: t.code, label: t.symbol, description: t.description, isActive: t.isActive, isHidden: t.isHidden, isSystem: t.isSystem, sortOrder: t.sortOrder, createdAt: t.createdAt, updatedAt: t.updatedAt }).from(t).where(where).orderBy(dir(orderCol)).limit(pageSize).offset(offset),
+          () => this.db.select({ total: count() }).from(t).where(where),
+          page, pageSize,
+        );
+      }
+
+      case LookupTypeCodes.VOLUMES: {
+        const t = schema.volumes;
+        const orderCol = sortBy === 'code' ? t.volumeCode : sortBy === 'label' ? t.volumeName : sortBy === 'createdAt' ? t.createdAt : t.sortOrder;
+        const where = and(
+          isNull(t.deletedAt),
+          isActive !== undefined ? eq(t.isActive, isActive) : undefined,
+          ilikeAny(search, t.volumeName, t.volumeCode),
+        );
+        return this.paginate(
+          this.db.select({ id: t.id, guuid: t.guuid, code: t.volumeCode, label: t.volumeName, description: sql<string | null>`null`, isActive: t.isActive, isHidden: t.isHidden, isSystem: t.isSystem, sortOrder: t.sortOrder, createdAt: t.createdAt, updatedAt: t.updatedAt }).from(t).where(where).orderBy(dir(orderCol)).limit(pageSize).offset(offset),
+          () => this.db.select({ total: count() }).from(t).where(where),
+          page, pageSize,
+        );
+      }
+
+      default:
+        return { rows: [], total: 0 };
+    }
+  }
+
+  /** Resolve a lookup_type row by its code (includes hasTable flag for routing decisions) */
+  async findLookupTypeByCode(code: string): Promise<LookupTypeRef | null> {
     const [row] = await this.db
       .select({
-        id: codeCategory.id,
-        code: codeCategory.code,
-        name: codeCategory.name,
+        id: lookupType.id,
+        code: lookupType.code,
+        title: lookupType.title,
+        hasTable: lookupType.hasTable,
       })
-      .from(codeCategory)
-      .where(and(eq(codeCategory.code, code), isNull(codeCategory.deletedAt)))
+      .from(lookupType)
+      .where(and(eq(lookupType.code, code), isNull(lookupType.deletedAt)))
       .limit(1);
     return row ?? null;
   }
 
-  /** Find a single code_value by id */
-  async findCodeValueById(id: number): Promise<CodeValueRow | null> {
+  /** Find a single lookup value by id */
+  async findLookupValueById(id: number): Promise<LookupValueRow | null> {
     const [row] = await this.db
-      .select(codeValueSelect)
-      .from(codeValue)
-      .where(and(eq(codeValue.id, id), isNull(codeValue.deletedAt)))
+      .select(lookupValueSelect)
+      .from(lookup)
+      .where(and(eq(lookup.id, id), isNull(lookup.deletedAt)))
       .limit(1);
     return row ?? null;
   }
 
   /**
-   * Fetch a code_value by id and verify it belongs to categoryCode in one query.
-   * Returns null if the value does not exist, is deleted, or belongs to a different category.
-   * Use this instead of calling findCodeCategoryByCode + findCodeValueById separately.
+   * Fetch a lookup value by id and verify it belongs to typeCode in one query.
+   * Returns null if the value does not exist, is deleted, or belongs to a different type.
    */
-  async findCodeValueByIdAndCategory(
+  async findLookupValueByIdAndType(
     id: number,
-    categoryCode: string,
-  ): Promise<CodeValueRow | null> {
+    typeCode: string,
+  ): Promise<LookupValueRow | null> {
     const [row] = await this.db
-      .select(codeValueSelect)
-      .from(codeValue)
-      .innerJoin(codeCategory, eq(codeValue.categoryFk, codeCategory.id))
+      .select(lookupValueSelect)
+      .from(lookup)
+      .innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id))
       .where(
         and(
-          eq(codeValue.id, id),
-          eq(codeCategory.code, categoryCode),
-          isNull(codeValue.deletedAt),
+          eq(lookup.id, id),
+          eq(lookupType.code, typeCode),
+          isNull(lookup.deletedAt),
         ),
       )
       .limit(1);
     return row ?? null;
   }
 
-  /** Fetch a code_value by guuid and verify it belongs to categoryCode. */
-  async findCodeValueByGuuidAndCategory(
+  /** Fetch a lookup value by guuid and verify it belongs to typeCode. */
+  async findLookupValueByGuuidAndType(
     guuid: string,
-    categoryCode: string,
-  ): Promise<CodeValueRow & { numericId: number } | null> {
+    typeCode: string,
+  ): Promise<LookupValueRow & { numericId: number } | null> {
     const [row] = await this.db
-      .select({ ...codeValueSelect, numericId: codeValue.id })
-      .from(codeValue)
-      .innerJoin(codeCategory, eq(codeValue.categoryFk, codeCategory.id))
+      .select({ ...lookupValueSelect, numericId: lookup.id })
+      .from(lookup)
+      .innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id))
       .where(
         and(
-          eq(codeValue.guuid, guuid),
-          eq(codeCategory.code, categoryCode),
-          isNull(codeValue.deletedAt),
+          eq(lookup.guuid, guuid),
+          eq(lookupType.code, typeCode),
+          isNull(lookup.deletedAt),
         ),
       )
       .limit(1);
     return row ?? null;
   }
 
-  /** Insert a new global code_value under a category */
-  async createCodeValue(categoryId: number, dto: CreateLookupValueDto): Promise<typeof codeValue.$inferSelect> {
+  /** Insert a new global lookup value under a type */
+  async createLookupValue(typeId: number, dto: CreateLookupValueDto): Promise<typeof lookup.$inferSelect> {
     const [row] = await this.db
-      .insert(codeValue)
+      .insert(lookup)
       .values({
-        categoryFk: categoryId,
+        lookupTypeFk: typeId,
         code: dto.code,
         label: dto.label,
         description: dto.description ?? null,
@@ -284,101 +400,47 @@ export class LookupsRepository extends BaseRepository {
     return row;
   }
 
-  /** Update label / description / sortOrder on a code_value (code is immutable after creation) */
-  async updateCodeValue(id: number, dto: UpdateLookupValueDto): Promise<typeof codeValue.$inferSelect | null> {
-    const set: Partial<typeof codeValue.$inferInsert> = {};
+  /** Update label / description / sortOrder on a lookup value (code is immutable after creation) */
+  async updateLookupValue(id: number, dto: UpdateLookupValueDto): Promise<typeof lookup.$inferSelect | null> {
+    const set: Partial<typeof lookup.$inferInsert> = {};
     if (dto.label !== undefined) set.label = dto.label;
-    if (dto.description !== undefined)
-      set.description = dto.description ?? null;
+    if (dto.description !== undefined) set.description = dto.description ?? null;
     if (dto.sortOrder !== undefined) set.sortOrder = dto.sortOrder ?? null;
 
     const [row] = await this.db
-      .update(codeValue)
+      .update(lookup)
       .set(set)
-      .where(and(eq(codeValue.id, id), isNull(codeValue.deletedAt)))
+      .where(and(eq(lookup.id, id), isNull(lookup.deletedAt)))
       .returning();
     return row ?? null;
   }
 
-  /** Soft-delete a code_value */
-  async deleteCodeValue(id: number): Promise<typeof codeValue.$inferSelect | null> {
+  /** Soft-delete a lookup value */
+  async deleteLookupValue(id: number): Promise<typeof lookup.$inferSelect | null> {
     const [row] = await this.db
-      .update(codeValue)
+      .update(lookup)
       .set({ deletedAt: new Date(), isActive: false })
-      .where(and(eq(codeValue.id, id), isNull(codeValue.deletedAt)))
+      .where(and(eq(lookup.id, id), isNull(lookup.deletedAt)))
       .returning();
     return row ?? null;
   }
 
-  // ─── Codes (admin CRUD on code_category + code_value) ────────────────────
-
-  private getCategoryOrderColumn(sortBy: string = 'name') {
-    switch (sortBy) {
-      case 'code':      return codeCategory.code;
-      case 'createdAt': return codeCategory.createdAt;
-      default:          return codeCategory.name;
-    }
-  }
-
-  private getCodeValueOrderColumn(sortBy: string = 'sortOrder') {
-    switch (sortBy) {
-      case 'code':      return codeValue.code;
-      case 'label':     return codeValue.label;
-      case 'createdAt': return codeValue.createdAt;
-      default:          return codeValue.sortOrder;
-    }
-  }
-
-  async findCategory(categoryCode: string): Promise<typeof codeCategory.$inferSelect | null> {
+  /** Lightweight existence check — true if an active lookup with this guuid exists under typeCode. */
+  async existsByGuuidAndType(guuid: string, typeCode: string): Promise<boolean> {
     const [row] = await this.db
-      .select()
-      .from(codeCategory)
-      .where(and(eq(codeCategory.code, categoryCode), eq(codeCategory.isActive, true), isNull(codeCategory.deletedAt)))
+      .select({ id: lookup.id })
+      .from(lookup)
+      .innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id))
+      .where(
+        and(
+          eq(lookup.guuid, guuid),
+          eq(lookupType.code, typeCode),
+          eq(lookup.isActive, true),
+          isNull(lookup.deletedAt),
+        ),
+      )
       .limit(1);
-    return row ?? null;
-  }
-
-  async findAllCategories(opts: {
-    page: number; pageSize: number; search?: string; sortBy?: string; sortOrder?: string; isActive?: boolean;
-  }): Promise<{ rows: typeof codeCategory.$inferSelect[]; total: number }> {
-    const { page, pageSize, search, sortBy = 'name', sortOrder = 'asc', isActive } = opts;
-    const offset = LookupsRepository.toOffset(page, pageSize);
-    const activeFilter = isActive === undefined ? true : isActive;
-    const where = and(
-      eq(codeCategory.isActive, activeFilter),
-      isNull(codeCategory.deletedAt),
-      ilikeAny(search, codeCategory.name, codeCategory.code),
-    );
-    return this.paginate(
-      this.db.select().from(codeCategory).where(where)
-        .orderBy(this.applySortDirection(this.getCategoryOrderColumn(sortBy), sortOrder))
-        .limit(pageSize).offset(offset),
-      () => this.db.select({ total: count() }).from(codeCategory).where(where),
-      page, pageSize,
-    );
-  }
-
-  async findValueById(id: number): Promise<typeof codeValue.$inferSelect | null> {
-    const [row] = await this.db
-      .select().from(codeValue)
-      .where(and(eq(codeValue.id, id), isNull(codeValue.deletedAt)))
-      .limit(1);
-    return row ?? null;
-  }
-
-  async findValueByIdWithStore(id: number): Promise<{ id: number; guuid: string; code: string; label: string; description: string | null; sortOrder: number | null; isSystem: boolean; storeGuuid: string | null } | null> {
-    const [row] = await this.db
-      .select({
-        id: codeValue.id, guuid: codeValue.guuid, code: codeValue.code,
-        label: codeValue.label, description: codeValue.description,
-        sortOrder: codeValue.sortOrder, isSystem: codeValue.isSystem,
-        storeGuuid: schema.store.guuid,
-      })
-      .from(codeValue)
-      .leftJoin(schema.store, eq(codeValue.storeFk, schema.store.id))
-      .where(and(eq(codeValue.id, id), isNull(codeValue.deletedAt)))
-      .limit(1);
-    return row ?? null;
+    return row !== undefined;
   }
 
   async findStoreIdByGuuid(guuid: string): Promise<number | null> {
@@ -388,70 +450,5 @@ export class LookupsRepository extends BaseRepository {
       .where(eq(schema.store.guuid, guuid))
       .limit(1);
     return row?.id ?? null;
-  }
-
-  async findValueByGuuid(guuid: string): Promise<typeof codeValue.$inferSelect | null> {
-    const [row] = await this.db
-      .select().from(codeValue)
-      .where(and(eq(codeValue.guuid, guuid), isNull(codeValue.deletedAt)))
-      .limit(1);
-    return row ?? null;
-  }
-
-  async findValuesByCategory(
-    categoryId: number,
-    opts: { page: number; pageSize: number; storeId?: number; search?: string; sortBy?: string; sortOrder?: string; isActive?: boolean },
-  ): Promise<{ rows: { id: number; guuid: string; code: string; label: string; description: string | null; sortOrder: number | null; isSystem: boolean; storeGuuid: string | null }[]; total: number }> {
-    const { page, pageSize, storeId, search, sortBy = 'sortOrder', sortOrder = 'asc', isActive } = opts;
-    const offset = LookupsRepository.toOffset(page, pageSize);
-    const activeFilter = isActive === undefined ? true : isActive;
-    const storeFilter = storeId
-      ? or(isNull(codeValue.storeFk), eq(codeValue.storeFk, storeId))
-      : isNull(codeValue.storeFk);
-    const where = and(
-      eq(codeValue.categoryFk, categoryId),
-      eq(codeValue.isActive, activeFilter),
-      eq(codeValue.isHidden, false),
-      storeFilter,
-      ilikeAny(search, codeValue.label, codeValue.code),
-    );
-    return this.paginate(
-      this.db
-        .select({ id: codeValue.id, guuid: codeValue.guuid, code: codeValue.code, label: codeValue.label, description: codeValue.description, sortOrder: codeValue.sortOrder, isSystem: codeValue.isSystem, storeGuuid: schema.store.guuid })
-        .from(codeValue)
-        .leftJoin(schema.store, eq(codeValue.storeFk, schema.store.id))
-        .where(where)
-        .orderBy(this.applySortDirection(this.getCodeValueOrderColumn(sortBy), sortOrder))
-        .limit(pageSize).offset(offset),
-      () => this.db.select({ total: count() }).from(codeValue).where(where),
-      page, pageSize,
-    );
-  }
-
-  async createCategory(data: typeof codeCategory.$inferInsert): Promise<typeof codeCategory.$inferSelect> {
-    const [created] = await this.db.insert(codeCategory).values(data).returning();
-    return created;
-  }
-
-  async createValue(data: typeof codeValue.$inferInsert): Promise<typeof codeValue.$inferSelect> {
-    const [created] = await this.db.insert(codeValue).values(data).returning();
-    return created;
-  }
-
-  async updateValue(id: number, data: Partial<typeof codeValue.$inferInsert>): Promise<typeof codeValue.$inferSelect | null> {
-    const [updated] = await this.db
-      .update(codeValue).set(data)
-      .where(and(eq(codeValue.id, id), eq(codeValue.isActive, true), eq(codeValue.isSystem, false)))
-      .returning();
-    return updated ?? null;
-  }
-
-  async softDeleteValue(id: number, deletedBy: number): Promise<boolean> {
-    const [row] = await this.db
-      .update(codeValue)
-      .set({ isActive: false, deletedAt: new Date(), deletedBy })
-      .where(and(eq(codeValue.id, id), eq(codeValue.isActive, true), eq(codeValue.isSystem, false), isNull(codeValue.deletedAt)))
-      .returning({ id: codeValue.id });
-    return !!row;
   }
 }

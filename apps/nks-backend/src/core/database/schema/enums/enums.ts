@@ -39,14 +39,9 @@ export const routeTypeEnum = pgEnum('route_type', [
   'modal',
 ]);
 
-// volumes: DB-enforced unit type classification — prevents typos like 'wieght'.
-export const volumeTypeEnum = pgEnum('volume_type', [
-  'weight',
-  'volume',
-  'length',
-  'count',
-  'area',
-]);
+// volumeTypeEnum intentionally removed — volumeType is now a plain varchar(50) on the
+// volumes table. Adding a new category (e.g. 'temperature') is an insert into seed data,
+// not an enum migration. Pattern follows notificationTypeEnum removal above.
 
 // notification_templates: replaces the contradictory isDraft/isActive boolean pair.
 // A template is exactly one of these states — never two at once.
@@ -59,12 +54,9 @@ export const notificationTemplateStatusEnum = pgEnum(
   ],
 );
 
-// store: lifecycle status — replaces the ambiguous isActive boolean for stores.
-export const storeStatusEnum = pgEnum('store_status', [
-  'ACTIVE', // operating normally
-  'SUSPENDED', // temporarily blocked (KYC failure, payment issue, admin action)
-  'CLOSED', // permanently shut down — soft-deleted but preserved for audit
-]);
+// storeStatusEnum intentionally removed — store.statusFk now references the status
+// reference table (entity-system/status). Valid codes: DRAFT, ACTIVE, INACTIVE,
+// SUSPENDED, VERIFIED, ARCHIVED, CLOSED — extensible via seed data, no migration needed.
 
 // otp_verification: why the OTP was issued — LOGIN and RESET_PASSWORD tokens must not be
 // interchangeable; purpose enforces that a RESET_PASSWORD token cannot be used to log in.

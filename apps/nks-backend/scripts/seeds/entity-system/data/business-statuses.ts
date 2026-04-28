@@ -25,4 +25,5 @@ export default [
   { code: 'VERIFIED',         name: 'Verified',         description: 'Identity or data verified',          fontColor: '#FFFFFF', bgColor: '#10B981', borderColor: '#059669', isBold: true,  sortOrder: 15, isSystem: true },
   { code: 'FAILED',           name: 'Failed',           description: 'Processing failed',                  fontColor: '#FFFFFF', bgColor: '#D9534F', borderColor: '#E60000', isBold: true,  sortOrder: 16, isSystem: true },
   { code: 'ARCHIVED',         name: 'Archived',         description: 'Moved to archive',                   fontColor: '#6B7280', bgColor: '#F3F4F6', borderColor: '#D1D5DB', isBold: false, sortOrder: 17, isSystem: true },
+  { code: 'SUSPENDED',        name: 'Suspended',        description: 'Temporarily blocked by admin',       fontColor: '#FFFFFF', bgColor: '#F59E0B', borderColor: '#D97706', isBold: true,  sortOrder: 18, isSystem: true },
 ];

@@ -141,10 +141,11 @@ export class SyncRepository extends BaseRepository {
 
   /**
    * Fetch states changed since a given compound cursor (timestamp + id).
-   * Uses (updated_at, id) > (cursorTs, cursorId) to break ties.
+   * Uses explicit OR condition: updatedAt > cursor OR (updatedAt == cursor AND id > cursorId)
    */
   async getStateChanges(cursorMs: number, cursorId: number, limit: number): Promise<StateChangeRow[]> {
     const cursorDate = new Date(cursorMs);
+    console.log(`[SYNC] getStateChanges: cursorMs=${cursorMs}, cursorId=${cursorId}, cursorDate=${cursorDate.toISOString()}`);
     const rows = await this.db
       .select({
         id: schema.state.id,
@@ -159,19 +160,31 @@ export class SyncRepository extends BaseRepository {
       })
       .from(schema.state)
       .where(
-        sql`(${schema.state.updatedAt}, ${schema.state.id}) > (${cursorDate}, ${cursorId})`,
+        or(
+          sql`${schema.state.updatedAt} > ${cursorDate}`,
+          and(
+            sql`${schema.state.updatedAt} = ${cursorDate}`,
+            sql`${schema.state.id} > ${cursorId}`,
+          ),
+        ),
       )
       .orderBy(schema.state.updatedAt, schema.state.id)
       .limit(limit + 1);
+    console.log(`[SYNC] getStateChanges returned ${rows.length} rows`);
+    if (rows.length > 0) {
+      console.log(`[SYNC] First row: id=${rows[0].id}, updatedAt=${rows[0].updatedAt}`);
+      console.log(`[SYNC] Last row: id=${rows[rows.length - 1].id}, updatedAt=${rows[rows.length - 1].updatedAt}`);
+    }
     return rows;
   }
 
   /**
    * Fetch districts changed since a given compound cursor (timestamp + id).
-   * Uses (updated_at, id) > (cursorTs, cursorId) to break ties.
+   * Uses explicit OR condition: updatedAt > cursor OR (updatedAt == cursor AND id > cursorId)
    */
   async getDistrictChanges(cursorMs: number, cursorId: number, limit: number): Promise<DistrictChangeRow[]> {
     const cursorDate = new Date(cursorMs);
+    console.log(`[SYNC] getDistrictChanges: cursorMs=${cursorMs}, cursorId=${cursorId}, cursorDate=${cursorDate.toISOString()}`);
     const rows = await this.db
       .select({
         id: schema.district.id,
@@ -187,10 +200,21 @@ export class SyncRepository extends BaseRepository {
       .from(schema.district)
       .leftJoin(schema.state, eq(schema.district.stateFk, schema.state.id))
       .where(
-        sql`(${schema.district.updatedAt}, ${schema.district.id}) > (${cursorDate}, ${cursorId})`,
+        or(
+          sql`${schema.district.updatedAt} > ${cursorDate}`,
+          and(
+            sql`${schema.district.updatedAt} = ${cursorDate}`,
+            sql`${schema.district.id} > ${cursorId}`,
+          ),
+        ),
       )
       .orderBy(schema.district.updatedAt, schema.district.id)
       .limit(limit + 1);
+    console.log(`[SYNC] getDistrictChanges returned ${rows.length} rows`);
+    if (rows.length > 0) {
+      console.log(`[SYNC] First row: id=${rows[0].id}, updatedAt=${rows[0].updatedAt}`);
+      console.log(`[SYNC] Last row: id=${rows[rows.length - 1].id}, updatedAt=${rows[rows.length - 1].updatedAt}`);
+    }
     return rows;
   }
 

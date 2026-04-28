@@ -21,6 +21,9 @@ import type {
   DistrictRow,
 } from "../database/schema";
 
+import { createLogger } from '../utils/logger';
+const log = createLogger('SyncTableHandlers');
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface SyncChange {
@@ -56,6 +59,10 @@ export const TABLE_HANDLERS: Record<string, TableHandler> = {
   // ── state (reference data) ──────────────────────────────────────────────────
   state: {
     async onBatchUpsert(items) {
+      log.debug(`state: onBatchUpsert called with ${items.length} items`);
+      if (items.length > 0) {
+        log.debug(`state: first item=${JSON.stringify(items[0])}`);
+      }
       const rows: StateRow[] = items.map(({ id, data: d }) => ({
         id,
         guuid:              str(d.guuid),
@@ -67,9 +74,12 @@ export const TABLE_HANDLERS: Record<string, TableHandler> = {
         updated_at:         str(d.updatedAt),
         deleted_at:         nullableStr(d.deletedAt),
       }));
+      log.debug(`state: calling stateRepository.batchUpsert with ${rows.length} rows`);
       await stateRepository.batchUpsert(rows);
+      log.debug(`state: batchUpsert completed`);
     },
     async onBatchDelete(ids) {
+      log.debug(`state: onBatchDelete called with ${ids.length} ids`);
       await stateRepository.batchSoftDelete(ids);
     },
   },
@@ -77,6 +87,10 @@ export const TABLE_HANDLERS: Record<string, TableHandler> = {
   // ── district (reference data) ────────────────────────────────────────────────
   district: {
     async onBatchUpsert(items) {
+      log.debug(`district: onBatchUpsert called with ${items.length} items`);
+      if (items.length > 0) {
+        log.debug(`district: first item=${JSON.stringify(items[0])}`);
+      }
       const rows: DistrictRow[] = items.map(({ id, data: d }) => ({
         id,
         guuid:         str(d.guuid),
@@ -88,9 +102,12 @@ export const TABLE_HANDLERS: Record<string, TableHandler> = {
         updated_at:    str(d.updatedAt),
         deleted_at:    nullableStr(d.deletedAt),
       }));
+      log.debug(`district: calling districtRepository.batchUpsert with ${rows.length} rows`);
       await districtRepository.batchUpsert(rows);
+      log.debug(`district: batchUpsert completed`);
     },
     async onBatchDelete(ids) {
+      log.debug(`district: onBatchDelete called with ${ids.length} ids`);
       await districtRepository.batchSoftDelete(ids);
     },
   },

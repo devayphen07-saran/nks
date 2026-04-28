@@ -21,7 +21,6 @@ import { UsersModule } from './contexts/iam/users/users.module';
 import { StoresModule } from './contexts/organization/stores/stores.module';
 import { LocationModule } from './contexts/reference-data/location/location.module';
 import { LookupsModule } from './contexts/reference-data/lookups/lookups.module';
-import { CodesModule } from './contexts/reference-data/codes/codes.module';
 import { StatusModule } from './contexts/reference-data/status/status.module';
 import { EntityStatusModule } from './contexts/reference-data/entity-status/entity-status.module';
 import { AuditModule } from './contexts/compliance/audit/audit.module';
@@ -70,7 +69,6 @@ import { HealthModule } from './core/health/health.module';
     RoutesModule,
     LocationModule,
     LookupsModule,
-    CodesModule,
     UsersModule,
     StatusModule,
     EntityStatusModule,

@@ -28,7 +28,7 @@ export class StateRepository {
         .insert(state)
         .values(rows)
         .onConflictDoUpdate({
-          target: state.id,
+          target: state.guuid,
           set: {
             state_name:         sql`excluded.state_name`,
             state_code:         sql`excluded.state_code`,

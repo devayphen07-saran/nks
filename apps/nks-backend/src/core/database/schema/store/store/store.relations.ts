@@ -1,6 +1,6 @@
 import { relations } from 'drizzle-orm';
 import { store } from './store.table';
-import { codeValue } from '../../lookups/code-value/code-value.table';
+import { lookup } from '../../lookups/lookup/lookup.table';
 import { storeUserMapping } from '../../store/store-user-mapping';
 import { storeOperatingHours } from '../../store/store-operating-hours';
 import { storeDocuments } from '../../store/store-documents';
@@ -15,14 +15,14 @@ export const storeRelations = relations(store, ({ one, many }) => ({
   children: many(store, {
     relationName: 'store_hierarchy',
   }),
-  storeLegalType: one(codeValue, {
+  storeLegalType: one(lookup, {
     fields: [store.storeLegalTypeFk],
-    references: [codeValue.id],
+    references: [lookup.id],
     relationName: 'storeLegalType',
   }),
-  storeCategory: one(codeValue, {
+  storeCategory: one(lookup, {
     fields: [store.storeCategoryFk],
-    references: [codeValue.id],
+    references: [lookup.id],
     relationName: 'storeCategory',
   }),
   members: many(storeUserMapping),

@@ -6,16 +6,13 @@ import {
   smallint,
   numeric,
   text,
-  check,
   index,
 } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { users } from '../../auth/users';
 import { country } from '../../location/country';
-import { storeLegalType } from '../../lookups/store-legal-type/store-legal-type.table';
-import { storeCategory } from '../../lookups/store-category/store-category.table';
-import { storeStatusEnum } from '../../enums';
+import { lookup } from '../../lookups/lookup/lookup.table';
+import { status } from '../../entity-system/status';
 import { baseEntity, auditFields } from '../../base.entity';
 
 export const store = pgTable(
@@ -39,16 +36,14 @@ export const store = pgTable(
       }),
 
     // Legal entity type (PVT_LTD, SOLE_PROP, PARTNERSHIP, LLC, CORP, TRUST, OPC, SOCIETY, etc.)
-    // NORMALIZED: Dedicated table instead of code_value pattern
     storeLegalTypeFk: bigint('store_legal_type_fk', { mode: 'number' })
       .notNull()
-      .references(() => storeLegalType.id, { onDelete: 'restrict' }),
+      .references(() => lookup.id, { onDelete: 'restrict' }),
 
     // Store category (GROCERY, PHARMACY, RETAIL, RESTAURANT, ECOMMERCE, etc.)
-    // NORMALIZED: Dedicated table instead of code_value pattern
     storeCategoryFk: bigint('store_category_fk', { mode: 'number' })
       .notNull()
-      .references(() => storeCategory.id, { onDelete: 'restrict' }),
+      .references(() => lookup.id, { onDelete: 'restrict' }),
 
     // ── KYC / Legal ──────────────────────────────────────────────────────────
     // tax_number removed — tax registrations (GST/PAN/VAT) live in tax_registrations table
@@ -57,8 +52,12 @@ export const store = pgTable(
     isVerified: boolean('is_verified').notNull().default(false),
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
-    // Single source of truth — replaces the ambiguous inherited isActive for stores.
-    storeStatus: storeStatusEnum('store_status').notNull().default('ACTIVE'),
+    // FK to status reference table — replaces the storeStatusEnum.
+    // Valid store statuses: DRAFT, ACTIVE, INACTIVE, SUSPENDED, VERIFIED, ARCHIVED, CLOSED.
+    // isActive must be kept in sync at the service layer when status changes.
+    statusFk: bigint('status_fk', { mode: 'number' })
+      .notNull()
+      .references(() => status.id, { onDelete: 'restrict' }),
 
     // ── POS Operational ──────────────────────────────────────────────────────
     // countryFk — link to country for currency and timezone defaults.
@@ -90,14 +89,9 @@ export const store = pgTable(
     ...auditFields(() => users.id),
   },
   (table) => [
-    // isActive must always match storeStatus — prevents split-brain lifecycle state.
-    // Do not set isActive directly; update storeStatus instead and let this rule enforce consistency.
-    check(
-      'store_status_active_sync_chk',
-      sql`(store_status = 'ACTIVE') = is_active`,
-    ),
     index('store_owner_user_idx').on(table.ownerUserFk),
-    index('store_parent_store_idx').on(table.parentStoreFk), // ← ADDED: for hierarchy queries
+    index('store_parent_store_idx').on(table.parentStoreFk),
+    index('store_status_fk_idx').on(table.statusFk),
   ],
 );
 

@@ -1,24 +1,42 @@
-import { pgTable, bigserial, varchar, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, varchar, boolean, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { baseEntity, auditFields } from '../../base.entity';
+import { users } from '../../auth/users';
 
 /**
- * Lookup type definitions
- * Categorizes generic lookup values into logical groups
+ * lookup_type — registry of all lookup categories (ayphen pattern).
  *
- * Examples:
- * - PLAN_TYPE (for plan-related lookups)
- * - BILLING_FREQUENCY (for billing-related lookups)
- * - PRODUCT_TYPE (for product-related lookups)
+ * has_table = false → values live in the generic `lookup` table (standard code/label/description)
+ * has_table = true  → values live in a dedicated table with domain-specific columns
+ *                     (billing_frequency.days, address_type.is_shipping_applicable, etc.)
+ *
+ * is_custom_table = true → lookup type was created by platform admin at runtime (not seeded)
  */
-export const lookupType = pgTable('lookup_type', {
-  id: bigserial('id', { mode: 'number' }).primaryKey(),
-  code: varchar('code', { length: 30 }).notNull().unique(),
-  title: varchar('title', { length: 50 }).notNull(),
-  description: varchar('description', { length: 150 }),
-  hasTable: boolean('has_table').notNull().default(false),
-  isActive: boolean('is_active').notNull().default(true),
-  isCustomTable: boolean('is_custom_table').notNull().default(false),
-});
+export const lookupType = pgTable(
+  'lookup_type',
+  {
+    ...baseEntity(),
 
-export type LookupType = typeof lookupType.$inferSelect;
+    code:        varchar('code',        { length: 50  }).notNull(),
+    title:       varchar('title',       { length: 100 }).notNull(),
+    description: varchar('description', { length: 255 }),
+
+    // false → values are rows in the lookup table
+    // true  → values live in a dedicated table (e.g. billing_frequency)
+    hasTable: boolean('has_table').notNull().default(false),
+
+    // true → created at runtime by admin; false → seeded by platform
+    isCustomTable: boolean('is_custom_table').notNull().default(false),
+
+    ...auditFields(() => users.id),
+  },
+  (table) => [
+    uniqueIndex('lookup_type_code_idx')
+      .on(table.code)
+      .where(sql`deleted_at IS NULL`),
+  ],
+);
+
+export type LookupType    = typeof lookupType.$inferSelect;
 export type NewLookupType = typeof lookupType.$inferInsert;
 export type UpdateLookupType = Partial<Omit<NewLookupType, 'id'>>;

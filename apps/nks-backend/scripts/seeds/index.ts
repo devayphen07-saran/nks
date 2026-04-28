@@ -34,6 +34,7 @@ export { seedCurrencies }          from './subscription/currencies.seed';
 export { seedSubscriptionStatus }  from './subscription/subscription-status.seed';
 
 // Lookups
+export { seedLookupTypes }          from './lookups/lookup-type.seed';
 export { seedBillingFrequencies }   from './lookups/billing-frequency.seed';
 export { seedCommunicationTypes }   from './lookups/communication-type.seed';
 export { seedContactPersonTypes }   from './lookups/contact-person-type.seed';

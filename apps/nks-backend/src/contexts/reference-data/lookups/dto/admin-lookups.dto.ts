@@ -31,7 +31,7 @@ export class UpdateLookupValueDto extends createZodDto(UpdateLookupValueSchema) 
 
 export interface LookupTypeResponse {
   code:       string;
-  name:       string;
+  title:      string;
   isSystem:   boolean;
   valueCount: number;
 }

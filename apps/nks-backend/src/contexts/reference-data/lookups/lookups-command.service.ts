@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { NotFoundException, BadRequestException } from '../../../common/exceptions';
+import { NotFoundException, BadRequestException, ForbiddenException } from '../../../common/exceptions';
 import { LookupsRepository } from './repositories/lookups.repository';
-import { AdminLookupMapper } from './mapper/lookups.mapper';
 import { AuditCommandService } from '../../compliance/audit/audit-command.service';
 import { ErrorCode, errPayload } from '../../../common/constants/error-codes.constants';
 import type { LookupValueAdminResponse } from './dto/admin-lookups.dto';
@@ -15,35 +14,42 @@ export class LookupsCommandService {
   ) {}
 
   async createLookupValue(
-    categoryCode: string,
+    typeCode: string,
     dto: CreateLookupValueDto,
     userId: number,
   ): Promise<LookupValueAdminResponse> {
-    const category = await this.repository.findCodeCategoryByCode(categoryCode);
-    if (!category) throw new NotFoundException(errPayload(ErrorCode.LOOKUP_CATEGORY_NOT_FOUND));
-    const result = await this.repository.createCodeValue(category.id, dto);
-    this.auditCommand.logLookupValueCreated(userId, result.id, categoryCode);
+    const type = await this.repository.findLookupTypeByCode(typeCode);
+    if (!type) throw new NotFoundException(errPayload(ErrorCode.LOOKUP_CATEGORY_NOT_FOUND));
+    if (type.hasTable) throw new ForbiddenException(errPayload(ErrorCode.LOOKUP_SYSTEM_TYPE_READONLY));
+    const result = await this.repository.createLookupValue(type.id, dto);
+    this.auditCommand.logLookupValueCreated(userId, result.id, typeCode);
     return result;
   }
 
   async updateLookupValue(
-    categoryCode: string,
+    typeCode: string,
     guuid: string,
     dto: UpdateLookupValueDto,
     userId: number,
   ): Promise<LookupValueAdminResponse> {
-    const value = await this.repository.findCodeValueByGuuidAndCategory(guuid, categoryCode);
+    const type = await this.repository.findLookupTypeByCode(typeCode);
+    if (!type) throw new NotFoundException(errPayload(ErrorCode.LOOKUP_CATEGORY_NOT_FOUND));
+    if (type.hasTable) throw new ForbiddenException(errPayload(ErrorCode.LOOKUP_SYSTEM_TYPE_READONLY));
+    const value = await this.repository.findLookupValueByGuuidAndType(guuid, typeCode);
     if (!value) throw new NotFoundException(errPayload(ErrorCode.LOOKUP_VALUE_NOT_FOUND));
-    const updated = await this.repository.updateCodeValue(value.numericId, dto);
+    const updated = await this.repository.updateLookupValue(value.numericId, dto);
     if (!updated) throw new BadRequestException(errPayload(ErrorCode.LOOKUP_UPDATE_FAILED));
-    this.auditCommand.logLookupValueUpdated(userId, value.numericId, categoryCode);
+    this.auditCommand.logLookupValueUpdated(userId, value.numericId, typeCode);
     return updated;
   }
 
-  async deleteLookupValue(categoryCode: string, guuid: string, userId: number): Promise<void> {
-    const value = await this.repository.findCodeValueByGuuidAndCategory(guuid, categoryCode);
+  async deleteLookupValue(typeCode: string, guuid: string, userId: number): Promise<void> {
+    const type = await this.repository.findLookupTypeByCode(typeCode);
+    if (!type) throw new NotFoundException(errPayload(ErrorCode.LOOKUP_CATEGORY_NOT_FOUND));
+    if (type.hasTable) throw new ForbiddenException(errPayload(ErrorCode.LOOKUP_SYSTEM_TYPE_READONLY));
+    const value = await this.repository.findLookupValueByGuuidAndType(guuid, typeCode);
     if (!value) throw new NotFoundException(errPayload(ErrorCode.LOOKUP_VALUE_NOT_FOUND));
-    await this.repository.deleteCodeValue(value.numericId);
-    this.auditCommand.logLookupValueDeleted(userId, value.numericId, categoryCode);
+    await this.repository.deleteLookupValue(value.numericId);
+    this.auditCommand.logLookupValueDeleted(userId, value.numericId, typeCode);
   }
 }

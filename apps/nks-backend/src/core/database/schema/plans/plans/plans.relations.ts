@@ -1,13 +1,13 @@
 import { relations } from 'drizzle-orm';
 import { plans } from './plans.table';
-import { codeValue } from '../../lookups/code-value/code-value.table';
+import { lookup } from '../../lookups/lookup/lookup.table';
 import { planPrice } from '../../plans/plan-price';
 import { subscription } from '../../plans/subscription';
 
 export const plansRelations = relations(plans, ({ one, many }) => ({
-  planType: one(codeValue, {
+  planType: one(lookup, {
     fields: [plans.planTypeFk],
-    references: [codeValue.id],
+    references: [lookup.id],
     relationName: 'planType',
   }),
   upgradeOption: one(plans, {

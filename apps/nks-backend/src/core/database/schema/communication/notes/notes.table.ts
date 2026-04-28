@@ -2,7 +2,7 @@ import { pgTable, bigint, text, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { entity } from '../../entity-system/entity';
 import { users } from '../../auth/users';
-import { notesType } from '../../lookups/notes-type';
+import { lookup } from '../../lookups/lookup/lookup.table';
 import { baseEntity, auditFields } from '../../base.entity';
 
 /**
@@ -32,7 +32,7 @@ export const notes = pgTable(
     // Fields
     notesTypeFk: bigint('notes_type_fk', { mode: 'number' })
       .notNull()
-      .references(() => notesType.id, { onDelete: 'restrict' }),
+      .references(() => lookup.id, { onDelete: 'restrict' }),
     content: text('content').notNull(),
 
     ...auditFields(() => users.id),

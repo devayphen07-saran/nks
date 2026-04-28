@@ -28,7 +28,7 @@ export class DistrictRepository {
         .insert(district)
         .values(rows)
         .onConflictDoUpdate({
-          target: district.id,
+          target: district.guuid,
           set: {
             district_name: sql`excluded.district_name`,
             district_code: sql`excluded.district_code`,

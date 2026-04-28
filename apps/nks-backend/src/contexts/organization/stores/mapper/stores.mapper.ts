@@ -1,7 +1,4 @@
 import type { UserStoreRow } from '../repositories/stores.repository';
-import { storeStatusEnum } from '../../../../core/database/schema/enums';
-
-const [STORE_ACTIVE] = storeStatusEnum.enumValues;
 
 export interface StoreDto {
   guuid: string;
@@ -18,7 +15,7 @@ export class StoresMapper {
       guuid: userStoreRow.guuid,
       storeName: userStoreRow.storeName,
       storeCode: userStoreRow.storeCode,
-      isApproved: userStoreRow.storeStatus === STORE_ACTIVE && userStoreRow.isVerified,
+      isApproved: userStoreRow.storeStatus === 'ACTIVE' && userStoreRow.isVerified,
       isOwner: userStoreRow.isOwner,
       createdAt: userStoreRow.createdAt.toISOString(),
     };

@@ -9,5 +9,19 @@
       "tag": "0000_colossal_doctor_octopus",
       "breakpoints": true
     }
+    ,{
+      "idx": 1,
+      "version": "7",
+      "when": 1745817600000,
+      "tag": "0001_volumes_type_varchar",
+      "breakpoints": true
+    }
+    ,{
+      "idx": 2,
+      "version": "7",
+      "when": 1745904000000,
+      "tag": "0002_store_status_fk",
+      "breakpoints": true
+    }
   ]
 }

@@ -222,6 +222,7 @@ export const ErrorCode = {
   LOOKUP_CATEGORY_NOT_FOUND: 'LOOKUP_CATEGORY_NOT_FOUND',
   LOOKUP_VALUE_NOT_FOUND: 'LOOKUP_VALUE_NOT_FOUND',
   LOOKUP_UPDATE_FAILED: 'LOOKUP_UPDATE_FAILED',
+  LOOKUP_SYSTEM_TYPE_READONLY: 'LOOKUP_SYSTEM_TYPE_READONLY',
 
   // ─── Entity Status ─────────────────────────────────────────────────────
   ENT_STATUS_ALREADY_ASSIGNED: 'ENT_STATUS_ALREADY_ASSIGNED',
@@ -364,6 +365,7 @@ export const ErrorMessages: Record<string, string> = {
   [ErrorCode.LOOKUP_CATEGORY_NOT_FOUND]: 'Lookup category not found.',
   [ErrorCode.LOOKUP_VALUE_NOT_FOUND]: 'Lookup value not found.',
   [ErrorCode.LOOKUP_UPDATE_FAILED]: 'Failed to update lookup value.',
+  [ErrorCode.LOOKUP_SYSTEM_TYPE_READONLY]: 'This lookup type is system-managed and cannot be modified via the generic API.',
 
   // Entity Status (extended)
   [ErrorCode.ENT_STATUS_ALREADY_ASSIGNED]: 'Status is already assigned to this entity.',

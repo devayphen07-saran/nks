@@ -23,12 +23,8 @@ export class TokenExtractorService {
     const cookie = cookies[AuthControllerHelpers.SESSION_COOKIE_NAME] ?? null;
 
     if (bearer && cookie) {
-      const deviceType = req.headers['x-device-type'];
-      const isMobile =
-        deviceType === 'IOS' ||
-        deviceType === 'ANDROID' ||
-        deviceType === 'ios' ||
-        deviceType === 'android';
+      const deviceType = (req.headers['x-device-type'] as string | undefined)?.toUpperCase();
+      const isMobile = deviceType === 'IOS' || deviceType === 'ANDROID';
 
       if (!isMobile) {
         throw new BadRequestException({

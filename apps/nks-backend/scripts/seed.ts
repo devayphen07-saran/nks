@@ -29,6 +29,7 @@ import {
   seedCurrencies,
   seedSubscriptionStatus,
   // New Lookup Tables
+  seedLookupTypes,
   seedStoreLegalTypes,
   seedStoreCategories,
   seedAddressTypes,
@@ -76,7 +77,8 @@ const seeds = [
   { name: 'store_owner_permissions', fn: seedStoreOwnerPermissions }, // ← Depends on system_roles + entity_type + permission_actions
   { name: 'routes', fn: seedRoutes },
   { name: 'role_route_mapping', fn: seedRoleRouteMappings },
-  // Lookup Tables
+  // Lookup Tables (lookup_type must run first — value seeds depend on it)
+  { name: 'lookup_type', fn: seedLookupTypes },
   { name: 'store_legal_type', fn: seedStoreLegalTypes },
   { name: 'store_category', fn: seedStoreCategories },
   { name: 'address_type', fn: seedAddressTypes },

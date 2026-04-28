@@ -22,24 +22,28 @@ import type {
 export class LookupsQueryService {
   constructor(private readonly repository: LookupsRepository) {}
 
+  // ── Public lookup endpoints ───────────────────────────────────────────────
+
   async getSalutations(): Promise<CodeValueResponse[]> {
-    return (await this.repository.getValuesByCategory('SALUTATION')).map(CodeValueMapper.buildCodeValueDto);
+    return (await this.repository.getValuesByType('SALUTATION')).map(CodeValueMapper.buildCodeValueDto);
   }
 
+  // ADDRESS_TYPE is a dedicated table — query it directly
   async getAddressTypes(): Promise<CodeValueResponse[]> {
-    return (await this.repository.getValuesByCategory('ADDRESS_TYPE')).map(CodeValueMapper.buildCodeValueDto);
+    return (await this.repository.getAddressTypesFromTable()).map(CodeValueMapper.buildCodeValueDto);
   }
 
+  // DESIGNATION_TYPE is a dedicated table — query it directly
   async getDesignations(): Promise<CodeValueResponse[]> {
-    return (await this.repository.getValuesByCategory('DESIGNATION')).map(CodeValueMapper.buildCodeValueDto);
+    return (await this.repository.getDesignationTypesFromTable()).map(CodeValueMapper.buildCodeValueDto);
   }
 
   async getStoreLegalTypes(): Promise<CodeValueResponse[]> {
-    return (await this.repository.getValuesByCategory('STORE_LEGAL_TYPE')).map(CodeValueMapper.buildCodeValueDto);
+    return (await this.repository.getValuesByType('STORE_LEGAL_TYPE')).map(CodeValueMapper.buildCodeValueDto);
   }
 
   async getStoreCategories(): Promise<CodeValueResponse[]> {
-    return (await this.repository.getValuesByCategory('STORE_CATEGORY')).map(CodeValueMapper.buildCodeValueDto);
+    return (await this.repository.getValuesByType('STORE_CATEGORY')).map(CodeValueMapper.buildCodeValueDto);
   }
 
   async getCountries(): Promise<CountryResponse[]> {
@@ -74,15 +78,24 @@ export class LookupsQueryService {
     }
   }
 
+  // ── Admin lookup endpoints ────────────────────────────────────────────────
+
   async getAllLookupTypes(): Promise<LookupTypesListResponse> {
-    return this.repository.findAllCodeCategories();
+    return this.repository.findAllLookupTypes();
   }
 
   async listLookupValues(
-    categoryCode: string,
+    typeCode: string,
     opts: { page: number; pageSize: number; search?: string; sortBy?: string; sortOrder?: string; isActive?: boolean },
   ): Promise<PaginatedResult<LookupValueAdminResponse>> {
-    const { rows, total } = await this.repository.findCodeValuesByCategory(categoryCode, opts);
+    const type = await this.repository.findLookupTypeByCode(typeCode);
+    if (!type) throw new NotFoundException(errPayload(ErrorCode.LOOKUP_CATEGORY_NOT_FOUND));
+
+    // Route to the correct table based on hasTable flag
+    const { rows, total } = type.hasTable
+      ? await this.repository.findDedicatedLookupValues(typeCode, opts)
+      : await this.repository.findLookupValuesByType(typeCode, opts);
+
     return paginated({ items: rows.map(AdminLookupMapper.buildLookupValueDto), page: opts.page, pageSize: opts.pageSize, total });
   }
 }

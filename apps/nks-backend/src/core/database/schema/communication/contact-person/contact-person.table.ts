@@ -10,8 +10,7 @@ import {
 import { sql } from 'drizzle-orm';
 import { entity } from '../../entity-system/entity';
 import { users } from '../../auth/users';
-import { contactPersonType } from '../../lookups/contact-person-type/contact-person-type.table';
-import { salutationType } from '../../lookups/salutation-type/salutation-type.table';
+import { lookup } from '../../lookups/lookup/lookup.table';
 import { designationType } from '../../lookups/designation-type/designation-type.table';
 import { baseEntity, auditFields } from '../../base.entity';
 
@@ -42,12 +41,10 @@ export const contactPerson = pgTable(
     // Fields
     contactPersonTypeFk: bigint('contact_person_type_fk', { mode: 'number' })
       .notNull()
-      .references(() => contactPersonType.id, { onDelete: 'restrict' }),
+      .references(() => lookup.id, { onDelete: 'restrict' }),
 
-    // Salutation (MR, MRS, MS, DR, PROF, HON, REV, IMAM, SRI, SHRI, SRIMATI)
-    // NORMALIZED: Dedicated table instead of code_value pattern
     salutationFk: bigint('salutation_fk', { mode: 'number' }).references(
-      () => salutationType.id,
+      () => lookup.id,
       { onDelete: 'set null' },
     ),
     firstName: varchar('first_name', { length: 100 }).notNull(),

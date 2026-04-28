@@ -14,7 +14,7 @@ import { store } from '../../store/store';
 import { country } from '../../location/country';
 import { taxAgencies } from '../../tax/tax-agencies';
 import { taxNames } from '../../tax/tax-names';
-import { taxRegistrationType } from '../../tax/tax-registration-type/tax-registration-type.table';
+import { lookup } from '../../lookups/lookup/lookup.table';
 import { taxFilingFrequency } from '../../tax/tax-filing-frequency/tax-filing-frequency.table';
 
 /**
@@ -67,7 +67,7 @@ export const taxRegistrations = pgTable(
     // NORMALIZED: Now an FK to tax_registration_type lookup table (was enum)
     registrationTypeFk: bigint('registration_type_fk', { mode: 'number' })
       .notNull()
-      .references(() => taxRegistrationType.id, { onDelete: 'restrict' }),
+      .references(() => lookup.id, { onDelete: 'restrict' }),
 
     // Display label e.g. "Main GST Registration"
     label: varchar('label', { length: 255 }),

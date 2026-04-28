@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { baseEntity, auditFields } from '../../base.entity';
 import { users } from '../../auth/users';
-import { planType } from '../../lookups/plan-type/plan-type.table';
+import { lookup } from '../../lookups/lookup/lookup.table';
 
 /**
  * Plans table - subscription plan definitions
@@ -34,7 +34,7 @@ export const plans = pgTable('plans', {
   // Plan type from plan_type lookup table (BASIC, STANDARD, PREMIUM, ENTERPRISE)
   planTypeFk: bigint('plan_type_fk', { mode: 'number' })
     .notNull()
-    .references(() => planType.id, { onDelete: 'restrict' }),
+    .references(() => lookup.id, { onDelete: 'restrict' }),
 
   // Plan path references (allows upgrade/downgrade paths)
   allowToUpgradeFk: bigint('allow_to_upgrade_fk', { mode: 'number' })

@@ -21,7 +21,7 @@ import type { LookupValueAdminResponse } from '../dto/admin-lookups.dto';
 
 // ── Admin row shape ───────────────────────────────────────────────────────────
 
-interface AdminCodeValueRow {
+interface AdminLookupValueRow {
   id:          number;
   guuid:       string;
   code:        string;
@@ -36,18 +36,18 @@ interface AdminCodeValueRow {
 }
 
 export class AdminLookupMapper {
-  static buildLookupValueDto(adminCodeValueRow: AdminCodeValueRow): LookupValueAdminResponse {
+  static buildLookupValueDto(row: AdminLookupValueRow): LookupValueAdminResponse {
     return {
-      guuid:       adminCodeValueRow.guuid,
-      code:        adminCodeValueRow.code,
-      label:       adminCodeValueRow.label,
-      description: adminCodeValueRow.description ?? undefined,
-      isActive:    adminCodeValueRow.isActive,
-      isHidden:    adminCodeValueRow.isHidden,
-      isSystem:    adminCodeValueRow.isSystem,
-      sortOrder:   adminCodeValueRow.sortOrder,
-      createdAt:   adminCodeValueRow.createdAt.toISOString(),
-      updatedAt:   adminCodeValueRow.updatedAt?.toISOString() ?? null,
+      guuid:       row.guuid,
+      code:        row.code,
+      label:       row.label,
+      description: row.description ?? undefined,
+      isActive:    row.isActive,
+      isHidden:    row.isHidden,
+      isSystem:    row.isSystem,
+      sortOrder:   row.sortOrder,
+      createdAt:   row.createdAt.toISOString(),
+      updatedAt:   row.updatedAt?.toISOString() ?? null,
     };
   }
 }

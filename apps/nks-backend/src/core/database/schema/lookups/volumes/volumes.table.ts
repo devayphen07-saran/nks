@@ -10,7 +10,6 @@ import { sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { baseEntity, auditFields } from '../../base.entity';
 import { users } from '../../auth/users';
-import { volumeTypeEnum } from '../../enums';
 
 /**
  * Unit of Measure (UOM) registry for product inventory.
@@ -33,7 +32,7 @@ export const volumes = pgTable(
 
     volumeName: varchar('volume_name', { length: 50 }).notNull().unique(), // Kilogram, Litre, Piece
     volumeCode: varchar('volume_code', { length: 20 }).notNull().unique(), // KG, L, PCS
-    volumeType: volumeTypeEnum('volume_type').notNull(),
+    volumeType: varchar('volume_type', { length: 50 }).notNull(),
     decimalPlaces: integer('decimal_places').notNull().default(0),
 
     // Conversion to base unit.

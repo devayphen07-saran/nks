@@ -12,7 +12,6 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import type { AuthenticatedRequest } from '../../common/guards/auth.guard';
 import { RBACGuard } from '../../common/guards/rbac.guard';
-import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { RateLimit } from '../../common/decorators/rate-limit.decorator';
 import { SyncService, type ChangesResponse, type PushResponse } from './sync.service';
 import {
@@ -42,8 +41,7 @@ export class SyncController {
   }
 
   @Get('changes')
-  @RateLimit(60)
-  @ResponseMessage('Sync changes fetched')
+  @RateLimit(300)
   @ApiOperation({
     summary: 'Fetch sync changes since cursor',
     description:
@@ -67,7 +65,6 @@ export class SyncController {
 
   @Post('push')
   @RateLimit(30)
-  @ResponseMessage('Sync push processed')
   @ApiOperation({
     summary: 'Push offline mutations from mobile',
     description:

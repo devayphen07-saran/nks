@@ -1,7 +1,7 @@
 import { relations } from 'drizzle-orm';
 import { address } from './address.table';
 import { entity } from '../../entity-system/entity';
-import { codeValue } from '../../lookups/code-value/code-value.table';
+import { addressType } from '../../location/address-type/address-type.table';
 import { state } from '../../location/state';
 import { district } from '../../location/district';
 import { pincode } from '../../location/pincode';
@@ -12,10 +12,9 @@ export const addressRelations = relations(address, ({ one }) => ({
     fields: [address.entityFk],
     references: [entity.id],
   }),
-  addressType: one(codeValue, {
+  addressType: one(addressType, {
     fields: [address.addressTypeFk],
-    references: [codeValue.id],
-    relationName: 'addressType',
+    references: [addressType.id],
   }),
   state: one(state, {
     fields: [address.stateFk],

@@ -1,7 +1,7 @@
 import { relations } from 'drizzle-orm';
 import { notes } from './notes.table';
 import { entity } from '../../entity-system/entity';
-import { notesType } from '../../lookups/notes-type';
+import { lookup } from '../../lookups/lookup/lookup.table';
 import { users } from '../../auth/users';
 
 export const notesRelations = relations(notes, ({ one }) => ({
@@ -9,9 +9,10 @@ export const notesRelations = relations(notes, ({ one }) => ({
     fields: [notes.entityFk],
     references: [entity.id],
   }),
-  notesType: one(notesType, {
+  notesType: one(lookup, {
     fields: [notes.notesTypeFk],
-    references: [notesType.id],
+    references: [lookup.id],
+    relationName: 'notesType',
   }),
   createdByUser: one(users, {
     fields: [notes.createdBy],

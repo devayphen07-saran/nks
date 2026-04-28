@@ -257,35 +257,58 @@ async function pullChanges(storeGuuid: string): Promise<void> {
     pageNum++;
     log.debug(`PULL: Page ${pageNum}, cursors=${JSON.stringify(currentCursors)}`);
 
-    let response: ChangesResponse;
-    try {
-      const res = await API.get<ChangesResponse>('/sync/changes', {
-        headers: { 'X-Sync-Schema-Version': SYNC_SCHEMA_VERSION },
-        params: {
-          // Axios paramsSerializer converts nested objects to cursor[table]=ts:id format
-          cursor: currentCursors,
-          storeGuuid: storeGuuid,
-          tables:     SYNC_TABLES.join(','),
-          limit:      PULL_PAGE_SIZE,
-        },
-        timeout: PULL_TIMEOUT_MS,
-      });
-      response = res.data;
-      if (pageNum === 1 && response.serverTime) {
-        firstPageServerTime = response.serverTime;
+    const response = await (async () => {
+      let retryCount = 0;
+      const maxRetries = 3;
+      while (retryCount < maxRetries) {
+        try {
+          log.debug(`PULL: Making API call to /sync/changes with params: storeGuuid=${storeGuuid}, tables=${SYNC_TABLES.join(',')}, limit=${PULL_PAGE_SIZE}`);
+          const res = await API.get<ChangesResponse>('/sync/changes', {
+            headers: { 'X-Sync-Schema-Version': SYNC_SCHEMA_VERSION },
+            params: {
+              cursor: currentCursors,
+              storeGuuid: storeGuuid,
+              tables:     SYNC_TABLES.join(','),
+              limit:      PULL_PAGE_SIZE,
+            },
+            timeout: PULL_TIMEOUT_MS,
+          });
+          const apiResponse = res.data as any;
+          const result = apiResponse.data ?? apiResponse;
+          log.debug(`PULL: API response unwrapped: serverTime=${result.serverTime}, hasMore=${result.hasMore}, changes.length=${result.changes?.length || 0}`);
+          if (pageNum === 1 && result.serverTime) {
+            firstPageServerTime = result.serverTime;
+          }
+          return result;
+        } catch (err) {
+          const status = (err as AxiosError).response?.status;
+          if (status === 429 && retryCount < maxRetries - 1) {
+            const backoffMs = Math.pow(2, retryCount) * 1000;
+            log.warn(`PULL: Rate limited (429) — retrying in ${backoffMs}ms (attempt ${retryCount + 1}/${maxRetries - 1})`);
+            await new Promise(resolve => setTimeout(resolve, backoffMs));
+            retryCount++;
+            continue;
+          }
+          log.error(`PULL: API call failed with status ${status}:`, err);
+          if (status === 403) {
+            log.warn('PULL: 403 — user not authorized for this store, skipping');
+            throw new Error('UNAUTHORIZED');
+          }
+          throw err;
+        }
       }
-    } catch (err) {
-      const status = (err as AxiosError).response?.status;
-      if (status === 403) {
-        log.warn('PULL: 403 — user not authorized for this store, skipping');
-        return;
-      }
-      throw err;
-    }
+      throw new Error('Failed to fetch changes after retries');
+    })();
+
 
     if (!response.changes?.length) {
       log.debug(`PULL: No changes on page ${pageNum}`);
       break;
+    }
+
+    log.debug(`PULL: Page ${pageNum} has ${response.changes.length} changes`);
+    if (response.changes.length > 0) {
+      log.debug(`PULL: First change: ${JSON.stringify(response.changes[0])}`);
     }
 
     // Bucket changes by table so we can call batch methods — one DB statement
@@ -304,6 +327,8 @@ async function pullChanges(storeGuuid: string): Promise<void> {
         (deletesByTable[change.table] ??= []).push(change.id);
       }
     }
+
+    log.debug(`PULL: Bucketed into: ${Object.keys(upsertsByTable).map(t => `${t}:${upsertsByTable[t]!.length} upserts`).join(', ')} | ${Object.keys(deletesByTable).map(t => `${t}:${deletesByTable[t]!.length} deletes`).join(', ')}`);
 
     // Apply batches — all upserts for a table in one INSERT, all deletes in one UPDATE.
     // NOTE: This should be wrapped in a transaction to prevent data corruption on app crash.
@@ -333,9 +358,10 @@ async function pullChanges(storeGuuid: string): Promise<void> {
     const serverNextCursors = response.nextCursors ?? {};
     await Promise.all(
       Object.entries(serverNextCursors).map(([table, cursorStr]) => {
-        const ms = parseInt(cursorStr.split(':')[0] ?? '0', 10);
+        const cursor = cursorStr as string;
+        const ms = parseInt(cursor.split(':')[0] ?? '0', 10);
         if (!isNaN(ms) && ms > 0) {
-          currentCursors[table] = cursorStr;
+          currentCursors[table] = cursor;
           return syncStateRepository.saveCursorForTable(table, ms);
         }
       }),

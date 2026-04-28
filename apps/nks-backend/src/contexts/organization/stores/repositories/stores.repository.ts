@@ -180,12 +180,13 @@ export class StoresRepository extends BaseRepository {
         guuid: schema.store.guuid,
         storeName: schema.store.storeName,
         storeCode: schema.store.storeCode,
-        storeStatus: schema.store.storeStatus,
+        storeStatus: schema.status.code,
         isVerified: schema.store.isVerified,
         createdAt: schema.store.createdAt,
         isOwner: sql<boolean>`(${schema.store.ownerUserFk} = ${userId})`,
       })
       .from(schema.store)
+      .innerJoin(schema.status, eq(schema.store.statusFk, schema.status.id))
       .leftJoin(
         schema.storeUserMapping,
         and(

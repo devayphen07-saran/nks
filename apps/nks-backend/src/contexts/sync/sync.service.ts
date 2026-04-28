@@ -240,10 +240,15 @@ export class SyncService {
     // when one table's cursor is behind (e.g. initial sync of a new table).
     const fetched = await Promise.all(
       requestedTables.map((table) => {
-        const { ts, id } = this.parseCursor(cursors[table] ?? '0:0');
+        const cursorStr = cursors[table] ?? '0:0';
+        const { ts, id } = this.parseCursor(cursorStr);
+        console.log(`[SYNC] Fetching ${table}: cursor="${cursorStr}" → ts=${ts}, id=${id}`);
         return TABLE_REGISTRY[table as SyncTableKey]
           .fetch(this.syncRepository, ts, id, fetchLimit)
-          .then((rows) => ({ table: table as SyncTableKey, rows }));
+          .then((rows) => {
+            console.log(`[SYNC] Got ${rows.length} rows for ${table}`);
+            return { table: table as SyncTableKey, rows };
+          });
       }),
     );
 

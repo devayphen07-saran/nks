@@ -16,7 +16,7 @@ import { commodityCodes } from '../../tax/commodity-codes';
 import { taxRateMaster } from '../../tax/tax-rate-master';
 import { taxRegistrations } from '../../tax/tax-registrations';
 import { users } from '../../auth/users';
-import { taxLineStatus } from '../../tax/tax-line-status';
+import { lookup } from '../../lookups/lookup/lookup.table';
 
 // Approval lifecycle for tax lines: PENDING (recorded) → APPROVED (validated) | REJECTED (disputed)
 // Now managed via tax_line_status lookup table instead of enum for extensibility
@@ -124,7 +124,7 @@ export const transactionTaxLines = pgTable(
     // FK to tax_line_status lookup table (PENDING, APPROVED, REJECTED)
     approvalStatusFk: bigint('approval_status_fk', { mode: 'number' })
       .notNull()
-      .references(() => taxLineStatus.id, { onDelete: 'restrict' }),
+      .references(() => lookup.id, { onDelete: 'restrict' }),
 
     // User who approved/rejected this record
     approvedBy: bigint('approved_by', { mode: 'number' }).references(

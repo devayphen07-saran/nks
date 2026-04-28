@@ -22,7 +22,7 @@ import { entityStatusMapping } from '../../../src/core/database/schema/entity-sy
  */
 // Keys must match entity_type.code (SCREAMING_SNAKE_CASE) — FK enforced in DB.
 const ENTITY_STATUS_MAP: Record<string, string[]> = {
-  STORE:          ['DRAFT', 'ACTIVE', 'INACTIVE', 'VERIFIED', 'ARCHIVED'],
+  STORE:          ['DRAFT', 'ACTIVE', 'INACTIVE', 'SUSPENDED', 'VERIFIED', 'ARCHIVED', 'CLOSED'],
   USER:           ['ACTIVE', 'INACTIVE', 'PENDING'],
   INVOICE:        ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PAID', 'PARTIALLY_PAID', 'OVERDUE', 'CANCELED', 'CLOSED'],
   PRODUCT:        ['DRAFT', 'ACTIVE', 'INACTIVE', 'ARCHIVED'],
