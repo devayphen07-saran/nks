@@ -17,12 +17,14 @@
 
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useOfflineStatus } from "../../hooks/useOfflineStatus";
 import { useMobileTheme } from "@nks/mobile-theme";
 
 export function OfflineStatusBanner() {
   const { urgency, label } = useOfflineStatus();
   const { theme } = useMobileTheme();
+  const insets = useSafeAreaInsets();
 
   if (urgency === "none") return null;
 
@@ -75,6 +77,7 @@ export function OfflineStatusBanner() {
         {
           backgroundColor: tier.backgroundColor,
           borderBottomColor: tier.borderBottomColor,
+          paddingTop: insets.top,
         },
       ]}
     >
@@ -88,8 +91,9 @@ export function OfflineStatusBanner() {
 
 const styles = StyleSheet.create({
   container: {
-    paddingVertical: 8,
+    paddingBottom: 8,
     paddingHorizontal: 12,
+    paddingTop: 8,
     borderBottomWidth: 1,
   },
   title: {
