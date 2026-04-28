@@ -12,7 +12,8 @@
  * from the server for that table.
  *
  * Meta keys (from SYNC_KEYS):
- *   LAST_SYNC_AT       → timestamp of last completed pull
+ *   LAST_PULL_AT       → timestamp of last completed pull
+ *   LAST_PUSH_AT       → timestamp of last completed push
  *   LAST_FULL_SYNC_AT  → timestamp of last full pull + push cycle
  *   LOOKUP_SYNCED_AT   → timestamp of last lookup TTL sync
  */

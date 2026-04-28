@@ -1,4 +1,4 @@
-import { eq, isNull, and } from 'drizzle-orm';
+import { eq, isNull, and, sql, inArray } from 'drizzle-orm';
 import { getDatabase } from '../connection';
 import { state } from '../schema';
 import type { StateRow } from '../schema';
@@ -9,27 +9,60 @@ const log = createLogger('StateRepository');
 export class StateRepository {
   private get db() { return getDatabase(); }
 
+  // ── Write ──────────────────────────────────────────────────────────────────
+
   async upsert(row: StateRow): Promise<void> {
+    await this.batchUpsert([row]);
+  }
+
+  /**
+   * Bulk INSERT OR REPLACE in a single statement.
+   * Uses `excluded.*` to reference the conflicting row's values so each
+   * column is updated to what was in the inserted row, not to a fixed JS
+   * variable (which would snapshot the first row in older Drizzle versions).
+   */
+  async batchUpsert(rows: StateRow[]): Promise<void> {
+    if (!rows.length) return;
     try {
       await this.db
         .insert(state)
-        .values(row)
+        .values(rows)
         .onConflictDoUpdate({
           target: state.id,
           set: {
-            state_name:         row.state_name,
-            state_code:         row.state_code,
-            gst_state_code:     row.gst_state_code,
-            is_union_territory: row.is_union_territory,
-            is_active:          row.is_active,
-            updated_at:         row.updated_at,
-            deleted_at:         row.deleted_at,
+            state_name:         sql`excluded.state_name`,
+            state_code:         sql`excluded.state_code`,
+            gst_state_code:     sql`excluded.gst_state_code`,
+            is_union_territory: sql`excluded.is_union_territory`,
+            is_active:          sql`excluded.is_active`,
+            updated_at:         sql`excluded.updated_at`,
+            deleted_at:         sql`excluded.deleted_at`,
           },
         });
     } catch (err) {
-      log.error('Failed to upsert state:', err);
+      log.error(`Failed to batch-upsert ${rows.length} states:`, err);
     }
   }
+
+  /** Mark a state as soft-deleted. Called when server emits operation:'delete'. */
+  async softDelete(id: number): Promise<void> {
+    await this.batchSoftDelete([id]);
+  }
+
+  /** Soft-delete multiple states in one statement. */
+  async batchSoftDelete(ids: number[]): Promise<void> {
+    if (!ids.length) return;
+    try {
+      await this.db
+        .update(state)
+        .set({ is_active: 0, deleted_at: sql`datetime('now')` })
+        .where(inArray(state.id, ids));
+    } catch (err) {
+      log.error(`Failed to batch soft-delete ${ids.length} states:`, err);
+    }
+  }
+
+  // ── Read ───────────────────────────────────────────────────────────────────
 
   async findAll(): Promise<StateRow[]> {
     try {
@@ -57,6 +90,8 @@ export class StateRepository {
       return null;
     }
   }
+
+  // ── Cleanup ────────────────────────────────────────────────────────────────
 
   async clear(): Promise<void> {
     try {

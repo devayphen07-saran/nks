@@ -8,6 +8,27 @@
       "when": 1776403016483,
       "tag": "0000_yummy_corsair",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1777372481000,
+      "tag": "0001_district_state_guuid",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1777372482000,
+      "tag": "0002_failed_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1777372483000,
+      "tag": "0003_mutation_queue_priority",
+      "breakpoints": true
     }
   ]
 }

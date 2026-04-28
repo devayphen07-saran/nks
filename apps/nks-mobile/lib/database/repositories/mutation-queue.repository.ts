@@ -16,6 +16,7 @@ import { eq, and, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { getDatabase } from '../connection';
 import { mutationQueue } from '../schema';
 import type { MutationQueueRow } from '../schema';
+import { failedOperationsRepository } from './failed-operations.repository';
 import { createLogger } from '../../utils/logger';
 import { uuidv7 } from 'uuidv7';
 
@@ -27,6 +28,15 @@ const backoffMs = (retries: number) => BACKOFF_MS[Math.min(retries, BACKOFF_MS.l
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export const MutationPriority = {
+  CRITICAL:  1,  // payments, stock adjustments
+  IMPORTANT: 3,  // sales, returns
+  NORMAL:    5,  // default
+  LOW:       9,  // analytics, non-urgent events
+} as const;
+
+export type MutationPriorityLevel = typeof MutationPriority[keyof typeof MutationPriority];
+
 export interface MutationQueueItem {
   id:              number;
   idempotency_key: string;
@@ -34,6 +44,7 @@ export interface MutationQueueItem {
   entity:          string;
   payload:         Record<string, unknown>;
   status:          string;
+  priority:        number;
   retries:         number;
   max_retries:     number;
 }
@@ -48,11 +59,12 @@ export class MutationQueueRepository {
   // ── Enqueue ────────────────────────────────────────────────────────────────
 
   async enqueue(
-    operation: string,
-    entity:    string,
-    payload:   Record<string, unknown>,
-    deviceId = '',
+    operation:  string,
+    entity:     string,
+    payload:    Record<string, unknown>,
+    deviceId  = '',
     maxRetries = 5,
+    priority:  MutationPriorityLevel = MutationPriority.NORMAL,
   ): Promise<void> {
     try {
       await this.db.insert(mutationQueue).values({
@@ -61,6 +73,7 @@ export class MutationQueueRepository {
         entity,
         payload:     JSON.stringify(payload),
         status:      'pending',
+        priority,
         retries:     0,
         max_retries: maxRetries,
         device_id:   deviceId,
@@ -95,7 +108,7 @@ export class MutationQueueRepository {
             ),
           ),
         )
-        .orderBy(mutationQueue.id)
+        .orderBy(mutationQueue.priority, mutationQueue.id)
         .limit(limit);
 
       const items: MutationQueueItem[] = [];
@@ -115,6 +128,7 @@ export class MutationQueueRepository {
           entity:          row.entity,
           payload,
           status:          row.status,
+          priority:        row.priority,
           retries:         row.retries,
           max_retries:     row.max_retries,
         });
@@ -194,14 +208,41 @@ export class MutationQueueRepository {
     }
   }
 
-  /** Permanently quarantine — row kept for audit trail, never deleted. */
+  /**
+   * Move a mutation to the dead-letter store and remove it from the active queue.
+   * The `failed_operations` table is the permanent audit trail (spec §3.4).
+   */
   async markQuarantined(id: number, errorCode: number, errorMsg: string): Promise<void> {
     try {
-      await this.db
-        .update(mutationQueue)
-        .set({ status: 'quarantined', last_error_code: errorCode, last_error_msg: errorMsg, next_retry_at: null })
-        .where(eq(mutationQueue.id, id));
-      log.warn(`Quarantined id=${id}: [${errorCode}] ${errorMsg}`);
+      const rows = await this.db
+        .select()
+        .from(mutationQueue)
+        .where(eq(mutationQueue.id, id))
+        .limit(1);
+
+      if (!rows[0]) return;
+      const row = rows[0];
+
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(row.payload) as Record<string, unknown>;
+      } catch {
+        payload = {};
+      }
+
+      await failedOperationsRepository.insert({
+        idempotency_key: row.idempotency_key,
+        operation:       row.operation,
+        entity:          row.entity,
+        payload,
+        error_code:      errorCode,
+        error_msg:       errorMsg,
+        device_id:       row.device_id,
+        created_at:      row.created_at,
+      });
+
+      await this.db.delete(mutationQueue).where(eq(mutationQueue.id, id));
+      log.warn(`Quarantined and moved to dead-letter id=${id}: [${errorCode}] ${errorMsg}`);
     } catch (err) {
       log.error('Failed to quarantine:', err);
     }
@@ -248,6 +289,9 @@ export class MutationQueueRepository {
   // ── Observability ──────────────────────────────────────────────────────────
 
   async countByStatus(status: MutationStatus): Promise<number> {
+    if (status === 'quarantined') {
+      return failedOperationsRepository.countUnresolved();
+    }
     try {
       const result = await this.db
         .select({ count: sql<number>`count(*)` })
@@ -259,28 +303,20 @@ export class MutationQueueRepository {
     }
   }
 
+  /** Quarantined ops are now in failed_operations — delegate to that repo. */
   async findQuarantined(): Promise<MutationQueueItem[]> {
-    try {
-      const rows = await this.db
-        .select()
-        .from(mutationQueue)
-        .where(eq(mutationQueue.status, 'quarantined'))
-        .orderBy(mutationQueue.id);
-
-      return rows.map(row => ({
-        id:              row.id,
-        idempotency_key: row.idempotency_key,
-        operation:       row.operation,
-        entity:          row.entity,
-        payload:         (() => { try { return JSON.parse(row.payload); } catch { return {}; } })(),
-        status:          row.status,
-        retries:         row.retries,
-        max_retries:     row.max_retries,
-      }));
-    } catch (err) {
-      log.error('Failed to fetch quarantined:', err);
-      return [];
-    }
+    const items = await failedOperationsRepository.findUnresolved();
+    return items.map(item => ({
+      id:              item.id,
+      idempotency_key: item.idempotency_key,
+      operation:       item.operation,
+      entity:          item.entity,
+      payload:         item.payload,
+      status:          'quarantined' as const,
+      priority:        MutationPriority.NORMAL,
+      retries:         0,
+      max_retries:     0,
+    }));
   }
 
   // ── Cleanup ────────────────────────────────────────────────────────────────

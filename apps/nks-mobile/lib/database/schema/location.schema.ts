@@ -24,12 +24,12 @@ export const district = sqliteTable(
     district_name: text("district_name").notNull(),
     district_code: text("district_code"),
     lgd_code: text("lgd_code"), // Local Government Directory code
-    state_fk: integer("state_fk").notNull(),
+    state_guuid: text("state_guuid").notNull(),
     is_active: integer("is_active").notNull().default(1),
     updated_at: text("updated_at").notNull(),
     deleted_at: text("deleted_at"),
   },
-  (t) => [index("idx_district_state_fk").on(t.state_fk)],
+  (t) => [index("idx_district_state_guuid").on(t.state_guuid)],
 );
 
 export type StateRow = typeof state.$inferSelect;

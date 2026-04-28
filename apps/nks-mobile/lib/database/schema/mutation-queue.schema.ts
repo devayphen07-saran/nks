@@ -10,6 +10,14 @@ export const mutationQueue = sqliteTable(
     payload:          text('payload').notNull(),                  // JSON string
     status:           text('status').notNull().default('pending'),
     // 'pending' | 'in_progress' | 'synced' | 'failed' | 'quarantined'
+    /**
+     * Lower value = higher priority. Default 5 (normal).
+     * Use 1 for critical writes (payments, stock adjustments),
+     * 3 for important ops (sales, returns),
+     * 5 for normal ops,
+     * 9 for analytics / low-urgency events.
+     */
+    priority:         integer('priority').notNull().default(5),
     retries:          integer('retries').notNull().default(0),
     max_retries:      integer('max_retries').notNull().default(5),
     next_retry_at:    integer('next_retry_at'),                   // Unix ms, null = ready now
@@ -23,6 +31,7 @@ export const mutationQueue = sqliteTable(
   (t) => [
     index('idx_mq_status').on(t.status),
     index('idx_mq_next_retry').on(t.next_retry_at),
+    index('idx_mq_priority').on(t.priority),
   ],
 );
 

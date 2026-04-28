@@ -9,13 +9,17 @@ import type {
   SyncOperation,
   ChangesResponse,
   OfflineSessionContext,
+  PushResponse,
+  PushOpResult,
 } from './dto';
 
-export type { ChangesResponse };
+export type { ChangesResponse, PushResponse };
 
 export interface GetChangesOptions {
   userId: number;
-  cursor: string;
+  sessionActiveStoreId: number | null;
+  /** Per-table cursors: { state: "ts:id", district: "ts:id" }. Missing tables default to "0:0". */
+  cursors: Record<string, string>;
   storeGuuid: string;
   tablesCsv: string;
   limit?: number;
@@ -104,34 +108,45 @@ export class SyncService {
    *
    * Two-phase processing:
    *   Phase 1 (pre-transaction): validates every op (type + signature).
-   *     Invalid ops are counted as rejected and never touch the DB.
-   *   Phase 2 (single atomic transaction): all ops that passed Phase 1 are
-   *     executed together. Idempotency duplicates and replays are handled
-   *     inside the transaction without causing a rollback.
+   *     Invalid ops are immediately assigned a 'rejected' result.
+   *   Phase 2: each valid op runs in its OWN transaction so one failure
+   *     never rolls back sibling ops (spec §10.4 — batch is not all-or-nothing).
+   *
+   * Returns per-operation results so mobile can selectively quarantine failed
+   * ops without discarding the rest, plus server_time for cursor advancement.
    */
   async processPushBatch(
     operations: SyncOperation[],
     userId: number,
     activeStoreId: number | null,
     offlineSession?: OfflineSessionContext,
-  ): Promise<{
-    processed: number;
-    rejected: number;
-    status: 'ok' | 'partial';
-  }> {
+  ): Promise<PushResponse> {
+    const serverTime = new Date().toISOString();
+
     if (offlineSession) {
       await this.syncValidation.validateOfflineSession(offlineSession, userId);
+
+      // When offlineToken is absent the JWT write-guard's assertStoreMatch is
+      // skipped. Fill the gap: resolve offlineSession.storeGuuid to a numeric ID
+      // and verify it matches the session's activeStoreId so a client that holds
+      // a valid HMAC for Store A cannot push mutations that land in Store B.
+      if (!offlineSession.offlineToken && offlineSession.storeGuuid) {
+        const resolvedStoreId = await this.syncRepository.verifyStoreMembership(
+          userId,
+          offlineSession.storeGuuid,
+        );
+        SyncAccessValidator.assertStoreMembership(resolvedStoreId);
+        SyncAccessValidator.assertPullStoreMatchesSession(resolvedStoreId, activeStoreId);
+      }
     }
 
     const signingKey = offlineSession?.signature ?? null;
-
-    // ── Phase 1: validate every op BEFORE opening a transaction ─────────────
-    let rejected = 0;
-    const validOps: SyncOperation[] = [];
+    const results: PushOpResult[] = [];
 
     for (const op of operations) {
+      // ── Phase 1: pre-transaction validation ────────────────────────────────
       if (!this.syncValidation.isValidOp(op)) {
-        rejected++;
+        results.push({ opId: op.id, status: 'rejected', reason: 'INVALID_OP' });
         continue;
       }
 
@@ -144,88 +159,104 @@ export class SyncService {
           op: op.op,
           data: sanitizeOpData(op.opData),
         });
-        rejected++;
+        results.push({ opId: op.id, status: 'rejected', reason: 'SIGNATURE_MISMATCH' });
         continue;
       }
 
-      validOps.push(op);
-    }
-
-    // ── Phase 2: apply all valid ops in one atomic transaction ───────────────
-    let processed = 0;
-
-    if (validOps.length > 0) {
-      await this.syncRepository.withTransaction(async (tx) => {
-        for (const op of validOps) {
+      // ── Phase 2: each op in its own transaction ─────────────────────────────
+      let opResult: PushOpResult;
+      try {
+        opResult = await this.syncRepository.withTransaction(async (tx) => {
           const idempotencyKey = `${op.clientId}-${op.id}`;
           const requestHash = this.syncValidation.hashOperation(op);
 
-          const result = await this.syncIdempotency.claim(
+          const claim = await this.syncIdempotency.claim(
             idempotencyKey,
             requestHash,
             tx,
           );
 
-          if (result === 'replay') {
-            rejected++;
-            continue;
+          if (claim === 'replay') {
+            return { opId: op.id, status: 'rejected' as const, reason: 'PAYLOAD_TAMPERED' };
           }
-          if (result === 'duplicate') continue;
+          if (claim === 'duplicate') {
+            return { opId: op.id, status: 'duplicate' as const };
+          }
 
-          await this.syncHandlerFactory.handle(op, userId, activeStoreId, tx);
-          processed++;
-        }
-      });
+          const wasHandled = await this.syncHandlerFactory.handle(op, userId, activeStoreId, tx);
+          if (!wasHandled) {
+            return { opId: op.id, status: 'rejected' as const, reason: 'UNKNOWN_TABLE' };
+          }
+          return { opId: op.id, status: 'ok' as const };
+        });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : 'INTERNAL_ERROR';
+        this.logger.error(`Op ${op.id} (${op.table}/${op.op}) failed: ${reason}`);
+        opResult = { opId: op.id, status: 'error', reason };
+      }
+
+      results.push(opResult);
     }
 
-    return { processed, rejected, status: rejected > 0 ? 'partial' : 'ok' };
+    return { serverTime, results };
   }
 
   /**
    * Fetch changes since a given compound cursor for pull-based sync.
    *
    * Cursor format: "timestampMs:rowId" — breaks ties when rows share the same updated_at.
+   *
+   * serverTime is captured before the queries run so mobile uses a consistent
+   * clock boundary as its next cursor — not the device clock.
    */
   async getChanges(opts: GetChangesOptions): Promise<ChangesResponse> {
     const {
       userId,
-      cursor,
+      sessionActiveStoreId,
+      cursors,
       storeGuuid,
       tablesCsv,
       limit = DEFAULT_SYNC_LIMIT,
     } = opts;
+
+    // Capture server time before any queries — mobile stores this as its
+    // next last_pulled_at cursor. Capturing after would create a window where
+    // rows committed between query-end and new Date() get missed on the next pull.
+    const serverTime = new Date().toISOString();
 
     const storeId = await this.syncRepository.verifyStoreMembership(
       userId,
       storeGuuid,
     );
     SyncAccessValidator.assertStoreMembership(storeId);
-
-    const { ts: cursorMs, id: cursorId } = this.parseCursor(cursor);
+    SyncAccessValidator.assertPullStoreMatchesSession(storeId, sessionActiveStoreId);
 
     const requestedTables = tablesCsv
       .split(',')
       .map((t) => t.trim())
       .filter((t) => SUPPORTED_TABLES.has(t));
 
-    // Fetch limit+1 rows per table to detect whether more pages exist
-    // without ambiguity.
+    // Fetch limit+1 rows per table to detect hasMore without a separate COUNT.
     const fetchLimit = limit + 1;
 
+    // Each table uses its own cursor — eliminates re-fetching already-synced tables
+    // when one table's cursor is behind (e.g. initial sync of a new table).
     const fetched = await Promise.all(
-      requestedTables.map((table) =>
-        TABLE_REGISTRY[table as SyncTableKey]
-          .fetch(this.syncRepository, cursorMs, cursorId, fetchLimit)
-          .then((rows) => ({ table: table as SyncTableKey, rows })),
-      ),
+      requestedTables.map((table) => {
+        const { ts, id } = this.parseCursor(cursors[table] ?? '0:0');
+        return TABLE_REGISTRY[table as SyncTableKey]
+          .fetch(this.syncRepository, ts, id, fetchLimit)
+          .then((rows) => ({ table: table as SyncTableKey, rows }));
+      }),
     );
 
     const allChanges: import('./dto/responses').SyncChange[] = [];
-    const allRawRows: Array<{ id: number; updatedAt: Date | null }> = [];
+    // Per-table next cursors — mobile advances each table independently.
+    const nextCursors: Record<string, string> = {};
     let hasMore = false;
 
     for (const { table, rows } of fetched) {
-      if (rows.length > limit) hasMore = true;
+      if (rows.length > fetchLimit - 1) hasMore = true;
       const slice = rows.slice(0, limit);
       const { map } = TABLE_REGISTRY[table];
       allChanges.push(
@@ -235,16 +266,15 @@ export class SyncService {
           ) => import('./dto/responses').SyncChange,
         ),
       );
-      allRawRows.push(...slice);
+      // Build per-table next cursor from the last row in this table's slice.
+      nextCursors[table] = this.buildTableCursor(slice, cursors[table] ?? '0:0');
     }
 
-    const nextCursor = this.buildNextCursor(allRawRows, cursor);
-
     this.logger.debug(
-      `Changes: ${allChanges.length} row(s) across [${requestedTables.join(',')}], hasMore=${hasMore}, nextCursor=${nextCursor}`,
+      `Changes: ${allChanges.length} row(s) across [${requestedTables.join(',')}], hasMore=${hasMore}`,
     );
 
-    return { nextCursor, hasMore, changes: allChanges };
+    return { serverTime, nextCursors, hasMore, changes: allChanges };
   }
 
   private parseCursor(cursor: string): { ts: number; id: number } {
@@ -256,7 +286,8 @@ export class SyncService {
     return { ts, id };
   }
 
-  private buildNextCursor(
+  /** Build the next cursor for a single table from its result slice. */
+  private buildTableCursor(
     rows: Array<{ id: number; updatedAt: Date | null }>,
     fallback: string,
   ): string {

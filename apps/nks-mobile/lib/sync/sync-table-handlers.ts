@@ -4,6 +4,10 @@
  * Maps server-side camelCase API payloads to local snake_case DB rows,
  * then calls the correct repository for each table.
  *
+ * Each handler exposes batch methods so the pull loop can collect an entire
+ * page of changes per table and write them in one SQLite statement instead
+ * of N individual round-trips.
+ *
  * Add a new entry to TABLE_HANDLERS when adding a new synced table.
  */
 
@@ -27,9 +31,11 @@ export interface SyncChange {
   updatedAt: number; // Unix ms — used to advance per-table cursor
 }
 
-type TableHandler = {
-  onUpsert: (id: number, data: Record<string, unknown>) => Promise<void>;
-  onDelete: (id: number) => Promise<void>;
+export type TableHandler = {
+  /** Write a batch of upserts in a single DB statement. */
+  onBatchUpsert: (items: Array<{ id: number; data: Record<string, unknown> }>) => Promise<void>;
+  /** Soft-delete a batch of rows in a single DB statement. */
+  onBatchDelete: (ids: number[]) => Promise<void>;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -38,16 +44,10 @@ type TableHandler = {
 const str = (v: unknown, fallback = ""): string =>
   typeof v === "string" ? v : fallback;
 
-const num = (v: unknown, fallback = 0): number =>
-  typeof v === "number" && isFinite(v) ? v : fallback;
-
 const bool = (v: unknown): number => (v ? 1 : 0);
 
 const nullableStr = (v: unknown): string | null =>
   typeof v === "string" ? v : null;
-
-const nullableNum = (v: unknown): number | null =>
-  typeof v === "number" && isFinite(v) ? v : null;
 
 // ─── TABLE_HANDLERS ───────────────────────────────────────────────────────────
 // Key must exactly match the `table` field from the server's ChangesResponse.
@@ -55,43 +55,43 @@ const nullableNum = (v: unknown): number | null =>
 export const TABLE_HANDLERS: Record<string, TableHandler> = {
   // ── state (reference data) ──────────────────────────────────────────────────
   state: {
-    async onUpsert(id, d) {
-      const row: StateRow = {
+    async onBatchUpsert(items) {
+      const rows: StateRow[] = items.map(({ id, data: d }) => ({
         id,
-        guuid: str(d.guuid),
-        state_name: str(d.stateName),
-        state_code: str(d.stateCode),
-        gst_state_code: nullableStr(d.gstStateCode),
+        guuid:              str(d.guuid),
+        state_name:         str(d.stateName),
+        state_code:         str(d.stateCode),
+        gst_state_code:     nullableStr(d.gstStateCode),
         is_union_territory: bool(d.isUnionTerritory),
-        is_active: bool(d.isActive),
-        updated_at: str(d.updatedAt),
-        deleted_at: nullableStr(d.deletedAt),
-      };
-      await stateRepository.upsert(row);
+        is_active:          bool(d.isActive),
+        updated_at:         str(d.updatedAt),
+        deleted_at:         nullableStr(d.deletedAt),
+      }));
+      await stateRepository.batchUpsert(rows);
     },
-    async onDelete(_id) {
-      // States are never deleted — ignore
+    async onBatchDelete(ids) {
+      await stateRepository.batchSoftDelete(ids);
     },
   },
 
   // ── district (reference data) ────────────────────────────────────────────────
   district: {
-    async onUpsert(id, d) {
-      const row: DistrictRow = {
+    async onBatchUpsert(items) {
+      const rows: DistrictRow[] = items.map(({ id, data: d }) => ({
         id,
-        guuid: str(d.guuid),
+        guuid:         str(d.guuid),
         district_name: str(d.districtName),
         district_code: nullableStr(d.districtCode),
-        lgd_code: nullableStr(d.lgdCode),
-        state_fk: num(d.stateFk),
-        is_active: bool(d.isActive),
-        updated_at: str(d.updatedAt),
-        deleted_at: nullableStr(d.deletedAt),
-      };
-      await districtRepository.upsert(row);
+        lgd_code:      nullableStr(d.lgdCode),
+        state_guuid:   str(d.stateGuuid),
+        is_active:     bool(d.isActive),
+        updated_at:    str(d.updatedAt),
+        deleted_at:    nullableStr(d.deletedAt),
+      }));
+      await districtRepository.batchUpsert(rows);
     },
-    async onDelete(_id) {
-      // Districts are never deleted — ignore
+    async onBatchDelete(ids) {
+      await districtRepository.batchSoftDelete(ids);
     },
   },
 };

@@ -31,4 +31,21 @@ export class SyncAccessValidator {
   static assertStoreMatch(jwtStoreGuuid: string | null, hmacStoreGuuid: string | null): void {
     if (jwtStoreGuuid !== hmacStoreGuuid) throw new ForbiddenException(errPayload(ErrorCode.SYNC_TOKEN_STORE_MISMATCH));
   }
+
+  /**
+   * Pull store must resolve to the same store as the session's active store.
+   *
+   * Pull derives its store from a client-supplied `storeGuuid` query param;
+   * push derives it from `req.user.activeStoreId` (the JWT session).
+   * Without this check a user who belongs to two stores can pull from Store A
+   * while their session routes pushes to Store B, corrupting cross-store state.
+   */
+  static assertPullStoreMatchesSession(
+    resolvedStoreId: number,
+    sessionActiveStoreId: number | null,
+  ): void {
+    if (sessionActiveStoreId === null || resolvedStoreId !== sessionActiveStoreId) {
+      throw new ForbiddenException(errPayload(ErrorCode.SYNC_STORE_ACCESS_DENIED));
+    }
+  }
 }

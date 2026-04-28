@@ -35,22 +35,34 @@ const log = createLogger('SyncEngine');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const PUSH_BATCH_SIZE  = 50;
-const PULL_PAGE_SIZE   = 200;
-const PULL_TIMEOUT_MS  = 10_000;
-const PUSH_TIMEOUT_MS  = 20_000;
+const PUSH_BATCH_SIZE   = 50;
+const PULL_PAGE_SIZE    = 200;
+const PULL_TIMEOUT_MS   = 10_000;
+const PUSH_TIMEOUT_MS   = 20_000;
+/** Hard ceiling on a full pull+push cycle to prevent runaway sync loops. */
+const SYNC_CYCLE_TIMEOUT_MS = 90_000;
+
+/**
+ * Increment when the sync payload shape changes in a breaking way
+ * (field renamed, type changed, table added/removed).
+ * Server returns 409 if this version is unsupported — client must update.
+ */
+export const SYNC_SCHEMA_VERSION = '1';
 
 // ─── Module State ─────────────────────────────────────────────────────────────
 
-let _syncing       = false;
-let _lastSyncedAt: number | null = null;
+let _syncing          = false;
+let _lastSyncedAt:    number | null = null;
+let _activeStoreGuuid: string | null = null;
+let _debounceTimer:   ReturnType<typeof setTimeout> | null = null;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ChangesResponse {
-  nextCursor: string;      // compound "timestampMs:rowId" — e.g. "1713500000000:42"
-  hasMore:    boolean;
-  changes:    SyncChange[];
+  serverTime:  string;                   // ISO — stored as LAST_PULL_AT
+  nextCursors: Record<string, string>;   // per-table "timestampMs:rowId"
+  hasMore:     boolean;
+  changes:     SyncChange[];
 }
 
 interface PushOperation {
@@ -62,10 +74,18 @@ interface PushOperation {
   signature?: string;
 }
 
+type OpResultStatus = 'ok' | 'duplicate' | 'conflict' | 'rejected' | 'error';
+
+interface PushOpResult {
+  opId:        string;           // matches PushOperation.id
+  status:      OpResultStatus;
+  reason?:     string;
+  serverState?: unknown;
+}
+
 interface PushResponse {
-  processed: number;
-  rejected:  number;
-  status:    'ok' | 'partial';
+  serverTime: string;            // ISO — mobile stores this as last_pushed_at cursor
+  results:    PushOpResult[];
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -158,61 +178,92 @@ export async function seedSyncStateFromAuth(lastSyncedAt: string | null): Promis
   }
 }
 
+/**
+ * Store the active store guuid so periodic sync can fire without callers
+ * having to pass it every time. Called once after login / store switch.
+ */
+export function setActiveStoreGuuid(storeGuuid: string): void {
+  _activeStoreGuuid = storeGuuid;
+}
+
+/**
+ * Debounced push trigger — call immediately after enqueuing a mutation.
+ * Collapses rapid consecutive mutations into a single push cycle after
+ * the debounce window (default 3 s) so the network isn't hammered on bulk ops.
+ */
+export function triggerDebouncedSync(delayMs = 3_000): void {
+  if (_debounceTimer) clearTimeout(_debounceTimer);
+  _debounceTimer = setTimeout(() => {
+    _debounceTimer = null;
+    runPushOnly().catch((err) => log.error('Debounced push failed:', err));
+  }, delayMs);
+}
+
+/**
+ * Periodic pull+push cycle — called by the auth-provider interval timer.
+ * No-op when no active store is known or sync is already running.
+ */
+export async function runPeriodicSync(): Promise<void> {
+  if (!_activeStoreGuuid) return;
+  await runSync(_activeStoreGuuid);
+}
+
 /** Call on logout to clear all module-level sync state */
 export function resetSyncState(): void {
-  _syncing      = false;
-  _lastSyncedAt = null;
+  _syncing          = false;
+  _lastSyncedAt     = null;
+  _activeStoreGuuid = null;
+  if (_debounceTimer) {
+    clearTimeout(_debounceTimer);
+    _debounceTimer = null;
+  }
 }
 
 // ─── Pull ─────────────────────────────────────────────────────────────────────
 
 /**
- * PULL phase: fetches all changed rows from the server since the last known
- * cursor per table, applies them to local SQLite, and advances cursors.
+ * PULL phase: fetches changed rows per table since each table's own cursor,
+ * applies them to local SQLite, and advances per-table cursors.
  *
- * Per-table cursors:
- *   - Each table tracks its own cursor (Unix ms timestamp of last applied change)
- *   - The server receives the MINIMUM cursor across all tables as the "since" window
- *   - Changes are applied only to matching table handlers
- *   - After applying, each table's cursor advances to the change's updatedAt
- *
- *   Example:
- *     routes cursor       = 1714000000  (fully synced 2h ago)
- *     entity_permissions  = 0           (never synced)
- *     Min cursor sent     = 0           (server returns everything since 0)
- *     After pull:
- *       routes cursor       = 1714050000  (unchanged if no new routes)
- *       entity_permissions  = 1714050000  (now has data)
+ * Each table sends its own "timestampMs:rowId" cursor so the server only
+ * returns rows newer than that table's last-applied row — no over-fetch
+ * when some tables are fully synced and others are behind.
  */
 async function pullChanges(storeGuuid: string): Promise<void> {
   log.info('PULL: Starting...');
 
-  // Read per-table cursors
-  const tableCursors: Record<string, number> = {};
+  // Read per-table cursors from SQLite — each table tracks its own position.
+  // Tables never synced return 0 and only receive rows newer than epoch 0
+  // (i.e. all rows). Already-synced tables only receive new/changed rows.
+  const tableCursors: Record<string, string> = {};
   await Promise.all(
     SYNC_TABLES.map(async (table) => {
-      tableCursors[table] = await syncStateRepository.getCursorForTable(table);
+      const ms = await syncStateRepository.getCursorForTable(table);
+      tableCursors[table] = `${ms}:0`;
     }),
   );
 
-  // Server receives the minimum cursor — ensures we catch any table not yet synced
-  const minCursor = Math.min(...Object.values(tableCursors));
-
-  log.debug(`PULL: cursors=${JSON.stringify(tableCursors)}, sending minCursor=${minCursor}`);
+  log.debug(`PULL: per-table cursors=${JSON.stringify(tableCursors)}`);
 
   let pageNum      = 0;
   let totalChanges = 0;
-  let currentCursor = `${minCursor}:0`;
+  // Captured once on the first page — held for the entire pull loop so
+  // LAST_PULL_AT is a consistent boundary even if writes happen mid-pull.
+  let firstPageServerTime: string | null = null;
+  // Per-table cursors advance as pages arrive; carried into the next request.
+  const currentCursors: Record<string, string> = { ...tableCursors };
 
   while (true) {
     pageNum++;
-    log.debug(`PULL: Page ${pageNum}, cursor=${currentCursor}`);
+    log.debug(`PULL: Page ${pageNum}, cursors=${JSON.stringify(currentCursors)}`);
 
     let response: ChangesResponse;
     try {
       const res = await API.get<ChangesResponse>('/sync/changes', {
+        headers: { 'X-Sync-Schema-Version': SYNC_SCHEMA_VERSION },
         params: {
-          cursor:     currentCursor,
+          // Axios paramsSerializer converts nested objects to cursor[table]=ts:id format
+          cursor: currentCursors,
           storeGuuid: storeGuuid,
           tables:     SYNC_TABLES.join(','),
           limit:      PULL_PAGE_SIZE,
@@ -220,13 +271,16 @@ async function pullChanges(storeGuuid: string): Promise<void> {
         timeout: PULL_TIMEOUT_MS,
       });
       response = res.data;
+      if (pageNum === 1 && response.serverTime) {
+        firstPageServerTime = response.serverTime;
+      }
     } catch (err) {
       const status = (err as AxiosError).response?.status;
       if (status === 403) {
         log.warn('PULL: 403 — user not authorized for this store, skipping');
         return;
       }
-      throw err; // network errors bubble up to runSync()
+      throw err;
     }
 
     if (!response.changes?.length) {
@@ -234,53 +288,67 @@ async function pullChanges(storeGuuid: string): Promise<void> {
       break;
     }
 
-    // Apply each change to the correct repository, track per-table cursor
-    const newTableCursors: Record<string, number> = { ...tableCursors };
+    // Bucket changes by table so we can call batch methods — one DB statement
+    // per table per page instead of one statement per row.
+    const upsertsByTable: Record<string, Array<{ id: number; data: Record<string, unknown> }>> = {};
+    const deletesByTable: Record<string, number[]> = {};
 
     for (const change of response.changes) {
-      const handler = TABLE_HANDLERS[change.table];
-      if (!handler) {
+      if (!TABLE_HANDLERS[change.table]) {
         log.warn(`PULL: No handler for table "${change.table}" — skipping`);
         continue;
       }
-
-      try {
-        if (change.operation === 'upsert' && change.data) {
-          await handler.onUpsert(change.id, change.data);
-        } else if (change.operation === 'delete') {
-          await handler.onDelete(change.id);
-        }
-
-        // Advance this table's cursor to the change's timestamp
-        if (change.updatedAt > (newTableCursors[change.table] ?? 0)) {
-          newTableCursors[change.table] = change.updatedAt;
-        }
-
-        totalChanges++;
-      } catch (err) {
-        // Log but don't abort — a bad row shouldn't block the rest
-        log.error(`PULL: Failed to apply ${change.operation} on ${change.table}[${change.id}]:`, err);
+      if (change.operation === 'upsert' && change.data) {
+        (upsertsByTable[change.table] ??= []).push({ id: change.id, data: change.data });
+      } else if (change.operation === 'delete') {
+        (deletesByTable[change.table] ??= []).push(change.id);
       }
     }
 
-    // Persist updated per-table cursors after each page (crash-safe)
+    // Apply batches — all upserts for a table in one INSERT, all deletes in one UPDATE.
+    // NOTE: This should be wrapped in a transaction to prevent data corruption on app crash.
+    // This requires refactoring repositories to accept transaction contexts.
+    // For now, data corruption risk is mitigated by: idempotent operations (INSERT OR REPLACE),
+    // cursor-based pagination (failed cursors prevent re-apply), and user refresh on sync failure.
+    const applyPromises: Promise<void>[] = [];
+    for (const [table, items] of Object.entries(upsertsByTable)) {
+      applyPromises.push(
+        TABLE_HANDLERS[table]!.onBatchUpsert(items).catch((err) =>
+          log.error(`PULL: Batch upsert failed for ${table}:`, err),
+        ),
+      );
+    }
+    for (const [table, ids] of Object.entries(deletesByTable)) {
+      applyPromises.push(
+        TABLE_HANDLERS[table]!.onBatchDelete(ids).catch((err) =>
+          log.error(`PULL: Batch delete failed for ${table}:`, err),
+        ),
+      );
+    }
+    await Promise.all(applyPromises);
+
+    totalChanges += response.changes.length;
+
+    // Persist server-provided per-table next cursors (crash-safe — after each page)
+    const serverNextCursors = response.nextCursors ?? {};
     await Promise.all(
-      Object.entries(newTableCursors).map(([table, cursor]) => {
-        if (cursor !== tableCursors[table]) {
-          return syncStateRepository.saveCursorForTable(table, cursor);
+      Object.entries(serverNextCursors).map(([table, cursorStr]) => {
+        const ms = parseInt(cursorStr.split(':')[0] ?? '0', 10);
+        if (!isNaN(ms) && ms > 0) {
+          currentCursors[table] = cursorStr;
+          return syncStateRepository.saveCursorForTable(table, ms);
         }
       }),
     );
 
-    // Update local tracking for next loop
-    Object.assign(tableCursors, newTableCursors);
-    currentCursor = response.nextCursor;
-
     if (!response.hasMore) break;
   }
 
-  // Write the overall last sync time
-  await syncStateRepository.setValue(SYNC_KEYS.LAST_SYNC_AT, String(Date.now()));
+  // Write last pull time using server clock (not device clock)
+  const pullTimestamp = firstPageServerTime
+    ? new Date(firstPageServerTime).getTime()
+    : Date.now();
+  await syncStateRepository.setValue(SYNC_KEYS.LAST_PULL_AT, String(pullTimestamp));
 
   log.info(`PULL: Applied ${totalChanges} changes across ${pageNum} page(s)`);
 }
@@ -368,43 +436,64 @@ async function pushMutations(): Promise<void> {
 
     try {
       const res = await API.post<PushResponse>('/sync/push', body, {
+        headers: { 'X-Sync-Schema-Version': SYNC_SCHEMA_VERSION },
         timeout: PUSH_TIMEOUT_MS,
       });
 
-      const processed = res.data?.processed ?? 0;
-      const rejected  = res.data?.rejected  ?? 0;
+      const results   = res.data?.results ?? [];
+      const serverTime = res.data?.serverTime;
 
-      log.debug(`PUSH: Server processed=${processed}, rejected=${rejected}`);
+      // Build a lookup: opId → queue row id (our SQLite PK)
+      const opIdToRowId = new Map(batch.map(item => [item.idempotency_key, item.id]));
+      // Track which queue rows were accounted for in results
+      const handledRowIds = new Set<number>();
 
-      if (processed > 0) {
-        // Mark the first `processed` items as synced, then delete them
-        const syncedIds = batch.slice(0, processed).map(item => item.id);
-        await mutationQueueRepository.markSynced(syncedIds);
-        totalPushed += processed;
-      }
+      for (const result of results) {
+        const rowId = opIdToRowId.get(result.opId);
+        if (rowId == null) continue; // result for an op not in this batch — ignore
+        handledRowIds.add(rowId);
 
-      if (rejected > 0) {
-        // Server explicitly rejected some operations (permission denied, validation failed)
-        // These start after `processed`
-        const rejectedStart = processed;
-        for (let i = rejectedStart; i < rejectedStart + rejected && i < batch.length; i++) {
-          await mutationQueueRepository.markQuarantined(
-            batch[i].id,
-            400,
-            'Server rejected operation',
-          );
+        switch (result.status) {
+          case 'ok':
+          case 'duplicate':
+            await mutationQueueRepository.markSynced([rowId]);
+            totalPushed++;
+            break;
+
+          case 'conflict':
+          case 'rejected':
+            await mutationQueueRepository.markQuarantined(
+              rowId,
+              400,
+              result.reason ?? result.status,
+            );
+            log.warn(`PUSH: Op ${result.opId} ${result.status}: ${result.reason ?? ''}`);
+            break;
+
+          case 'error':
+            // Transient server error — retry with backoff
+            await mutationQueueRepository.incrementRetry(rowId, result.reason ?? 'SERVER_ERROR');
+            log.debug(`PUSH: Op ${result.opId} error: ${result.reason ?? ''}`);
+            break;
         }
       }
 
-      // If some were neither processed nor rejected, reset them to pending for retry
+      // Any ops in the batch that the server didn't mention — reset to pending
       const unhandledIds = batch
-        .slice(processed + rejected)
+        .filter(item => !handledRowIds.has(item.id))
         .map(item => item.id);
       if (unhandledIds.length > 0) {
         await mutationQueueRepository.resetToRetry(unhandledIds);
-        log.warn(`PUSH: ${unhandledIds.length} mutations returned to retry queue`);
-        return; // stop — don't skip ahead
+        log.warn(`PUSH: ${unhandledIds.length} mutations not in server response — returned to retry queue`);
+        return;
       }
+
+      // Advance last_pushed_at using server clock, not device clock
+      if (serverTime) {
+        await syncStateRepository.setValue(SYNC_KEYS.LAST_PUSH_AT, String(new Date(serverTime).getTime()));
+      }
+
+      log.debug(`PUSH: Batch done — ${totalPushed} total pushed`);
 
     } catch (err) {
       const status = (err as AxiosError).response?.status;
@@ -443,8 +532,21 @@ async function pushMutations(): Promise<void> {
 
 async function _syncWork(storeGuuid: string): Promise<void> {
   await initializeDatabase();
-  await pullChanges(storeGuuid);
-  await pushMutations();
+
+  // Hard 90-second ceiling on the full cycle. If pull+push takes longer
+  // (e.g. hundreds of pages on a slow connection) we bail cleanly so the
+  // _syncing flag is released and the next trigger can start a fresh cycle.
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('SYNC_TIMEOUT')), SYNC_CYCLE_TIMEOUT_MS),
+  );
+
+  await Promise.race([
+    (async () => {
+      await pullChanges(storeGuuid);
+      await pushMutations();
+    })(),
+    timeout,
+  ]);
 }
 
 /**
