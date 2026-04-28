@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InternalServerException } from '../../../../../common/exceptions';
+import {
+  ErrorCode,
+  errPayload,
+} from '../../../../../common/constants/error-codes.constants';
 import { OnboardingValidator } from '../../validators';
 import { OnboardingCompleteDto, OnboardingCompleteResponseDto } from '../../dto';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
@@ -56,7 +60,7 @@ export class OnboardingService {
       }, tx);
 
       if (dto.email) {
-        if (!passwordHash) throw new InternalServerException('Password hash missing — assertPasswordRequired should have caught this');
+        if (!passwordHash) throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
 
         const emailTaken = await this.authUsersRepository.emailExistsForOtherUser(
           dto.email,

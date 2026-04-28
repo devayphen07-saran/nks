@@ -6,6 +6,10 @@ import { AuditValidator } from './validators/audit.validator';
 import { AuditMapper } from './mapper/audit.mapper';
 import { AuditEvents } from '../../../common/events/audit.events';
 import { NotFoundException } from '../../../common/exceptions';
+import {
+  ErrorCode,
+  errPayload,
+} from '../../../common/constants/error-codes.constants';
 import type { PaginatedResult } from '../../../common/utils/paginated-result';
 import { paginated } from '../../../common/utils/paginated-result';
 import type { AuditListQuery } from './dto/requests';
@@ -243,7 +247,7 @@ export class AuditService {
    */
   async getByGuuid(auditGuuid: string): Promise<AuditLogResponseDto> {
     const row = await this.auditRepository.findByGuuid(auditGuuid);
-    if (!row) throw new NotFoundException('Audit log not found');
+    if (!row) throw new NotFoundException(errPayload(ErrorCode.AUDIT_LOG_NOT_FOUND));
     return AuditMapper.buildAuditLogDto(row);
   }
 }

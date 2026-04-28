@@ -7,6 +7,10 @@ import { PermissionsService } from '../permissions/permissions.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
 import { SessionAuthValidator } from '../../validators';
 import { InternalServerException } from '../../../../../common/exceptions';
+import {
+  ErrorCode,
+  errPayload,
+} from '../../../../../common/constants/error-codes.constants';
 import { DeviceTypeEnum } from '../../../../../common/validators/session.validator';
 import type { UserRoleEntry } from '../../mapper/auth-mapper';
 import type { DeviceInfo } from '../../interfaces/device-info.interface';
@@ -59,7 +63,7 @@ export class SessionBootstrapService {
 
       const user = await this.authUsersRepository.findEmailAndGuuid(userId);
       if (!user?.guuid) {
-        throw new InternalServerException('User record missing guuid — cannot sign JWT');
+        throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
       }
 
       const roleHash = this.authUtils.hashRoles(userRoles);
@@ -102,7 +106,7 @@ export class SessionBootstrapService {
       });
 
       if (!updatedSession?.guuid) {
-        throw new InternalServerException('Session update failed — cannot proceed without session guuid');
+        throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
       }
 
       this.logger.log(`Session bootstrapped for user ${userId}.`);
