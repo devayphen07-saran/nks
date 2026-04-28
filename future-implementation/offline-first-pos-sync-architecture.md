@@ -3,7 +3,7 @@
 **Stack:** React Native (Expo) mobile app + NestJS backend
 **Use case:** Mobile POS that must work fully offline and reconcile with the server when connectivity returns.
 
-**Version:** 3.0 — adds web client architecture: dual API surface, shared domain services, corrected audit columns (`created_by_user_id` + `last_modified_by_user_id` + `audit_log`), web conflict handling, and three non-negotiable rules for keeping mobile pull in sync with web writes.
+**Version:** 4.0 — fixes cursor capture timing bug, pagination cursor advancement, idempotency retention bump to 90 days, cascading rejection section, `syncing` state clarification, `sequence` generation hardening, tombstone note, `expected_version` removed from create example, KDS polling caveat.
 
 ---
 
@@ -115,9 +115,11 @@ Every domain table (e.g., `sales`, `sale_items`, `customers`, `products`, `payme
 
 **`sync_status` lifecycle:**
 - `pending` — local change not yet sent to server
-- `syncing` — currently being pushed (rare; reset to `pending` on app launch if stuck)
+- `syncing` — domain row is actively being pushed (set when its queue op transitions to `in_progress`; useful for "uploading…" UI indicators). Reset to `pending` on app launch if stuck.
 - `synced` — server has confirmed the latest local version
 - `failed` — server rejected or returned a conflict; needs resolution
+
+> **Important:** `syncing` must actually be written to the domain row when its queue op is marked `in_progress` — otherwise the state is declared but never set, which causes confusion. The push algorithm should update the domain row alongside the queue row at the same moment.
 
 **The pull worker treats `pending`, `syncing`, and `failed` as "do not overwrite."** Only `synced` (or absent) rows can be replaced by server data.
 
@@ -145,7 +147,7 @@ CREATE INDEX idx_queue_status_seq ON sync_queue(status, sequence);
 CREATE INDEX idx_queue_next_retry ON sync_queue(next_retry_at) WHERE status = 'pending';
 ```
 
-> **Note on `sequence` generation:** The write path uses `SELECT COALESCE(MAX(sequence), 0) + 1 FROM sync_queue` inside a transaction. This is **safe in SQLite** because SQLite serializes writes (single-writer architecture). If you ever migrate to a multi-writer local store, replace this with a proper monotonic generator (autoincrement column, ULID, or a dedicated counter row with row-level locking).
+> **Note on `sequence` generation:** The write path uses `SELECT COALESCE(MAX(sequence), 0) + 1 FROM sync_queue` inside a transaction. This is **safe in SQLite** only when there is a single writer process — which `expo-sqlite` guarantees in a standard app. However, if you ever add a background task, notification handler, or second SQLite connection that can write to the queue concurrently, this breaks silently. Cheap insurance now: make `sequence` an `INTEGER PRIMARY KEY AUTOINCREMENT` on a dedicated counter table, or use a ULID. Either costs nothing to add early and prevents a hard-to-debug ordering bug later.
 
 ### 3.3 Sync metadata
 
@@ -217,7 +219,7 @@ CREATE INDEX idx_processed_device ON processed_operations(device_id, processed_a
 
 This is what makes retries safe. Before processing any operation, the server checks this table. If the `client_op_id` exists, it returns the cached `result` instead of re-processing.
 
-Retention: keep rows for ~30 days, then archive or delete. Any retry after 30 days is vanishingly rare.
+Retention: keep rows for **90 days**, then archive or delete. The v2 spec said 30 days, but a rural POS offline for 30+ days is a realistic scenario (see the 10-day example in §11). At 30-day retention, retries from such a device hit a server that has forgotten the `client_op_id`. UUID-based creates will produce a duplicate-row error (not a silent double-write), but `update` and `delete` operations may be re-applied incorrectly. 90 days covers the realistic tail while keeping the table manageable.
 
 ### 4.3 Tombstones (deletions)
 
@@ -236,6 +238,8 @@ CREATE INDEX idx_tomb_entity_time ON tombstones(entity_type, deleted_at);
 ```
 
 Prefer **soft deletes** (`deleted_at` on the row itself) whenever possible — they're simpler to sync.
+
+> **Note:** With soft deletes used everywhere in this architecture, this table is reserved for future hard-delete cases (e.g., a GDPR erasure request). It is not used by the current pull flow, which detects deletes via `deleted_at IS NOT NULL` on the domain row itself.
 
 ---
 
@@ -354,7 +358,6 @@ X-Device-Id: abc-123
       "entity": "sale",
       "operation": "create",
       "client_id": "sale-uuid-b",
-      "expected_version": 1,
       "payload": {
         "customer_id": "cust-uuid-a",
         "items": [ { "product_id": "p1", "qty": 2, "price": 150 } ],
@@ -523,11 +526,17 @@ try:
   for entity in ['products', 'customers', 'categories', 'taxes']:
     cursor = read last_pulled_at from sync_metadata for this entity
     has_more = true
-    latest_server_time = null
+    # Capture server_time ONCE at the start of this entity's pull.
+    # Do NOT update it per-page — if writes happen during a long paginated
+    # pull, using a freshly captured server_time per page can produce an
+    # inconsistent cursor. Hold one value for the entire entity loop.
+    entity_server_time = null
 
     while has_more:
       response = GET /sync/pull?since=cursor&entity=entity&limit=500
-      latest_server_time = response.server_time
+
+      if entity_server_time is null:
+        entity_server_time = response.server_time   # captured once, first page only
 
       for upserted_row in response.upserted:
         # CRITICAL: do not overwrite local rows that have unsynced work.
@@ -557,9 +566,11 @@ try:
             WHERE id = deleted_id
 
       has_more = response.has_more
-      cursor = response.next_cursor or response.server_time
+      cursor = response.next_cursor   # advance page cursor within this entity
 
-    UPDATE sync_metadata SET last_pulled_at = latest_server_time
+    # Only advance last_pulled_at when the entity is fully drained (has_more = false).
+    # Use the server_time captured on the first page, not the last response.
+    UPDATE sync_metadata SET last_pulled_at = entity_server_time
       WHERE entity_type = entity
 finally:
   release pull_mutex
@@ -754,6 +765,17 @@ After N retries (e.g., 10) OR an explicit `rejected` from the server, move the r
 
 Critical: a batch push is **not** all-or-nothing. If the batch has 50 ops and op #23 is a conflict, ops #1–22 and #24–50 still succeed. The server processes each op in its own transaction.
 
+### 10.5 Cascading rejections
+
+When a parent op is rejected, dependent ops in the same or subsequent batch will also fail with a different error (e.g., FK violation, `product_not_available`). Both end up in the dead-letter queue with unrelated-looking errors, making the root cause hard to diagnose.
+
+Two mitigations:
+
+- **`dependency_failed` status** — the server can detect "this op failed because a prior op in this batch was rejected" and return a distinct status so the mobile UI groups them: "Sale failed because customer creation was rejected."
+- **At minimum, document the pattern** — when the cashier reviews failed ops, show them in `sequence` order so the root cause (the first rejection) is visible before its dependents.
+
+If your entity dependency graph is shallow (customer → sale is the main one), the second option is usually sufficient.
+
 ---
 
 ## 11. End-to-End Example: 1000 Queued Operations
@@ -922,15 +944,28 @@ export class SyncService {
     const { entity, since, limit = 500 } = query;
     const service = this.dispatcher.getEntityService(entity);
 
-    const { upserted, deleted, hasMore, nextCursor } =
-      await service.getChangesSince(
-        since ? new Date(since) : null,
-        device.storeId,
-        limit,
-      );
+    // Capture server_time BEFORE the query runs, inside the same transaction.
+    // If captured after, a row committed between query-end and new Date() will
+    // have updated_at < server_time but be missed by the next pull that uses
+    // server_time as its since cursor. In Postgres, NOW() returns transaction
+    // start time — use that to get a consistent snapshot boundary.
+    const { serverTime, upserted, deleted, hasMore, nextCursor } =
+      await this.dataSource.transaction(async (tx) => {
+        const serverTime = await tx
+          .query('SELECT NOW() AS now')
+          .then((r: any[]) => r[0].now as Date);
+
+        const result = await service.getChangesSince(
+          since ? new Date(since) : null,
+          device.storeId,
+          limit,
+          tx,
+        );
+        return { serverTime, ...result };
+      });
 
     return {
-      server_time: new Date().toISOString(),
+      server_time: serverTime.toISOString(),
       entity,
       upserted,
       deleted,
@@ -1156,6 +1191,20 @@ Security:
 | Where is the sync cursor time from? | Server's clock, returned in every pull response |
 | What stops pull from clobbering local edits? | Pull skips rows where `sync_status ∈ {pending, syncing, failed}` |
 | How is cursor drift handled? | Per-entity cursors; redundant fetches accepted as the trade-off for resumability |
+
+---
+
+## Changelog from v3
+
+- **Cursor capture timing fixed** (§12.4) — `server_time` is now captured via `SELECT NOW()` at the start of the query transaction, not after it. Prevents a window where a row committed between query-end and `new Date()` gets silently skipped by the next pull.
+- **Pagination cursor advancement fixed** (§7.3) — `entity_server_time` is captured once on the first page and held for the entire entity loop. `last_pulled_at` only advances when `has_more` is finally false, preventing inconsistent cursors during writes-while-pulling.
+- **`expected_version` removed from create example** (§6.2) — creates have no prior version; the field is only meaningful on updates. The dispatcher correctly handles creates by checking existence, not version.
+- **Cascading rejections documented** (§10.5) — parent rejection causes dependent ops to also fail. Introduces `dependency_failed` as an optional distinct status, and recommends displaying failed ops in sequence order so the root cause is visible.
+- **Idempotency retention bumped to 90 days** (§4.2) — 30 days is insufficient for a rural POS that can realistically be offline for 30+ days. Update and delete retries after 30-day expiry could re-apply incorrectly.
+- **`syncing` state clarified** (§3.1) — must actually be written to the domain row when the queue op transitions to `in_progress`; was declared but never set in the original push algorithm.
+- **`sequence` generation hardened** (§3.2) — strengthened warning: any second SQLite connection (background task, notification handler) breaks the single-writer assumption. Recommend AUTOINCREMENT counter or ULID now rather than later.
+- **Tombstone table annotated** (§4.3) — marked as reserved for future hard-delete (GDPR erasure) cases; not used by the current soft-delete pull flow.
+- **KDS polling caveat added** (§16.6 and §16.11) — 30-second polling is insufficient for Kitchen Display System / live order screens; those require WebSocket or SSE.
 
 ---
 
@@ -1411,7 +1460,7 @@ WS /api/v1/realtime?store_id=...
   → { type: 'product.updated', data: {...} }
 ```
 
-For most POS dashboards a 30-second auto-refresh is sufficient and simpler.
+For most POS dashboards (sales history, inventory levels, reports) a 30-second auto-refresh is sufficient and simpler. **Exception:** if you add a Kitchen Display System (KDS) or a live order queue screen, 30-second polling is too slow — those screens need a WebSocket or SSE connection to be usable.
 
 ---
 
@@ -1550,7 +1599,7 @@ Sale line items must store `price_at_time_of_sale` — a copied value, never a l
 | How does mobile pick up web changes? | Existing `/sync/pull`. Web bumps `updated_at`; mobile sees it next pull. |
 | How does web pick up mobile changes? | Just queries the DB. Mobile-pushed rows are immediately visible. |
 | Do mobile and web share business logic? | Yes — domain services called by both layers. |
-| Real-time on web? | Optional WebSocket / SSE. 30-second polling is fine for most POS dashboards. |
+| Real-time on web? | Optional WebSocket / SSE. 30-second polling is fine for sales/inventory/reports. Required for KDS / live order screens. |
 | Authentication? | Same signing key, different `aud`. Mobile: long-lived JWT + device_id. Web: short-lived + cookie. |
 | New conflict scenario? | Web-deletes-product-mobile-uses → add validation in `SalesSyncService.apply`. |
 | Most critical rule? | Web writes must always bump `updated_at` + `version` via shared domain service. |
