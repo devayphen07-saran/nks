@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { eq, and, isNull, count, asc, desc, sql } from 'drizzle-orm';
 import type { AnyColumn } from 'drizzle-orm/column';
@@ -228,6 +228,7 @@ export class LookupsRepository extends BaseRepository {
   /**
    * Paginated admin view for a dedicated-table lookup type.
    * Routes to the correct table based on typeCode and maps columns to LookupValueRow.
+   * Uses type-safe methods per table instead of unsafe `as any` casting.
    */
   async findDedicatedLookupValues(
     typeCode: string,
@@ -237,81 +238,40 @@ export class LookupsRepository extends BaseRepository {
     const offset = LookupsRepository.toOffset(page, pageSize);
     const dir = sortOrder === 'desc' ? desc : asc;
 
-    // ── Helper for standard tables (code + label + description columns) ──────
-    const standardTable = async (
-      tbl: typeof schema.billingFrequency | typeof schema.communicationType | typeof schema.designationType | typeof schema.entityType | typeof schema.notificationStatus | typeof schema.staffInviteStatus | typeof schema.taxFilingFrequency | typeof schema.addressType,
-    ) => {
-      const t = tbl as typeof schema.billingFrequency;
-      const orderCol = sortBy === 'code' ? t.code : sortBy === 'label' ? t.label : sortBy === 'createdAt' ? t.createdAt : t.sortOrder;
-      const where = and(
-        isNull(t.deletedAt),
-        isActive !== undefined ? eq(t.isActive, isActive) : undefined,
-        ilikeAny(search, t.label, t.code),
-      );
-      return this.paginate(
-        this.db.select({ id: t.id, guuid: t.guuid, code: t.code, label: t.label, description: t.description, isActive: t.isActive, isHidden: t.isHidden, isSystem: t.isSystem, sortOrder: t.sortOrder, createdAt: t.createdAt, updatedAt: t.updatedAt }).from(t as any).where(where).orderBy(dir(orderCol)).limit(pageSize).offset(offset),
-        () => this.db.select({ total: count() }).from(t as any).where(where),
-        page, pageSize,
-      );
-    };
-
+    // Route to type-safe method per lookup type
     switch (typeCode) {
       case LookupTypeCodes.BILLING_FREQUENCY:
-        return standardTable(schema.billingFrequency);
+        return this.queryStandardLookupTable(schema.billingFrequency, page, pageSize, offset, dir, search, sortBy, isActive);
 
       case LookupTypeCodes.COMMUNICATION_TYPE:
-        return standardTable(schema.communicationType);
+        return this.queryStandardLookupTable(schema.communicationType, page, pageSize, offset, dir, search, sortBy, isActive);
 
       case LookupTypeCodes.DESIGNATION_TYPE:
-        return standardTable(schema.designationType);
+        return this.queryStandardLookupTable(schema.designationType, page, pageSize, offset, dir, search, sortBy, isActive);
 
       case LookupTypeCodes.ENTITY_TYPE:
-        return standardTable(schema.entityType);
+        return this.queryStandardLookupTable(schema.entityType, page, pageSize, offset, dir, search, sortBy, isActive);
 
       case LookupTypeCodes.NOTIFICATION_STATUS:
-        return standardTable(schema.notificationStatus);
+        return this.queryStandardLookupTable(schema.notificationStatus, page, pageSize, offset, dir, search, sortBy, isActive);
 
       case LookupTypeCodes.STAFF_INVITE_STATUS:
-        return standardTable(schema.staffInviteStatus);
+        return this.queryStandardLookupTable(schema.staffInviteStatus, page, pageSize, offset, dir, search, sortBy, isActive);
 
       case LookupTypeCodes.TAX_FILING_FREQUENCY:
-        return standardTable(schema.taxFilingFrequency);
+        return this.queryStandardLookupTable(schema.taxFilingFrequency, page, pageSize, offset, dir, search, sortBy, isActive);
 
       case LookupTypeCodes.ADDRESS_TYPE:
-        return standardTable(schema.addressType);
+        return this.queryStandardLookupTable(schema.addressType, page, pageSize, offset, dir, search, sortBy, isActive);
 
-      case LookupTypeCodes.CURRENCY: {
-        const t = schema.currency;
-        const orderCol = sortBy === 'code' ? t.code : sortBy === 'label' ? t.symbol : sortBy === 'createdAt' ? t.createdAt : t.sortOrder;
-        const where = and(
-          isNull(t.deletedAt),
-          isActive !== undefined ? eq(t.isActive, isActive) : undefined,
-          ilikeAny(search, t.symbol, t.code),
-        );
-        return this.paginate(
-          this.db.select({ id: t.id, guuid: t.guuid, code: t.code, label: t.symbol, description: t.description, isActive: t.isActive, isHidden: t.isHidden, isSystem: t.isSystem, sortOrder: t.sortOrder, createdAt: t.createdAt, updatedAt: t.updatedAt }).from(t).where(where).orderBy(dir(orderCol)).limit(pageSize).offset(offset),
-          () => this.db.select({ total: count() }).from(t).where(where),
-          page, pageSize,
-        );
-      }
+      case LookupTypeCodes.CURRENCY:
+        return this.queryCurrencyTable(page, pageSize, offset, dir, search, sortBy, isActive);
 
-      case LookupTypeCodes.VOLUMES: {
-        const t = schema.volumes;
-        const orderCol = sortBy === 'code' ? t.volumeCode : sortBy === 'label' ? t.volumeName : sortBy === 'createdAt' ? t.createdAt : t.sortOrder;
-        const where = and(
-          isNull(t.deletedAt),
-          isActive !== undefined ? eq(t.isActive, isActive) : undefined,
-          ilikeAny(search, t.volumeName, t.volumeCode),
-        );
-        return this.paginate(
-          this.db.select({ id: t.id, guuid: t.guuid, code: t.volumeCode, label: t.volumeName, description: sql<string | null>`null`, isActive: t.isActive, isHidden: t.isHidden, isSystem: t.isSystem, sortOrder: t.sortOrder, createdAt: t.createdAt, updatedAt: t.updatedAt }).from(t).where(where).orderBy(dir(orderCol)).limit(pageSize).offset(offset),
-          () => this.db.select({ total: count() }).from(t).where(where),
-          page, pageSize,
-        );
-      }
+      case LookupTypeCodes.VOLUMES:
+        return this.queryVolumesTable(page, pageSize, offset, dir, search, sortBy, isActive);
 
       default:
-        return { rows: [], total: 0 };
+        throw new BadRequestException(`Unknown lookup type: ${typeCode}`);
     }
   }
 
@@ -450,5 +410,162 @@ export class LookupsRepository extends BaseRepository {
       .where(eq(schema.store.guuid, guuid))
       .limit(1);
     return row?.id ?? null;
+  }
+
+  /**
+   * Type-safe query for standard lookup tables (code + label + description columns).
+   * No unsafe `as any` casting — full type information is preserved.
+   */
+  private async queryStandardLookupTable(
+    table: typeof schema.billingFrequency | typeof schema.communicationType | typeof schema.designationType | typeof schema.entityType | typeof schema.notificationStatus | typeof schema.staffInviteStatus | typeof schema.taxFilingFrequency | typeof schema.addressType,
+    page: number,
+    pageSize: number,
+    offset: number,
+    dir: (col: AnyColumn) => any,
+    search: string | undefined,
+    sortBy: string | undefined,
+    isActive: boolean | undefined,
+  ): Promise<{ rows: LookupValueRow[]; total: number }> {
+    // Determine sort column — all these tables have: code, label, createdAt, sortOrder
+    const orderCol =
+      sortBy === 'code' ? table.code :
+      sortBy === 'label' ? table.label :
+      sortBy === 'createdAt' ? table.createdAt :
+      table.sortOrder;
+
+    const where = and(
+      isNull(table.deletedAt),
+      isActive !== undefined ? eq(table.isActive, isActive) : undefined,
+      ilikeAny(search, table.label, table.code),
+    );
+
+    return this.paginate(
+      this.db
+        .select({
+          id: table.id,
+          guuid: table.guuid,
+          code: table.code,
+          label: table.label,
+          description: table.description,
+          isActive: table.isActive,
+          isHidden: table.isHidden,
+          isSystem: table.isSystem,
+          sortOrder: table.sortOrder,
+          createdAt: table.createdAt,
+          updatedAt: table.updatedAt,
+        })
+        .from(table)
+        .where(where)
+        .orderBy(dir(orderCol))
+        .limit(pageSize)
+        .offset(offset),
+      () => this.db.select({ total: count() }).from(table).where(where),
+      page,
+      pageSize,
+    );
+  }
+
+  /**
+   * Type-safe query for currency table (symbol instead of label).
+   */
+  private async queryCurrencyTable(
+    page: number,
+    pageSize: number,
+    offset: number,
+    dir: (col: AnyColumn) => any,
+    search: string | undefined,
+    sortBy: string | undefined,
+    isActive: boolean | undefined,
+  ): Promise<{ rows: LookupValueRow[]; total: number }> {
+    const t = schema.currency;
+
+    const orderCol =
+      sortBy === 'code' ? t.code :
+      sortBy === 'label' ? t.symbol :
+      sortBy === 'createdAt' ? t.createdAt :
+      t.sortOrder;
+
+    const where = and(
+      isNull(t.deletedAt),
+      isActive !== undefined ? eq(t.isActive, isActive) : undefined,
+      ilikeAny(search, t.symbol, t.code),
+    );
+
+    return this.paginate(
+      this.db
+        .select({
+          id: t.id,
+          guuid: t.guuid,
+          code: t.code,
+          label: t.symbol,
+          description: t.description,
+          isActive: t.isActive,
+          isHidden: t.isHidden,
+          isSystem: t.isSystem,
+          sortOrder: t.sortOrder,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+        })
+        .from(t)
+        .where(where)
+        .orderBy(dir(orderCol))
+        .limit(pageSize)
+        .offset(offset),
+      () => this.db.select({ total: count() }).from(t).where(where),
+      page,
+      pageSize,
+    );
+  }
+
+  /**
+   * Type-safe query for volumes table (volumeCode and volumeName columns).
+   */
+  private async queryVolumesTable(
+    page: number,
+    pageSize: number,
+    offset: number,
+    dir: (col: AnyColumn) => any,
+    search: string | undefined,
+    sortBy: string | undefined,
+    isActive: boolean | undefined,
+  ): Promise<{ rows: LookupValueRow[]; total: number }> {
+    const t = schema.volumes;
+
+    const orderCol =
+      sortBy === 'code' ? t.volumeCode :
+      sortBy === 'label' ? t.volumeName :
+      sortBy === 'createdAt' ? t.createdAt :
+      t.sortOrder;
+
+    const where = and(
+      isNull(t.deletedAt),
+      isActive !== undefined ? eq(t.isActive, isActive) : undefined,
+      ilikeAny(search, t.volumeName, t.volumeCode),
+    );
+
+    return this.paginate(
+      this.db
+        .select({
+          id: t.id,
+          guuid: t.guuid,
+          code: t.volumeCode,
+          label: t.volumeName,
+          description: t.description,
+          isActive: t.isActive,
+          isHidden: t.isHidden,
+          isSystem: t.isSystem,
+          sortOrder: t.sortOrder,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+        })
+        .from(t)
+        .where(where)
+        .orderBy(dir(orderCol))
+        .limit(pageSize)
+        .offset(offset),
+      () => this.db.select({ total: count() }).from(t).where(where),
+      page,
+      pageSize,
+    );
   }
 }

@@ -4,18 +4,17 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { AuthController } from './controllers/auth.controller';
 import { OtpController } from './controllers/otp.controller';
 import { RolesModule } from '../roles/roles.module';
-import { RateLimitingModule } from '../../../common/guards/rate-limiting.module';
-import { MailModule } from '../../../shared/mail/mail.module';
 
-// Repositories
-import { SessionsRepository } from './repositories/sessions.repository';
+// Sub-modules
+import { OtpModule } from './modules/otp.module';
+import { SessionModule } from './modules/session.module';
+import { TokenModule } from './modules/token.module';
+
+// Repositories (non-module specific)
 import { AuthUsersRepository } from './repositories/auth-users.repository';
-import { OtpRepository } from './repositories/otp.repository';
-import { OtpRateLimitRepository } from './repositories/otp-rate-limit.repository';
 import { AuthProviderRepository } from './repositories/auth-provider.repository';
 import { PermissionsChangelogRepository } from './repositories/permissions-changelog.repository';
 import { RevokedDevicesRepository } from './repositories/revoked-devices.repository';
-import { JtiBlocklistRepository } from './repositories/jti-blocklist.repository';
 
 // Shared / infrastructure
 import { AuthUtilsService } from './services/shared/auth-utils.service';
@@ -27,49 +26,18 @@ import * as schema from '../../../core/database/schema';
 
 // Security
 import { PasswordService } from './services/security/password.service';
-import { RefreshTokenService } from './services/session/refresh-token.service';
 import { KeyRotationAlertService } from './services/security/key-rotation-alert.service';
 import { KeyRotationScheduler } from './services/security/key-rotation-scheduler';
 
-// Providers
-import { Msg91Service } from './services/providers/msg91.service';
-
 // Permissions
 import { PermissionsService } from './services/permissions/permissions.service';
-
-// OTP
-import { OtpService } from './services/otp/otp.service';
-import { OtpDeliveryService } from './services/otp/otp-delivery.service';
-import { OtpRateLimitService } from './services/otp/otp-rate-limit.service';
-
-// Token
-import { TokenService } from './services/token/token.service';
-import { TokenPairGeneratorService } from './services/token/token-pair-generator.service';
-import { TokenLifecycleService } from './services/token/token-lifecycle.service';
-import { TokenTheftDetectionService } from './services/token/token-theft-detection.service';
-import { JtiBlocklistService } from './services/token/jti-blocklist.service';
-
-// Session
-import { CsrfService } from '../../../common/csrf.service';
-import { AuthCommandService } from './services/session/auth-command.service';
-import { AuthQueryService } from './services/session/auth-query.service';
-import { SessionCommandService } from './services/session/session-command.service';
-import { SessionQueryService } from './services/session/session-query.service';
-import { SessionBootstrapService } from './services/session/session-bootstrap.service';
-import { SessionCleanupService } from './services/session/session-cleanup.service';
-import { AuthContextService } from './services/session/auth-context.service';
-import { DeviceRevocationQueryService } from './services/session/device-revocation-query.service';
 
 // Guard services
 import { UserContextLoaderService } from './services/guard/user-context-loader.service';
 import { AuthPolicyService } from './services/guard/auth-policy.service';
 
-// Listeners
-import { SessionRevocationListener } from './listeners/session-revocation.listener';
-
 // Flows / orchestrators
 import { AuthFlowOrchestratorService } from './services/orchestrators/auth-flow-orchestrator.service';
-import { OtpAuthOrchestrator } from './services/orchestrators/otp-auth-orchestrator.service';
 import { PasswordAuthService } from './services/flows/password-auth.service';
 import { AccountSecurityService } from './services/flows/account-security.service';
 import { InitialRoleAssignmentService } from './services/flows/initial-role-assignment.service';
@@ -83,7 +51,7 @@ import { UserOnboardingUseCase } from './use-cases/user-onboarding.use-case';
 import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case';
 
 /**
- * AuthModule — flat, single-module auth implementation.
+ * AuthModule — modular auth implementation with sub-modules for OTP, Session, Token.
  *
  * Dependency direction (MUST stay acyclic):
  *   AuthModule → RolesModule → StoresModule
@@ -94,20 +62,25 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
  *
  * RoutesModule is intentionally NOT imported here — routes access is handled
  * independently in AppModule.
+ *
+ * Sub-modules:
+ *   - OtpModule: OTP generation, delivery, rate limiting
+ *   - SessionModule: Session CRUD, token rotation, revocation
+ *   - TokenModule: Token pair generation, JTI blocklist
+ *
+ * Refactoring:
+ *   - Providers: 44 → ~25 (sub-modules encapsulate 20+ services)
+ *   - SessionsRepository (768 lines) → 4 focused repos in SessionModule
  */
 @Module({
-  imports: [RateLimitingModule, RolesModule, MailModule],
+  imports: [OtpModule, SessionModule, TokenModule, RolesModule],
   controllers: [OtpController, AuthController],
   providers: [
-    // Infrastructure
-    SessionsRepository,
+    // Infrastructure & configuration
     AuthUsersRepository,
-    OtpRepository,
-    OtpRateLimitRepository,
     AuthProviderRepository,
     PermissionsChangelogRepository,
     RevokedDevicesRepository,
-    JtiBlocklistRepository,
     AuthUtilsService,
     JWTConfigService,
     {
@@ -122,53 +95,20 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
         }),
     },
 
-    // CSRF — needed by auth controllers to set csrf_token cookie in login/register responses
-    CsrfService,
-
     // Security
     PasswordService,
-    RefreshTokenService,
     KeyRotationAlertService,
     KeyRotationScheduler,
 
-    // Providers
-    Msg91Service,
-
     // Permissions
     PermissionsService,
-
-    // OTP
-    OtpService,
-    OtpDeliveryService,
-    OtpRateLimitService,
-
-    // Token
-    TokenService,
-    TokenPairGeneratorService,
-    TokenLifecycleService,
-    TokenTheftDetectionService,
-    JtiBlocklistService,
-
-    // Session
-    AuthCommandService,
-    AuthQueryService,
-    SessionCommandService,
-    SessionQueryService,
-    SessionBootstrapService,
-    SessionCleanupService,
-    AuthContextService,
-    DeviceRevocationQueryService,
 
     // Guard services (consumed by AuthGuard in common/guards via AuthModule exports)
     UserContextLoaderService,
     AuthPolicyService,
 
-    // Listeners
-    SessionRevocationListener,
-
     // Flows / Orchestrators
     AuthFlowOrchestratorService,
-    OtpAuthOrchestrator,
     PasswordAuthService,
     AccountSecurityService,
     InitialRoleAssignmentService,

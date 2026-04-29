@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { SessionEvents } from '../../../../common/events/session.events';
 import type { SessionRevokeAllPayload } from '../../../../common/events/session.events';
-import { SessionsRepository } from '../repositories/sessions.repository';
+import { SessionRevocationRepository } from '../repositories/session-revocation.repository';
 
 /**
  * Handles fan-out session revocation off the hot request path.
@@ -16,14 +16,14 @@ import { SessionsRepository } from '../repositories/sessions.repository';
 export class SessionRevocationListener {
   private readonly logger = new Logger(SessionRevocationListener.name);
 
-  constructor(private readonly sessionsRepository: SessionsRepository) {}
+  constructor(private readonly sessionRevocationRepository: SessionRevocationRepository) {}
 
   @OnEvent(SessionEvents.REVOKE_ALL_FOR_USER, { async: true, suppressErrors: false })
   async handle(payload: SessionRevokeAllPayload): Promise<void> {
     try {
       // The triggering session is already deleted; this picks up only the remaining ones.
-      const jtis = await this.sessionsRepository.findJtisByUserId(payload.userId);
-      await this.sessionsRepository.revokeAllForUser(payload.userId, payload.reason, jtis);
+      const jtis = await this.sessionRevocationRepository.findJtisByUserId(payload.userId);
+      await this.sessionRevocationRepository.revokeAllForUser(payload.userId, payload.reason, jtis);
       this.logger.log(
         `Background revocation complete — reason=${payload.reason} userId=${payload.userId} sessions=${jtis.length}`,
       );

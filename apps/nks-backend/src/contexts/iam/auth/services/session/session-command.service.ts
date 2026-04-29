@@ -1,6 +1,8 @@
 import * as crypto from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
-import { SessionsRepository } from '../../repositories/sessions.repository';
+import { SessionRepository } from '../../repositories/session.repository';
+import { SessionRevocationRepository } from '../../repositories/session-revocation.repository';
+import { SessionContextRepository } from '../../repositories/session-context.repository';
 import { RevokedDevicesRepository } from '../../repositories/revoked-devices.repository';
 import { SessionAuthValidator } from '../../validators';
 import { SessionValidator } from '../../../../../common/validators/session.validator';
@@ -21,7 +23,9 @@ export class SessionCommandService {
   private readonly logger = new Logger(SessionCommandService.name);
 
   constructor(
-    private readonly sessionsRepository: SessionsRepository,
+    private readonly sessionRepository: SessionRepository,
+    private readonly sessionContextRepository: SessionContextRepository,
+    private readonly sessionRevocationRepository: SessionRevocationRepository,
     private readonly revokedDevicesRepository: RevokedDevicesRepository,
     private readonly sessionBootstrap: SessionBootstrapService,
   ) {}
@@ -30,7 +34,7 @@ export class SessionCommandService {
     const validatedDeviceType = SessionValidator.validateDeviceType(input.deviceType);
     const validatedLoginMethod = SessionValidator.validateLoginMethod(input.loginMethod);
 
-    const session = await this.sessionsRepository.createWithinLimit(
+    const session = await this.sessionContextRepository.createWithinLimit(
       input.userId,
       AUTH_CONSTANTS.SESSION.MAX_PER_USER,
       {
@@ -55,22 +59,22 @@ export class SessionCommandService {
   }
 
   async invalidateSession(sessionId: number): Promise<void> {
-    await this.sessionsRepository.delete(sessionId);
+    await this.sessionRepository.delete(sessionId);
     this.logger.debug(`Session invalidated: ${sessionId}`);
   }
 
   async invalidateSessionByToken(token: string): Promise<void> {
-    const session = await this.sessionsRepository.findByToken(token);
+    const session = await this.sessionRepository.findByToken(token);
     if (!session) return;
-    await this.sessionsRepository.revokeSession(session.id, 'LOGOUT', session.jti ?? undefined);
+    await this.sessionRevocationRepository.revokeSession(session.id, 'LOGOUT', session.jti ?? undefined);
   }
 
   async terminateSession(userId: number, sessionGuuid: string): Promise<void> {
-    const session = await this.sessionsRepository.findByGuuid(sessionGuuid);
+    const session = await this.sessionRepository.findByGuuid(sessionGuuid);
     if (!session) return;
 
     SessionAuthValidator.assertSessionBelongsToUser(session, userId);
-    await this.sessionsRepository.revokeSession(session.id, 'TERMINATED', session.jti ?? undefined);
+    await this.sessionRevocationRepository.revokeSession(session.id, 'TERMINATED', session.jti ?? undefined);
 
     if (session.deviceId) {
       this.revokedDevicesRepository
@@ -86,14 +90,14 @@ export class SessionCommandService {
   }
 
   async terminateAllSessions(userId: number): Promise<number> {
-    const jtis = await this.sessionsRepository.findJtisByUserId(userId);
-    await this.sessionsRepository.revokeAllForUser(userId, 'TERMINATED', jtis);
+    const jtis = await this.sessionRevocationRepository.findJtisByUserId(userId);
+    await this.sessionRevocationRepository.revokeAllForUser(userId, 'TERMINATED', jtis);
     this.logger.debug(`All sessions terminated for user ${userId} (${jtis.length} JTIs blocklisted)`);
     return jtis.length;
   }
 
   async revokeRefreshToken(sessionId: number): Promise<void> {
-    await this.sessionsRepository.revokeRefreshToken(sessionId);
+    await this.sessionRevocationRepository.revokeRefreshToken(sessionId);
   }
 
   createSessionForUser(userId: number, deviceInfo?: DeviceInfo) {

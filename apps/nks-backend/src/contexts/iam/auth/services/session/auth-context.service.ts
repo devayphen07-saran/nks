@@ -1,5 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SessionsRepository } from '../../repositories/sessions.repository';
+import { SessionContextRepository } from '../../repositories/session-context.repository';
+import { SessionTokenRepository } from '../../repositories/session-token.repository';
+import { SessionRevocationRepository } from '../../repositories/session-revocation.repository';
+import { SessionRepository } from '../../repositories/session.repository';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 
 /**
@@ -18,7 +21,10 @@ export class AuthContextService {
   private readonly logger = new Logger(AuthContextService.name);
 
   constructor(
-    private readonly sessionsRepository: SessionsRepository,
+    private readonly sessionContextRepository: SessionContextRepository,
+    private readonly sessionTokenRepository: SessionTokenRepository,
+    private readonly sessionRevocationRepository: SessionRevocationRepository,
+    private readonly sessionRepository: SessionRepository,
     private readonly authUsersRepository: AuthUsersRepository,
   ) {}
 
@@ -27,7 +33,7 @@ export class AuthContextService {
    * Replaces the previous two-round-trip flow (findByTokenWithJtiCheck → findUserById + findUserRolesForAuth).
    */
   findSessionAuthContext(token: string) {
-    return this.sessionsRepository.findSessionAuthContext(token);
+    return this.sessionContextRepository.findSessionAuthContext(token);
   }
 
   /**
@@ -35,7 +41,7 @@ export class AuthContextService {
    * Returns `{ session: null, revokedJti: false }` for unknown tokens.
    */
   findSessionByToken(token: string) {
-    return this.sessionsRepository.findByTokenWithJtiCheck(token);
+    return this.sessionTokenRepository.findByTokenWithJtiCheck(token);
   }
 
   /**
@@ -53,7 +59,7 @@ export class AuthContextService {
    * Remaining sessions are cleaned up by SessionRevocationListener off the hot path.
    */
   revokeCurrentSession(sessionId: number, reason: string, jti?: string): Promise<void> {
-    return this.sessionsRepository.revokeSession(sessionId, reason, jti);
+    return this.sessionRevocationRepository.revokeSession(sessionId, reason, jti);
   }
 
   /**
@@ -62,7 +68,7 @@ export class AuthContextService {
    * longer a live role assignment — prevents the stale value from surfacing again.
    */
   clearActiveStore(sessionId: number): Promise<void> {
-    return this.sessionsRepository.clearActiveStore(sessionId);
+    return this.sessionRepository.clearActiveStore(sessionId);
   }
 
   /**
@@ -76,10 +82,10 @@ export class AuthContextService {
     newExpiresAt: Date,
     newCsrfSecret: string,
   ): Promise<boolean> {
-    return this.sessionsRepository.rotateToken(oldToken, newToken, newExpiresAt, newCsrfSecret);
+    return this.sessionTokenRepository.rotateToken(oldToken, newToken, newExpiresAt, newCsrfSecret);
   }
 
   rotateCsrfSecret(sessionId: number, newCsrfSecret: string): Promise<void> {
-    return this.sessionsRepository.rotateCsrfSecret(sessionId, newCsrfSecret);
+    return this.sessionTokenRepository.rotateCsrfSecret(sessionId, newCsrfSecret);
   }
 }

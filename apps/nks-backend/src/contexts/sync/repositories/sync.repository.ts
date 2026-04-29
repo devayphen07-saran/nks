@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { eq, sql, and, isNull, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -55,6 +55,8 @@ export interface DistrictChangeRow {
 
 @Injectable()
 export class SyncRepository extends BaseRepository {
+  private readonly logger = new Logger(SyncRepository.name);
+
   constructor(
     @InjectDb() db: Db,
     private readonly txService: TransactionService,
@@ -145,7 +147,7 @@ export class SyncRepository extends BaseRepository {
    */
   async getStateChanges(cursorMs: number, cursorId: number, limit: number): Promise<StateChangeRow[]> {
     const cursorDate = new Date(cursorMs);
-    console.log(`[SYNC] getStateChanges: cursorMs=${cursorMs}, cursorId=${cursorId}, cursorDate=${cursorDate.toISOString()}`);
+    this.logger.debug(`[SYNC] getStateChanges: cursorMs=${cursorMs}, cursorId=${cursorId}, cursorDate=${cursorDate.toISOString()}`);
     const rows = await this.db
       .select({
         id: schema.state.id,
@@ -170,10 +172,10 @@ export class SyncRepository extends BaseRepository {
       )
       .orderBy(schema.state.updatedAt, schema.state.id)
       .limit(limit + 1);
-    console.log(`[SYNC] getStateChanges returned ${rows.length} rows`);
+    this.logger.debug(`[SYNC] getStateChanges returned ${rows.length} rows`);
     if (rows.length > 0) {
-      console.log(`[SYNC] First row: id=${rows[0].id}, updatedAt=${rows[0].updatedAt}`);
-      console.log(`[SYNC] Last row: id=${rows[rows.length - 1].id}, updatedAt=${rows[rows.length - 1].updatedAt}`);
+      this.logger.debug(`[SYNC] First row: id=${rows[0].id}, updatedAt=${rows[0].updatedAt}`);
+      this.logger.debug(`[SYNC] Last row: id=${rows[rows.length - 1].id}, updatedAt=${rows[rows.length - 1].updatedAt}`);
     }
     return rows;
   }
@@ -184,7 +186,7 @@ export class SyncRepository extends BaseRepository {
    */
   async getDistrictChanges(cursorMs: number, cursorId: number, limit: number): Promise<DistrictChangeRow[]> {
     const cursorDate = new Date(cursorMs);
-    console.log(`[SYNC] getDistrictChanges: cursorMs=${cursorMs}, cursorId=${cursorId}, cursorDate=${cursorDate.toISOString()}`);
+    this.logger.debug(`[SYNC] getDistrictChanges: cursorMs=${cursorMs}, cursorId=${cursorId}, cursorDate=${cursorDate.toISOString()}`);
     const rows = await this.db
       .select({
         id: schema.district.id,
@@ -210,10 +212,10 @@ export class SyncRepository extends BaseRepository {
       )
       .orderBy(schema.district.updatedAt, schema.district.id)
       .limit(limit + 1);
-    console.log(`[SYNC] getDistrictChanges returned ${rows.length} rows`);
+    this.logger.debug(`[SYNC] getDistrictChanges returned ${rows.length} rows`);
     if (rows.length > 0) {
-      console.log(`[SYNC] First row: id=${rows[0].id}, updatedAt=${rows[0].updatedAt}`);
-      console.log(`[SYNC] Last row: id=${rows[rows.length - 1].id}, updatedAt=${rows[rows.length - 1].updatedAt}`);
+      this.logger.debug(`[SYNC] First row: id=${rows[0].id}, updatedAt=${rows[0].updatedAt}`);
+      this.logger.debug(`[SYNC] Last row: id=${rows[rows.length - 1].id}, updatedAt=${rows[rows.length - 1].updatedAt}`);
     }
     return rows;
   }

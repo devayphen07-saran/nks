@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { JWTConfigService, JWTPayload } from '../../../../../config/jwt.config';
 import { RefreshTokenService } from '../session/refresh-token.service';
-import { SessionsRepository } from '../../repositories/sessions.repository';
+import { SessionTokenRepository } from '../../repositories/session-token.repository';
 import {
   ACCESS_TOKEN_TTL_MS,
   REFRESH_TOKEN_TTL_MS,
@@ -21,7 +21,7 @@ import type { TokenPair } from '../../mapper/auth-mapper';
  * Dependencies (2):
  *   - jwtConfigService: RS256 token signing
  *   - refreshTokenService: Opaque refresh token generation
- *   - sessionsRepository: Persist refresh token data
+ *   - sessionTokenRepository: Persist refresh token data
  */
 @Injectable()
 export class TokenPairGeneratorService {
@@ -30,7 +30,7 @@ export class TokenPairGeneratorService {
   constructor(
     private readonly jwtConfigService: JWTConfigService,
     private readonly refreshTokenService: RefreshTokenService,
-    private readonly sessionsRepository: SessionsRepository,
+    private readonly sessionTokenRepository: SessionTokenRepository,
   ) {}
 
   /**
@@ -92,7 +92,7 @@ export class TokenPairGeneratorService {
     );
 
     // Step 5: Persist refresh token hash to session
-    await this.sessionsRepository.setRefreshTokenData(sessionToken, {
+    await this.sessionTokenRepository.setRefreshTokenData(sessionToken, {
       refreshTokenHash,
       refreshTokenExpiresAt,
       accessTokenExpiresAt: jwtExpiresAt,

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SessionsRepository } from '../../repositories/sessions.repository';
+import { SessionRepository } from '../../repositories/session.repository';
 import { SessionMapper } from '../../mapper/session.mapper';
 import type { UserSession } from '../../../../../core/database/schema/auth/user-session';
 import type { SessionInfoDto } from '../../dto';
@@ -19,18 +19,18 @@ export interface PublicSession {
 export class SessionQueryService {
   private readonly logger = new Logger(SessionQueryService.name);
 
-  constructor(private readonly sessionsRepository: SessionsRepository) {}
+  constructor(private readonly sessionRepository: SessionRepository) {}
 
   async getUserSessions(userId: number): Promise<SessionInfoDto[]> {
-    const sessions = await this.sessionsRepository.findActiveByUserId(userId);
+    const sessions = await this.sessionRepository.findActiveByUserId(userId);
     return sessions.map(SessionMapper.buildSessionInfoDtoFromRow);
   }
 
   async getSessionById(sessionId: number): Promise<UserSession | null> {
-    return this.sessionsRepository.findById(sessionId);
+    return this.sessionRepository.findById(sessionId);
   }
 
   async getSessionByToken(token: string): Promise<UserSession | null> {
-    return this.sessionsRepository.findByToken(token);
+    return this.sessionRepository.findByToken(token);
   }
 }

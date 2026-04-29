@@ -193,6 +193,28 @@ export class RolesRepository extends BaseRepository {
   // ─── Role Assignment (user_role_mapping writes) ───────────────────────────
 
   /**
+   * Unset isPrimary on all active role assignments for a user in the given store scope.
+   * Call before assigning a new primary role so there is never more than one isPrimary=true.
+   */
+  async unsetPrimaryRole(userFk: number, storeFk: number | null, tx?: Db): Promise<void> {
+    const client = tx ?? this.db;
+    await client
+      .update(userRoleMapping)
+      .set({ isPrimary: false })
+      .where(
+        and(
+          eq(userRoleMapping.userFk, userFk),
+          storeFk != null
+            ? eq(userRoleMapping.storeFk, storeFk)
+            : isNull(userRoleMapping.storeFk),
+          eq(userRoleMapping.isPrimary, true),
+          eq(userRoleMapping.isActive, true),
+          isNull(userRoleMapping.deletedAt),
+        ),
+      );
+  }
+
+  /**
    * Assign a role to a user. Pass storeFk=null for platform-level roles.
    * isPrimary=true marks the role whose code flows into JWT.primaryRole.
    * Idempotent: returns null (no-op) if the assignment already exists.
@@ -251,15 +273,16 @@ export class RolesRepository extends BaseRepository {
 
   /**
    * Soft-delete ALL role assignments for a user in a specific store.
-   * Called when a user is removed from a store.
+   * Returns the deleted roleIds so callers can fan out changelog/cache
+   * invalidation without a separate SELECT round-trip.
    */
   async removeAllStoreRoles(
     userFk: number,
     storeFk: number,
     tx?: Db,
-  ): Promise<void> {
+  ): Promise<number[]> {
     const client = tx ?? this.db;
-    await client
+    const rows = await client
       .update(userRoleMapping)
       .set({ isActive: false, deletedAt: new Date() })
       .where(
@@ -268,7 +291,9 @@ export class RolesRepository extends BaseRepository {
           eq(userRoleMapping.storeFk, storeFk),
           isNull(userRoleMapping.deletedAt),
         ),
-      );
+      )
+      .returning({ roleId: userRoleMapping.roleFk });
+    return rows.map((r) => r.roleId);
   }
 
   /**
@@ -446,7 +471,7 @@ export class RolesRepository extends BaseRepository {
       .select()
       .from(schema.roles)
       .where(
-        and(eq(schema.roles.guuid, guuid), eq(schema.roles.isActive, true)),
+        and(eq(schema.roles.guuid, guuid), eq(schema.roles.isActive, true), isNull(schema.roles.deletedAt)),
       )
       .limit(1);
     return role ?? null;
@@ -457,7 +482,7 @@ export class RolesRepository extends BaseRepository {
     const [role] = await this.db
       .select()
       .from(schema.roles)
-      .where(and(eq(schema.roles.id, id), eq(schema.roles.isActive, true)))
+      .where(and(eq(schema.roles.id, id), eq(schema.roles.isActive, true), isNull(schema.roles.deletedAt)))
       .limit(1);
     return role ?? null;
   }

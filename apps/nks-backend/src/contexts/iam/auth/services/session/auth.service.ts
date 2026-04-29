@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SessionAuthValidator } from '../../validators';
-import { SessionsRepository } from '../../repositories/sessions.repository';
+import { SessionRepository } from '../../repositories/session.repository';
+import { SessionContextRepository } from '../../repositories/session-context.repository';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { SessionService } from './session.service';
 import { AuditService } from '../../../../compliance/audit/audit.service';
@@ -23,7 +24,8 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
   constructor(
-    private readonly sessionsRepository: SessionsRepository,
+    private readonly sessionRepository: SessionRepository,
+    private readonly sessionContextRepository: SessionContextRepository,
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly sessionService: SessionService,
     private readonly auditService: AuditService,
@@ -50,7 +52,7 @@ export class AuthService {
   async checkSessionStatus(
     token: string,
   ): Promise<{ active: boolean; revoked: boolean; wipe: boolean }> {
-    const session = await this.sessionsRepository.findByToken(token);
+    const session = await this.sessionRepository.findByToken(token);
 
     // Unknown token — treat as revoked (could be already cleaned up)
     if (!session) return { active: false, revoked: true, wipe: false };

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { SessionsRepository } from '../../repositories/sessions.repository';
+import { SessionContextRepository } from '../../repositories/session-context.repository';
 import { RevokedDevicesRepository } from '../../repositories/revoked-devices.repository';
 import { REVOKED_SESSION_RETENTION_DAYS } from '../../auth.constants';
 
@@ -20,7 +20,7 @@ export class SessionCleanupService {
   private readonly logger = new Logger(SessionCleanupService.name);
 
   constructor(
-    private readonly sessionsRepository: SessionsRepository,
+    private readonly sessionContextRepository: SessionContextRepository,
     private readonly revokedDevicesRepository: RevokedDevicesRepository,
   ) {}
 
@@ -37,7 +37,7 @@ export class SessionCleanupService {
   async cleanupExpiredSessions(): Promise<number> {
     try {
       const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const deletedCount = await this.sessionsRepository.deleteExpiredSessions(cutoffTime);
+      const deletedCount = await this.sessionContextRepository.deleteExpiredSessions(cutoffTime);
       if (deletedCount > 0) {
         this.logger.log(`Expired session cleanup: deleted ${deletedCount} session(s)`);
       }
@@ -52,7 +52,7 @@ export class SessionCleanupService {
 
   async cleanupOldRevokedSessions(): Promise<number> {
     try {
-      const deleted = await this.sessionsRepository.deleteOldRevokedSessions(
+      const deleted = await this.sessionContextRepository.deleteOldRevokedSessions(
         REVOKED_SESSION_RETENTION_DAYS,
       );
       if (deleted > 0) {

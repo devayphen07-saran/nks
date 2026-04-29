@@ -311,6 +311,9 @@ export class JWTConfigService {
    * On primary key failure, tries fallback keys by kid claim to support
    * graceful key rotation — tokens signed with the previous key remain
    * valid for up to 30 days after rotation.
+   *
+   * Fallback key expiration is checked explicitly to provide clear error messages
+   * distinguishing "key rotation grace period expired" from "invalid signature".
    */
   verifyToken(token: string): JWTPayload {
     try {
@@ -321,12 +324,35 @@ export class JWTConfigService {
       });
       return JWTPayloadSchema.parse(raw);
     } catch (primaryError) {
-      // Decode without verification to read the kid claim
+      // Decode without verification to read the kid claim and payload
       const decoded = jwt.decode(token, { complete: true });
-      const kid = decoded?.header?.kid as string | undefined;
+      if (!decoded) {
+        this.logger.warn('JWT decode failed — malformed token');
+        throw primaryError;
+      }
+
+      const kid = decoded.header?.kid as string | undefined;
+      const payload = decoded.payload as any;
 
       if (kid && kid !== this.currentKeyId) {
         const fallback = this.getFallbackKey(kid);
+
+        // Fallback key not found — check if it exists but has expired
+        if (!fallback) {
+          const expiredFallback = this.fallbackKeys.find(fk => fk.kid === kid);
+          if (expiredFallback && expiredFallback.expiresAt <= new Date()) {
+            const gracePeriodExpiredAt = expiredFallback.expiresAt.toISOString();
+            this.logger.warn(
+              `JWT signed with expired fallback key (kid=${kid}, expired=${gracePeriodExpiredAt})`,
+            );
+            throw new Error(
+              `Token signed with key that rotated out on ${gracePeriodExpiredAt}. ` +
+              `Please obtain a new token from the login endpoint.`,
+            );
+          }
+        }
+
+        // Fallback key exists and is still valid — try verification
         if (fallback) {
           try {
             const raw = jwt.verify(token, fallback.publicKeyPem, {
@@ -340,6 +366,7 @@ export class JWTConfigService {
               `JWT verification failed with fallback key (kid=${kid})`,
               fallbackError,
             );
+            // Fall through to throw primary error
           }
         }
       }

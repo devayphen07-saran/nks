@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { DbTransaction } from '../../../../core/database/transaction.service';
 import * as schema from '../../../../core/database/schema';
 import { entityType } from '../../../../core/database/schema/lookups/entity-type/entity-type.table';
 import { rolePermissions } from '../../../../core/database/schema/rbac/role-permissions/role-permissions.table';
@@ -109,7 +110,7 @@ export class PermissionsRepository extends BaseRepository implements OnModuleIni
   async bulkUpsert(
     roleId: number,
     entries: BulkUpsertEntry[],
-    tx?: NodePgDatabase<typeof schema>,
+    tx?: DbTransaction,
   ): Promise<number> {
     if (entries.length === 0) return 0;
     const client = tx ?? this.db;

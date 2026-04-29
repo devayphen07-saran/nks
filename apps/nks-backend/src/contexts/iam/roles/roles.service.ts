@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { RolesRepository } from './repositories/roles.repository';
 import { PermissionsRepository } from './repositories/role-permissions.repository';
 import { RolePermissionService } from './role-permission.service';
+import { TransactionService } from '../../../core/database/transaction.service';
 import { RolesValidator } from './validators';
 import { RoleMapper } from './mapper/role.mapper';
 import { AuditCommandService } from '../../compliance/audit/audit-command.service';
@@ -16,6 +17,7 @@ export class RolesService {
     private readonly rolesRepository: RolesRepository,
     private readonly rolePermissionsRepository: PermissionsRepository,
     private readonly rolePermission: RolePermissionService,
+    private readonly txService: TransactionService,
     private readonly auditCommand: AuditCommandService,
   ) {}
 
@@ -37,7 +39,7 @@ export class RolesService {
     });
 
     this.auditCommand.logRoleCreated(userId, role.id, role.code, storeFk);
-    this.logger.log(`Role created: ${role.code} by user ${userId}`);
+    this.logger.log(`Role created: id=${role.id} code=${role.code} by user=${userId}`);
     return RoleMapper.buildRoleDto(role);
   }
 
@@ -62,46 +64,54 @@ export class RolesService {
 
     const permEntries = entityEntries.map(([entityCode, requested]) => ({
       entityCode,
-      canView:   Boolean(requested['canView']),
-      canCreate: Boolean(requested['canCreate']),
-      canEdit:   Boolean(requested['canEdit']),
-      canDelete: Boolean(requested['canDelete']),
-      deny:      Boolean(requested['deny']),
+      canView:   requested.canView   ?? false,
+      canCreate: requested.canCreate ?? false,
+      canEdit:   requested.canEdit   ?? false,
+      canDelete: requested.canDelete ?? false,
+      deny:      requested.deny      ?? false,
     }));
 
-    // Update role metadata
-    const updated = await this.rolesRepository.update(
-      role.id,
-      {
-        ...(dto.name        ? { roleName: dto.name }               : {}),
-        ...(dto.description !== undefined ? { description: dto.description } : {}),
-        ...(dto.sortOrder   !== undefined ? { sortOrder: dto.sortOrder }    : {}),
-      },
-    );
-    RolesValidator.assertFound(updated);
+    const metaData = {
+      ...(dto.name        ? { roleName: dto.name }               : {}),
+      ...(dto.description !== undefined ? { description: dto.description } : {}),
+      ...(dto.sortOrder   !== undefined ? { sortOrder: dto.sortOrder }    : {}),
+    };
+    const hasMetaChanges = Object.keys(metaData).length > 0;
+    const hasPermChanges = permEntries.length > 0;
 
-    // Update permissions (delegated to RolePermissionService)
-    if (permEntries.length > 0) {
-      await this.rolePermission.updateRolePermissions(
-        role.id,
-        userId,
-        entityEntries as [string, Record<string, boolean>][],
-        permEntries,
-        callerPerms,
-      );
+    if (!hasMetaChanges && !hasPermChanges) {
+      return RoleMapper.buildRoleDto(role);
     }
 
-    // Audit log metadata changes
-    const metaChanges: Record<string, unknown> = {
-      ...(dto.name !== undefined ? { name: dto.name } : {}),
-      ...(dto.description !== undefined ? { description: dto.description } : {}),
-      ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
-    };
-    if (Object.keys(metaChanges).length > 0) {
+    // Atomic write: metadata + permissions in one transaction
+    const updated = await this.txService.run(async (tx) => {
+      const r = hasMetaChanges
+        ? await this.rolesRepository.update(role.id, metaData, tx)
+        : role;
+      if (hasPermChanges) {
+        await this.rolePermission.updateRolePermissions(
+          role.id, userId, entityEntries as [string, Record<string, boolean>][], permEntries, callerPerms, tx,
+        );
+      }
+      return r;
+    }, { name: 'UpdateRoleWithPermissions' });
+
+    RolesValidator.assertFound(updated);
+
+    // Post-commit effects (cache, audit, changelog) run after tx
+    if (hasPermChanges) {
+      this.rolePermission.postCommitEffects(role.id, userId, permEntries);
+    }
+    if (hasMetaChanges) {
+      const metaChanges: Record<string, unknown> = {
+        ...(dto.name !== undefined ? { name: dto.name } : {}),
+        ...(dto.description !== undefined ? { description: dto.description } : {}),
+        ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+      };
       this.auditCommand.logRoleUpdated(userId, role.id, updated.code, metaChanges);
     }
 
-    this.logger.log(`Role updated: ${updated.code} by user ${userId}`);
+    this.logger.log(`Role updated: id=${role.id} code=${updated.code} by user=${userId}`);
     return RoleMapper.buildRoleDto(updated);
   }
 
@@ -112,30 +122,51 @@ export class RolesService {
     storeFk: number | null,
     isPrimary: boolean,
   ): Promise<void> {
-    const row = await this.rolesRepository.assignRole(userFk, roleFk, storeFk, assignedBy, isPrimary);
+    const row = await this.txService.run(async (tx) => {
+      if (isPrimary) {
+        await this.rolesRepository.unsetPrimaryRole(userFk, storeFk, tx);
+      }
+      return this.rolesRepository.assignRole(userFk, roleFk, storeFk, assignedBy, isPrimary, tx);
+    }, { name: 'AssignRoleToUser' });
+
     if (row) {
+      this.auditCommand.logRoleAssigned(assignedBy, userFk, roleFk, storeFk);
       this.rolePermission.recordRoleAssigned(userFk, roleFk);
     }
   }
 
-  async removeRoleFromUser(userFk: number, roleFk: number, storeFk: number | null): Promise<void> {
+  async removeRoleFromUser(userFk: number, roleFk: number, storeFk: number | null, removedBy?: number): Promise<void> {
     await this.rolesRepository.removeRole(userFk, roleFk, storeFk);
+    this.auditCommand.logRoleRemoved(removedBy ?? userFk, userFk, roleFk, storeFk);
     this.rolePermission.recordRoleRemoved(userFk, roleFk);
   }
 
-  async removeAllUserStoreRoles(userFk: number, storeFk: number): Promise<void> {
-    const activeRoles = await this.rolesRepository.getActiveRolesForStore(userFk, storeFk);
-    await this.rolesRepository.removeAllStoreRoles(userFk, storeFk);
-    const roleIds = activeRoles.map(({ roleId }) => roleId);
-    this.rolePermission.recordRolesBulkRemoved(userFk, roleIds);
+  async removeAllUserStoreRoles(userFk: number, storeFk: number, removedBy?: number): Promise<void> {
+    const roleIds = await this.rolesRepository.removeAllStoreRoles(userFk, storeFk);
+    if (roleIds.length > 0) {
+      this.auditCommand.logRolesBulkRemoved(removedBy ?? userFk, userFk, storeFk, roleIds);
+      this.rolePermission.recordRolesBulkRemoved(userFk, roleIds);
+    }
   }
 
   async deleteRole(deletedBy: number, guuid: string): Promise<void> {
     const role = await this.rolesRepository.findByGuuid(guuid);
     RolesValidator.assertFound(role);
     RolesValidator.assertRoleNotSystem(role.isSystem);
-    await this.rolePermission.recordRoleSoftDeleted(role.id);
-    await this.rolesRepository.softDelete(role.id, deletedBy);
-    this.logger.log(`Role soft-deleted: ${role.code} by user ${deletedBy}`);
+
+    // Wrap soft-delete and audit in transaction — ensures consistency if logic grows
+    // Changelog fan-out is async and outside transaction (non-blocking, fire-and-forget)
+    await this.txService.run(async (tx) => {
+      await this.rolesRepository.softDelete(role.id, deletedBy, tx);
+      this.auditCommand.logRoleDeleted(deletedBy, role.id, role.code);
+      this.logger.log(`Role soft-deleted: id=${role.id} code=${role.code} by user=${deletedBy}`);
+    });
+
+    // Non-blocking changelog fan-out; failures are logged but do not roll back the delete
+    this.rolePermission.recordRoleSoftDeleted(role.id).catch((e: unknown) => {
+      this.logger.error(
+        `Changelog fan-out failed after role delete: id=${role.id}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    });
   }
 }

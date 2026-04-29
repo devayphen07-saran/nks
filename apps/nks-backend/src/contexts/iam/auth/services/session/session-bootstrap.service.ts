@@ -1,7 +1,7 @@
 import * as crypto from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SessionsRepository } from '../../repositories/sessions.repository';
+import { SessionTokenRepository } from '../../repositories/session-token.repository';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { PermissionsService } from '../permissions/permissions.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
@@ -31,7 +31,7 @@ export class SessionBootstrapService {
   private readonly ipHmacSecret: string;
 
   constructor(
-    private readonly sessionsRepository: SessionsRepository,
+    private readonly sessionTokenRepository: SessionTokenRepository,
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly permissionsService: PermissionsService,
     private readonly authUtils: AuthUtilsService,
@@ -87,7 +87,7 @@ export class SessionBootstrapService {
       const jti = crypto.randomUUID();
       const csrfSecret = crypto.randomBytes(32).toString('hex');
 
-      const updatedSession = await this.sessionsRepository.updateByToken(session.token, {
+      const updatedSession = await this.sessionTokenRepository.updateByToken(session.token, {
         roleHash,
         activeStoreFk,
         jti,

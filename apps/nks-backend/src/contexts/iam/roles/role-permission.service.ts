@@ -2,14 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PermissionsRepository } from './repositories/role-permissions.repository';
 import { PermissionEvaluatorService } from './permission-evaluator.service';
 import { TransactionService } from '../../../core/database/transaction.service';
+import type { DbTransaction } from '../../../core/database/transaction.service';
 import { AuditCommandService } from '../../compliance/audit/audit-command.service';
 import { PermissionsChangelogService } from '../../../shared/permissions-changelog/permissions-changelog.service';
 import { RolesValidator } from './validators';
 import type { RoleEntityPermissions } from './dto/role-response.dto';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import type * as schema from '../../../core/database/schema';
-
-type Db = NodePgDatabase<typeof schema>;
 
 interface PermissionEntry {
   entityCode: string;
@@ -61,32 +58,44 @@ export class RolePermissionService {
    * @param permEntries - Normalized permission entries to upsert
    * @param callerPerms - Caller's entity permissions for ceiling validation
    */
+  /**
+   * Validate ceiling + bulk-upsert permissions.
+   *
+   * When `tx` is provided the caller owns the transaction — this method only
+   * writes to the DB and skips post-commit effects so the caller can run them
+   * after the outer tx commits.  Call `postCommitEffects()` afterwards.
+   *
+   * When `tx` is omitted this method is self-contained: it creates its own
+   * transaction and runs all post-commit effects before returning.
+   */
   async updateRolePermissions(
     roleId: number,
     userId: number,
     entityEntries: [string, Record<string, boolean>][],
     permEntries: PermissionEntry[],
     callerPerms: RoleEntityPermissions,
+    tx?: DbTransaction,
   ): Promise<void> {
-    if (permEntries.length === 0) {
-      return;
-    }
+    if (permEntries.length === 0) return;
 
-    // Validate that the caller's permissions ceiling is not exceeded
     RolesValidator.assertPermissionCeiling(entityEntries, callerPerms);
 
-    // Perform transactional bulk upsert
-    await this.txService.run(
-      async (tx) => {
-        await this.rolePermissionsRepository.bulkUpsert(roleId, permEntries, tx);
-      },
-      { name: 'UpdateRolePermissions' },
-    );
+    if (tx) {
+      await this.rolePermissionsRepository.bulkUpsert(roleId, permEntries, tx);
+    } else {
+      await this.txService.run(
+        async (innerTx) => {
+          await this.rolePermissionsRepository.bulkUpsert(roleId, permEntries, innerTx);
+        },
+        { name: 'UpdateRolePermissions' },
+      );
+      this.postCommitEffects(roleId, userId, permEntries);
+    }
+  }
 
-    // Invalidate permission cache for this role
+  /** Run cache invalidation, audit logs, and changelog after the transaction commits. */
+  postCommitEffects(roleId: number, userId: number, permEntries: PermissionEntry[]): void {
     this.permissionEvaluator.invalidateForRole(roleId);
-
-    // Audit log each permission change and record in changelog
     for (const { entityCode, ...perms } of permEntries) {
       this.auditCommand.logEntityPermissionChanged(userId, roleId, entityCode, perms);
       this.permissionsChangelog.recordChange(roleId, entityCode, 'MODIFIED', perms).catch((e: unknown) =>

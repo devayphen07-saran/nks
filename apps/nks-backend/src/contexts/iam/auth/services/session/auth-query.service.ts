@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SessionsRepository } from '../../repositories/sessions.repository';
+import { SessionRepository } from '../../repositories/session.repository';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 
 @Injectable()
@@ -7,14 +7,14 @@ export class AuthQueryService {
   private readonly logger = new Logger(AuthQueryService.name);
 
   constructor(
-    private readonly sessionsRepository: SessionsRepository,
+    private readonly sessionRepository: SessionRepository,
     private readonly authUsersRepository: AuthUsersRepository,
   ) {}
 
   async checkSessionStatus(
     token: string,
   ): Promise<{ active: boolean; revoked: boolean; wipe: boolean }> {
-    const session = await this.sessionsRepository.findByToken(token);
+    const session = await this.sessionRepository.findByToken(token);
 
     if (!session) return { active: false, revoked: true, wipe: false };
 

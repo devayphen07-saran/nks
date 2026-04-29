@@ -242,11 +242,11 @@ export class SyncService {
       requestedTables.map((table) => {
         const cursorStr = cursors[table] ?? '0:0';
         const { ts, id } = this.parseCursor(cursorStr);
-        console.log(`[SYNC] Fetching ${table}: cursor="${cursorStr}" → ts=${ts}, id=${id}`);
+        this.logger.debug(`[SYNC] Fetching ${table}: cursor="${cursorStr}" → ts=${ts}, id=${id}`);
         return TABLE_REGISTRY[table as SyncTableKey]
           .fetch(this.syncRepository, ts, id, fetchLimit)
           .then((rows) => {
-            console.log(`[SYNC] Got ${rows.length} rows for ${table}`);
+            this.logger.debug(`[SYNC] Got ${rows.length} rows for ${table}`);
             return { table: table as SyncTableKey, rows };
           });
       }),

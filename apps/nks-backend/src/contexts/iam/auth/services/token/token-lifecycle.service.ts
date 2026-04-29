@@ -7,7 +7,7 @@ import {
 } from '../../../../../common/exceptions';
 import { JWTConfigService } from '../../../../../config/jwt.config';
 import { RefreshTokenService } from '../session/refresh-token.service';
-import { SessionsRepository } from '../../repositories/sessions.repository';
+import { SessionTokenRepository } from '../../repositories/session-token.repository';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { RoleQueryService } from '../../../roles/role-query.service';
 import { PermissionsService } from '../permissions/permissions.service';
@@ -43,7 +43,7 @@ export class TokenLifecycleService {
   constructor(
     private readonly jwtConfigService: JWTConfigService,
     private readonly refreshTokenService: RefreshTokenService,
-    private readonly sessionsRepository: SessionsRepository,
+    private readonly sessionTokenRepository: SessionTokenRepository,
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly roleQuery: RoleQueryService,
     private readonly permissionsService: PermissionsService,
@@ -68,7 +68,7 @@ export class TokenLifecycleService {
 
     // Step 2: Fetch session with EXCLUSIVE LOCK — prevents concurrent rotation races
     const session =
-      await this.sessionsRepository.findByRefreshTokenHashForUpdate(
+      await this.sessionTokenRepository.findByRefreshTokenHashForUpdate(
         refreshTokenHash,
       );
     TokenLifecycleValidator.assertRefreshTokenValid(session);
@@ -143,7 +143,7 @@ export class TokenLifecycleService {
         ? session.activeStoreFk
         : null;
 
-    const rotated = await this.sessionsRepository.rotateRefreshTokenInPlace(
+    const rotated = await this.sessionTokenRepository.rotateRefreshTokenInPlace(
       session.id,
       refreshTokenHash,
       {

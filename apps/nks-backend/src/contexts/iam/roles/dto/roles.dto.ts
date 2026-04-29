@@ -33,15 +33,20 @@ export class CreateRoleDto extends createZodDto(CreateRoleSchema) {}
 // Any new permission field added here MUST also be validated in RolesService.updateRole()
 // against the caller's own permissions before being applied. Failing to do so allows
 // privilege escalation: a STORE_OWNER could grant themselves permissions they don't hold.
+// Strict shape for one entity permission entry — only the 5 known fields.
+const EntityPermissionInputSchema = z.object({
+  canView:   z.boolean().optional().default(false),
+  canCreate: z.boolean().optional().default(false),
+  canEdit:   z.boolean().optional().default(false),
+  canDelete: z.boolean().optional().default(false),
+  deny:      z.boolean().optional().default(false),
+});
+
 export const UpdateRoleSchema = CreateRoleSchema.partial().omit({ code: true }).extend({
-  entityPermissions: z.record(z.string(), z.record(z.string(), z.boolean())).optional(),
+  entityPermissions: z.record(z.string(), EntityPermissionInputSchema).optional(),
   routePermissions: z.array(z.object({
     routeGuuid: z.uuid(),
-    canView: z.boolean().optional(),
-    canCreate: z.boolean().optional(),
-    canEdit: z.boolean().optional(),
-    canDelete: z.boolean().optional(),
-    canExport: z.boolean().optional(),
+    allow: z.boolean().optional(),
   })).optional(),
 });
 export class UpdateRoleDto extends createZodDto(UpdateRoleSchema) {}

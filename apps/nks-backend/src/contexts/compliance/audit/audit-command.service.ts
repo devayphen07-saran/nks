@@ -142,4 +142,20 @@ export class AuditCommandService {
   logEntityStatusRemoved(actorId: number, entityCode: string, statusCode: string): void {
     this.log({ action: 'DELETE', userId: actorId, description: `Status '${statusCode}' removed from entity '${entityCode}'`, metadata: { entityCode, statusCode }, severity: 'info', resourceType: 'entity_status', resourceId: `${entityCode}:${statusCode}` });
   }
+
+  logRoleAssigned(actorId: number, userFk: number, roleFk: number, storeFk: number | null): void {
+    this.log({ action: 'CREATE', userId: actorId, description: `Role ${roleFk} assigned to user ${userFk}`, metadata: { userFk, roleFk, storeFk }, severity: 'info', resourceType: 'user_role_mapping', resourceId: roleFk });
+  }
+
+  logRoleRemoved(actorId: number, userFk: number, roleFk: number, storeFk: number | null): void {
+    this.log({ action: 'DELETE', userId: actorId, description: `Role ${roleFk} removed from user ${userFk}`, metadata: { userFk, roleFk, storeFk }, severity: 'info', resourceType: 'user_role_mapping', resourceId: roleFk });
+  }
+
+  logRolesBulkRemoved(actorId: number, userFk: number, storeFk: number, roleIds: number[]): void {
+    this.log({ action: 'DELETE', userId: actorId, description: `All roles removed from user ${userFk} in store ${storeFk}`, metadata: { userFk, storeFk, roleIds }, severity: 'info', resourceType: 'user_role_mapping', resourceId: userFk });
+  }
+
+  logRoleDeleted(actorId: number, roleId: number, roleCode: string): void {
+    this.log({ action: 'DELETE', userId: actorId, description: `Role '${roleCode}' deleted`, metadata: { roleId, roleCode }, severity: 'warning', resourceType: 'role', resourceId: roleId });
+  }
 }

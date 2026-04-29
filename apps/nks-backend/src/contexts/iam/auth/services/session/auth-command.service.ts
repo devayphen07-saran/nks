@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SessionAuthValidator } from '../../validators';
-import { SessionsRepository } from '../../repositories/sessions.repository';
+import { SessionRepository } from '../../repositories/session.repository';
+import { SessionContextRepository } from '../../repositories/session-context.repository';
 import { SessionCommandService } from './session-command.service';
 import { AuditCommandService } from '../../../../compliance/audit/audit-command.service';
 import type { DeviceInfo } from '../../interfaces/device-info.interface';
@@ -10,7 +11,8 @@ export class AuthCommandService {
   private readonly logger = new Logger(AuthCommandService.name);
 
   constructor(
-    private readonly sessionsRepository: SessionsRepository,
+    private readonly sessionRepository: SessionRepository,
+    private readonly sessionContextRepository: SessionContextRepository,
     private readonly sessionCommand: SessionCommandService,
     private readonly auditCommand: AuditCommandService,
   ) {}
@@ -30,16 +32,16 @@ export class AuthCommandService {
     userId: number,
     deviceInfo?: DeviceInfo,
   ): Promise<{ token: string; expiresAt: Date }> {
-    const session = await this.sessionsRepository.findByToken(oldToken);
+    const session = await this.sessionRepository.findByToken(oldToken);
     SessionAuthValidator.assertSessionOwnership(session, userId);
 
     const newSession = await this.sessionCommand.createSessionForUser(userId, deviceInfo);
-    await this.sessionsRepository.delete(session.id);
+    await this.sessionRepository.delete(session.id);
     return newSession;
   }
 
   async cleanupExpiredSessions(): Promise<{ deletedCount: number }> {
-    const deletedCount = await this.sessionsRepository.deleteExpired();
+    const deletedCount = await this.sessionContextRepository.deleteExpired();
     return { deletedCount };
   }
 }
