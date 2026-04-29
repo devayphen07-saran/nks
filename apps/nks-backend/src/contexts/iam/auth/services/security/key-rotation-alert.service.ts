@@ -141,49 +141,6 @@ export class KeyRotationAlertService {
    *   })
    *   testAlerts() { return this.keyRotationAlertService.testAlertConfiguration(); }
    */
-  async testAlertConfiguration(): Promise<{
-    slackConfigured: boolean;
-    slackSendSucceeded: boolean;
-    alertsEnabled: boolean;
-    error?: string;
-  }> {
-    this.logger.log({
-      event: 'KEY_ROTATION_ALERT_TEST',
-      timestamp: new Date().toISOString(),
-    });
-
-    let slackSendSucceeded = false;
-    let testError: string | undefined;
-
-    if (this.slackWebhookUrl) {
-      try {
-        slackSendSucceeded = await this.sendSlackAlert({
-          type: 'success',
-          summary: 'Test: Key rotation alert configuration check',
-          details: {
-            oldKid: 'test-old-kid',
-            newKid: 'test-new-kid',
-            reason: 'scheduled',
-            durationMs: 0,
-            rotatedAt: new Date(),
-          },
-        });
-        if (!slackSendSucceeded) {
-          testError = 'Slack webhook returned a non-OK response';
-        }
-      } catch (error) {
-        testError = error instanceof Error ? error.message : String(error);
-      }
-    }
-
-    return {
-      slackConfigured: !!this.slackWebhookUrl,
-      slackSendSucceeded,
-      alertsEnabled: this.alertsEnabled,
-      ...(testError ? { error: testError } : {}),
-    };
-  }
-
   // ── Private helpers ─────────────────────────────────────────────────────────
 
   /**

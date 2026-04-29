@@ -15,6 +15,33 @@ import type { z } from 'zod';
 type OfflineSessionPayload = NonNullable<z.infer<typeof OfflineSessionContextSchema>>;
 
 /**
+ * SyncValidationService — Offline-first sync validation and authorization.
+ *
+ * Authorization Contract (Signature-Based, NOT Permission-Based):
+ *   - Operations validated via cryptographic HMAC signatures (not permission ceiling)
+ *   - Mobile client computes: SHA256(signingKey:op:table:canonicalJson(opData))
+ *   - Server replicates computation and verifies via timing-safe comparison
+ *   - Device revocation tracked separately for cross-context security
+ *
+ * Key Design Decision:
+ *   - Signature verification proves mobile client had valid offline session at time of operation
+ *   - No permission checks here — offline ops are pre-authorized by the offline session HMAC
+ *   - Device revocation ensures compromised devices cannot replay old signatures
+ *   - Idempotency based on operation hash, not request duplication detection
+ *
+ * Business Rule Validation:
+ *   - Operation type must be known (isValidOp)
+ *   - Offline session HMAC must be valid and not expired
+ *   - Device must not be revoked (cross-context check)
+ *   - Offline JWT claims must match HMAC-verified session payload
+ *   - Graceful degradation for older clients (optional signatures/tokens)
+ *
+ * Audit Trail:
+ *   - userId parameter identifies who performed the operation (from session)
+ *   - Operation signatures and device revocations are persisted
+ */
+
+/**
  * Deterministic JSON serialisation with sorted keys.
  *
  * Ensures the same logical object produces the identical string on any JS engine

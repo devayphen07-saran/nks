@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { RevokedDevicesRepository } from '../../repositories/revoked-devices.repository';
 
 /**
@@ -14,8 +14,6 @@ import { RevokedDevicesRepository } from '../../repositories/revoked-devices.rep
  */
 @Injectable()
 export class DeviceRevocationQueryService {
-  private readonly logger = new Logger(DeviceRevocationQueryService.name);
-
   constructor(
     private readonly revokedDevicesRepository: RevokedDevicesRepository,
   ) {}

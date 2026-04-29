@@ -5,14 +5,19 @@ import {
   errPayload,
 } from '../../../../../common/constants/error-codes.constants';
 import * as crypto from 'crypto';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { DbTransaction } from '../../../../../core/database/transaction.service';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { RoleQueryService } from '../../../roles/role-query.service';
 import { RoleMutationService } from '../../../roles/role-mutation.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
 import { UserCreationValidator } from '../../validators';
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
+import { SYSTEM_USER_ID } from '../../../../../common/constants/app-constants';
+import { SanitizerValidator } from '../../../../../common/validators/sanitizer.validator';
 import * as schema from '../../../../../core/database/schema';
+import type { NewUser } from '../../../../../core/database/schema/auth/users';
+
+type DbUser = typeof schema.users.$inferSelect;
 
 /**
  * UserCreationService
@@ -22,15 +27,21 @@ import * as schema from '../../../../../core/database/schema';
  * - OtpService: Pure OTP verification only (verify token with MSG91)
  * - UserCreationService: User find/create logic (no OTP knowledge)
  * - OtpAuthOrchestrator: Orchestrates full flow (verify OTP → find/create user → create session)
- *
- * This separation ensures:
- * - OtpService is pure verification logic (testable, reusable)
- * - UserCreationService can be reused by other flows (email signup, social auth)
- * - Each service has single responsibility
  */
 @Injectable()
 export class UserCreationService {
   private readonly logger = new Logger(UserCreationService.name);
+
+  /**
+   * Short-circuit flag: once a SUPER_ADMIN is confirmed, skip the DB check.
+   *
+   * Per-instance, intentionally. In a multi-pod deployment each pod warms up
+   * its own flag independently — that's fine because the underlying question
+   * is monotonic (once a SUPER_ADMIN exists it doesn't go away in normal
+   * operation), so every pod converges to the same `true` after one DB hit.
+   * If you ever soft-delete the SUPER_ADMIN, restart the pods.
+   */
+  private superAdminConfirmed = false;
 
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
@@ -46,103 +57,98 @@ export class UserCreationService {
    * IMPORTANT: OTP users can only be created AFTER a SUPER_ADMIN exists.
    * The first SUPER_ADMIN must be created via email/password registration.
    * OTP users always get the USER role.
-   *
-   * @param phone - Phone number (verified via OTP)
-   * @returns User object with verified phone flag set
    */
-  async findOrCreateByPhone(
-    phone: string,
-  ): Promise<typeof schema.users.$inferSelect> {
-    let user = await this.authUsersRepository.findByPhone(phone);
-
-    if (!user) {
-      // Block OTP registration if no SUPER_ADMIN exists yet.
-      // First admin must be created via email/password.
-      await this.ensureSuperAdminExists();
-
-      // Create user + USER role atomically.
-      // OTP users always get USER role (never SUPER_ADMIN).
-      user = await this.authUsersRepository.createUserWithInitialRole(
-        {
-          firstName: 'User',
-          lastName: phone.slice(-4),
-          phoneNumber: phone,
-          phoneNumberVerified: true,
-          iamUserId: crypto.randomUUID(),
-        },
-        null,
-        (tx, userId) => this.assignUserRole(tx, userId),
-      );
-
-      UserCreationValidator.assertUserCreated(user);
-
-      this.logger.log(`New user created via phone OTP: ${user.id}`);
-    }
-
-    // Mark phone as verified (after MSG91 confirmation)
-    if (!user.phoneNumberVerified) {
-      await this.authUsersRepository.verifyPhone(user.id);
-      user = { ...user, phoneNumberVerified: true };
-      this.logger.log(
-        `Phone number verified for user ${user.id}: ${phone.slice(-4)}`,
-      );
-    }
-
-    return user;
-  }
-
-  /**
-   * Find or create user by email (for email signup after email OTP verification).
-   *
-   * @param email - Email (verified via OTP)
-   * @param name - User's name (optional, from signup form)
-   * @returns User object with verified email
-   */
-  async findOrCreateByEmail(
-    email: string,
-    name?: string,
-  ): Promise<typeof schema.users.$inferSelect> {
-    let user = await this.authUsersRepository.findByEmail(email);
-
-    if (!user) {
-      // Block email OTP registration if no SUPER_ADMIN exists yet.
-      await this.ensureSuperAdminExists();
-
-      // Create user + USER role atomically.
-      user = await this.authUsersRepository.createUserWithInitialRole(
-        {
-          firstName: name ?? email.split('@')[0],
-          lastName: '',
-          email,
-          emailVerified: true,
-          iamUserId: crypto.randomUUID(),
-        },
-        null,
-        (tx, userId) => this.assignUserRole(tx, userId),
-      );
-
-      UserCreationValidator.assertUserCreated(user);
-
-      this.logger.log(`New user created via email OTP: ${user.id}`);
-    }
-
-    // Mark email as verified (after email OTP confirmation)
-    if (!user.emailVerified) {
-      await this.authUsersRepository.verifyEmail(user.id);
-      user = { ...user, emailVerified: true };
-      this.logger.log(`Email verified for user ${user.id}: ${email}`);
-    }
-
-    return user;
+  async findOrCreateByPhone(phone: string): Promise<DbUser> {
+    const normalizedPhone = SanitizerValidator.sanitizePhoneNumber(phone);
+    return this.findOrCreate({
+      channel: 'phone OTP',
+      maskedIdentifier: normalizedPhone.slice(-4),
+      find: () => this.authUsersRepository.findByPhone(normalizedPhone),
+      buildPayload: () => ({
+        firstName: 'User',
+        lastName: normalizedPhone.slice(-4),
+        phoneNumber: normalizedPhone,
+        phoneNumberVerified: true,
+        iamUserId: crypto.randomUUID(),
+      }),
+      isVerified: (u) => u.phoneNumberVerified,
+      verify: (id) => this.authUsersRepository.verifyPhone(id),
+    });
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────
 
   /**
+   * Shared find-or-create flow used by both phone and email entry points.
+   */
+  private async findOrCreate(opts: {
+    channel: 'phone OTP' | 'email OTP';
+    maskedIdentifier: string;
+    find: () => Promise<DbUser | null>;
+    buildPayload: () => NewUser;
+    isVerified: (u: DbUser) => boolean;
+    verify: (id: number) => Promise<void>;
+  }): Promise<DbUser> {
+    let user = await opts.find();
+
+    if (!user) {
+      await this.ensureSuperAdminExists();
+
+      user = await this.authUsersRepository.createUserWithInitialRole(
+        opts.buildPayload(),
+        null,
+        SYSTEM_USER_ID,
+        (tx, userId) => this.assignUserRole(tx, userId),
+      );
+
+      // Race-safe: createUserWithInitialRole returns null when a concurrent
+      // request hit the unique constraint first. Re-fetch the winner's row.
+      if (!user) {
+        user = await opts.find();
+        if (!user) {
+          this.logger.error(
+            `Race resolution failed for ${opts.channel} (${opts.maskedIdentifier}) — create and re-fetch both returned null`,
+          );
+          throw new InternalServerException(
+            errPayload(ErrorCode.INTERNAL_SERVER_ERROR),
+          );
+        }
+      }
+
+      UserCreationValidator.assertUserCreated(user);
+      this.logger.log(`New user created via ${opts.channel}: ${user.id}`);
+    }
+
+    if (!opts.isVerified(user)) {
+      try {
+        await opts.verify(user.id);
+      } catch (err) {
+        this.logger.error(
+          `Verify failed for ${opts.channel} (userId=${user.id}, ${opts.maskedIdentifier}); retryable on next OTP`,
+          err instanceof Error ? err.stack : String(err),
+        );
+        throw err;
+      }
+      // Re-fetch to stay in sync with DB state (updatedAt, triggers, etc.).
+      const refreshed = await opts.find();
+      if (refreshed) user = refreshed;
+      this.logger.log(
+        `Verified ${opts.channel} for user ${user.id}: ${opts.maskedIdentifier}`,
+      );
+    }
+
+    return user;
+  }
+
+  /**
    * Guard: Reject registration if no SUPER_ADMIN exists yet.
    * The first admin must be created via email/password registration.
+   * Result is cached after the first success — once a super admin exists
+   * the answer never reverts.
    */
   private async ensureSuperAdminExists(): Promise<void> {
+    if (this.superAdminConfirmed) return;
+
     const superAdminRoleId = await this.authUtils.getCachedSystemRoleId(
       SystemRoleCodes.SUPER_ADMIN,
     );
@@ -154,15 +160,19 @@ export class UserCreationService {
         errPayload(ErrorCode.INTERNAL_SERVER_ERROR),
       );
     }
+
     const exists = await this.roleQuery.hasSuperAdmin(superAdminRoleId);
     UserCreationValidator.assertAdminExists(exists);
+
+    this.superAdminConfirmed = true;
   }
 
   /**
-   * Assign USER role within a transaction. OTP users never get SUPER_ADMIN.
+   * Assign the default USER role within the creation transaction.
+   * OTP-registered users never receive SUPER_ADMIN.
    */
   private async assignUserRole(
-    tx: NodePgDatabase<typeof schema>,
+    tx: DbTransaction,
     userId: number,
   ): Promise<void> {
     const assigned = await this.roleMutation.assignRoleWithinTransaction(
@@ -170,9 +180,11 @@ export class UserCreationService {
       userId,
       SystemRoleCodes.USER,
     );
-    if (!assigned)
+    if (!assigned) {
       throw new InternalServerException(
         errPayload(ErrorCode.INTERNAL_SERVER_ERROR),
       );
+    }
   }
 }
+

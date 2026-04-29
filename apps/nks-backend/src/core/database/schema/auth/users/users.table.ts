@@ -28,15 +28,11 @@ export const users = pgTable(
 
     // Cross-service identity anchor for the Ayphen platform.
     //
-    // This is the **primary external user identifier** across the Ayphen
-    // frontend (ayphen-frontend), Next (ayphen-next), and IAM libs. Those
-    // clients interpolate it directly into REST paths — e.g.
+    // This is the **primary external user identifier** used in REST paths — e.g.
     // `/v1/users/:iamUserId/companies/owner`, `/v1/users/:iamUserId/favorites`,
     // `/v1/companies/:tenantId/users/:iamUserId/deactivate`.
     //
-    // Required (NOT NULL) — ayphen treats it as non-optional in
-    // `auth-types.ts` and DTOs, so NKS must mint one for every user at
-    // creation. Generated via crypto.randomUUID() at registration and
+    // Required (NOT NULL) — minted for every user at creation via crypto.randomUUID()
     // never re-used or rotated.
     //
     // Included as a required claim in every RS256 access and offline JWT

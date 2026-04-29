@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { LocationRepository } from './repositories/location.repository';
 import { LocationMapper } from './location.mapper';
 import type { StateResponse, DistrictResponse, PincodeResponse } from './dto/location-response.dto';
@@ -8,8 +8,6 @@ import type { PaginatedResult } from '../../../common/utils/paginated-result';
 
 @Injectable()
 export class LocationService {
-  private readonly logger = new Logger(LocationService.name);
-
   constructor(
     private readonly locationRepository: LocationRepository,
   ) {}

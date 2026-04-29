@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { StoresRepository } from './repositories/stores.repository';
 import { StoresMapper, type StoreDto } from './mapper/stores.mapper';
 
@@ -10,8 +10,6 @@ import { StoresMapper, type StoreDto } from './mapper/stores.mapper';
  */
 @Injectable()
 export class StoreQueryService {
-  private readonly logger = new Logger(StoreQueryService.name);
-
   constructor(private readonly storesRepository: StoresRepository) {}
 
   async getMyStores(userId: number): Promise<{ myStores: StoreDto[]; invitedStores: StoreDto[] }> {

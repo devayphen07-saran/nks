@@ -1,13 +1,30 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { UserPreferences } from '../../../core/database/schema/user-preferences';
 import { UserPreferencesValidator } from './validators';
 import { AuthorizationValidator } from '../../../common/validators/authorization.validator';
 import { UserPreferencesRepository } from './repositories/user-preferences.repository';
 
+/**
+ * UserPreferencesService
+ *
+ * Manages user preference lifecycle (create, read, update, delete).
+ *
+ * Authorization Contract:
+ *   - getOrCreate(userId, createdBy): createdBy must equal userId (can only create own preferences)
+ *   - update(userId, data, modifiedBy): modifiedBy must equal userId (can only modify own preferences)
+ *   - delete(userId, deletedBy): deletedBy must equal userId (can only delete own preferences)
+ *
+ * Business Rule Validation:
+ *   - Users can ONLY modify their own preferences (validateOwnResource)
+ *   - No permission checks needed — user-scoped, not permission-based access
+ *   - Prevents users from modifying other users' preferences
+ *
+ * Audit Trail:
+ *   - All operations tracked via createdBy/modifiedBy/deletedBy
+ *   - userId parameter identifies which user's preferences are being modified
+ */
 @Injectable()
 export class UserPreferencesService {
-  private readonly logger = new Logger(UserPreferencesService.name);
-
   constructor(
     private readonly userPreferencesRepository: UserPreferencesRepository,
   ) {}
@@ -20,8 +37,7 @@ export class UserPreferencesService {
       userFk: userId,
       theme: 'light',
       notificationsEnabled: true,
-      createdBy,
-    });
+    }, createdBy);
   }
 
   async get(userId: number): Promise<UserPreferences | null> {
@@ -35,10 +51,7 @@ export class UserPreferencesService {
   ) {
     AuthorizationValidator.validateOwnResource(userId, modifiedBy);
 
-    return this.userPreferencesRepository.update(userId, {
-      ...data,
-      modifiedBy,
-    });
+    return this.userPreferencesRepository.update(userId, data, modifiedBy);
   }
 
   async setTheme(userId: number, theme: string, modifiedBy: number) {

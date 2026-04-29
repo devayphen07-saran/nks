@@ -344,10 +344,10 @@ export class LookupsRepository extends BaseRepository {
   }
 
   /** Insert a new global lookup value under a type */
-  async createLookupValue(typeId: number, dto: CreateLookupValueDto): Promise<typeof lookup.$inferSelect> {
-    const [row] = await this.db
-      .insert(lookup)
-      .values({
+  async createLookupValue(typeId: number, dto: CreateLookupValueDto, createdBy: number): Promise<typeof lookup.$inferSelect> {
+    return this.insertOneAudited(
+      lookup,
+      {
         lookupTypeFk: typeId,
         code: dto.code,
         label: dto.label,
@@ -355,34 +355,33 @@ export class LookupsRepository extends BaseRepository {
         sortOrder: dto.sortOrder ?? null,
         isActive: true,
         isSystem: false,
-      })
-      .returning();
-    return row;
+      },
+      createdBy,
+    );
   }
 
   /** Update label / description / sortOrder on a lookup value (code is immutable after creation) */
-  async updateLookupValue(id: number, dto: UpdateLookupValueDto): Promise<typeof lookup.$inferSelect | null> {
+  async updateLookupValue(id: number, dto: UpdateLookupValueDto, modifiedBy: number): Promise<typeof lookup.$inferSelect | null> {
     const set: Partial<typeof lookup.$inferInsert> = {};
     if (dto.label !== undefined) set.label = dto.label;
     if (dto.description !== undefined) set.description = dto.description ?? null;
     if (dto.sortOrder !== undefined) set.sortOrder = dto.sortOrder ?? null;
 
-    const [row] = await this.db
-      .update(lookup)
-      .set(set)
-      .where(and(eq(lookup.id, id), isNull(lookup.deletedAt)))
-      .returning();
-    return row ?? null;
+    return this.updateOneAudited(
+      lookup,
+      set,
+      and(eq(lookup.id, id), isNull(lookup.deletedAt))!,
+      modifiedBy,
+    );
   }
 
   /** Soft-delete a lookup value */
-  async deleteLookupValue(id: number): Promise<typeof lookup.$inferSelect | null> {
-    const [row] = await this.db
-      .update(lookup)
-      .set({ deletedAt: new Date(), isActive: false })
-      .where(and(eq(lookup.id, id), isNull(lookup.deletedAt)))
-      .returning();
-    return row ?? null;
+  async deleteLookupValue(id: number, deletedBy: number): Promise<typeof lookup.$inferSelect | null> {
+    return this.softDeleteAudited(
+      lookup,
+      and(eq(lookup.id, id), isNull(lookup.deletedAt))!,
+      deletedBy,
+    );
   }
 
   /** Lightweight existence check — true if an active lookup with this guuid exists under typeCode. */
@@ -550,7 +549,7 @@ export class LookupsRepository extends BaseRepository {
           guuid: t.guuid,
           code: t.volumeCode,
           label: t.volumeName,
-          description: t.description,
+          description: sql<string | null>`NULL`,
           isActive: t.isActive,
           isHidden: t.isHidden,
           isSystem: t.isSystem,

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { SessionContextRepository } from '../../repositories/session-context.repository';
 import { SessionTokenRepository } from '../../repositories/session-token.repository';
 import { SessionRevocationRepository } from '../../repositories/session-revocation.repository';
@@ -18,8 +18,6 @@ import { AuthUsersRepository } from '../../repositories/auth-users.repository';
  */
 @Injectable()
 export class AuthContextService {
-  private readonly logger = new Logger(AuthContextService.name);
-
   constructor(
     private readonly sessionContextRepository: SessionContextRepository,
     private readonly sessionTokenRepository: SessionTokenRepository,

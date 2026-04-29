@@ -14,9 +14,8 @@ export interface JWTPayload {
   sid: string;
   jti: string;
   /**
-   * Cross-service user identifier consumed by the ayphen frontend, ayphen-next
-   * and ayphen-iam libs. Treated as the primary external user ID — required,
-   * never null, embedded as a URL path parameter in those clients.
+   * Cross-service user identifier. Treated as the primary external user ID — required,
+   * never null, embedded as a URL path parameter in clients.
    */
   iamUserId: string;
   firstName?: string;

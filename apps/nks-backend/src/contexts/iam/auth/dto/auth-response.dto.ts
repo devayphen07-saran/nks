@@ -22,9 +22,7 @@ const AuthUserSchema = z.object({
 const AuthMinimalUserSchema = z.object({
   guuid: z.string(),
   /**
-   * Required cross-service user identifier. Consumed by ayphen-frontend,
-   * ayphen-next and ayphen-iam as the primary external user ID (used as a
-   * URL path parameter in those clients).
+   * Required cross-service user identifier used as a URL path parameter.
    */
   iamUserId: z.string(),
   firstName: z.string().nullable(),
@@ -80,7 +78,6 @@ const AuthSyncMetadataSchema = z.object({
 // ─── Exported DTOs ────────────────────────────────────────────────────────
 
 export class MeResponseDto extends createZodDto(AuthUserSchema) {}
-export class RefreshTokenResponseDto extends createZodDto(AuthTokenSchema) {}
 
 /**
  * Full auth response envelope returned by the mapper.

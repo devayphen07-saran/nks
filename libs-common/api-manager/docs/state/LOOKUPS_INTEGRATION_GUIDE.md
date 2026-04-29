@@ -1,6 +1,6 @@
 # Lookups Module — Integration Guide
 
-**Location**: `/Users/saran/ayphen/projects/nks/libs-common/api-manager/src/lib/lookups`
+**Location**: `./libs-common/api-manager/src/lib/lookups`
 
 ## Module Structure
 

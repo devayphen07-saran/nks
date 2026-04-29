@@ -7,7 +7,7 @@ import { coreEntity } from '../../base.entity';
 /**
  * Role Permissions — one wide row per (role, entity).
  *
- * Boolean columns mirror ayphen's role_permission_mapping pattern:
+ * Boolean columns:
  *   allow      — master access grant for the entity
  *   can_view   — read permission
  *   can_create — create permission

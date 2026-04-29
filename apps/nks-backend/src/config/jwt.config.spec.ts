@@ -65,6 +65,8 @@ describe('JWTConfigService', () => {
         sid: 'session-1',
         jti: 'jti-1',
         iamUserId: 'user-1',
+        iss: 'nks-auth',
+        aud: 'nks-api',
         roles: ['USER'],
       };
 

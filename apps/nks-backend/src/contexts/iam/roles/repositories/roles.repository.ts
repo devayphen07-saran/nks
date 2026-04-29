@@ -16,6 +16,7 @@ import type { AnyColumn } from 'drizzle-orm/column';
 import { ilikeAny } from '../../../../core/database/query-helpers';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
+import type { DbTransaction } from '../../../../core/database/transaction.service';
 import * as schema from '../../../../core/database/schema';
 import { userRoleMapping } from '../../../../core/database/schema/auth/user-role-mapping';
 import type {
@@ -41,7 +42,7 @@ export class RolesRepository extends BaseRepository {
    * System roles have storeFk = NULL and isEditable = false.
    * Pass tx parameter to use within a transaction (useful for atomic first-user role assignment).
    */
-  async findSystemRoleId(code: string, tx?: Db): Promise<number | null> {
+  async findSystemRoleId(code: string, tx?: DbTransaction): Promise<number | null> {
     const client = tx ?? this.db;
     const [row] = await client
       .select({ id: schema.roles.id })
@@ -196,7 +197,7 @@ export class RolesRepository extends BaseRepository {
    * Unset isPrimary on all active role assignments for a user in the given store scope.
    * Call before assigning a new primary role so there is never more than one isPrimary=true.
    */
-  async unsetPrimaryRole(userFk: number, storeFk: number | null, tx?: Db): Promise<void> {
+  async unsetPrimaryRole(userFk: number, storeFk: number | null, tx?: DbTransaction): Promise<void> {
     const client = tx ?? this.db;
     await client
       .update(userRoleMapping)
@@ -225,7 +226,7 @@ export class RolesRepository extends BaseRepository {
     storeFk: number | null,
     assignedBy: number | null,
     isPrimary: boolean,
-    tx?: Db,
+    tx?: DbTransaction,
     expiresAt?: Date | null,
   ): Promise<typeof userRoleMapping.$inferSelect | null> {
     const client = tx ?? this.db;
@@ -253,7 +254,7 @@ export class RolesRepository extends BaseRepository {
     userFk: number,
     roleFk: number,
     storeFk: number | null,
-    tx?: Db,
+    tx?: DbTransaction,
   ): Promise<void> {
     const client = tx ?? this.db;
     await client
@@ -279,7 +280,7 @@ export class RolesRepository extends BaseRepository {
   async removeAllStoreRoles(
     userFk: number,
     storeFk: number,
-    tx?: Db,
+    tx?: DbTransaction,
   ): Promise<number[]> {
     const client = tx ?? this.db;
     const rows = await client
@@ -487,38 +488,35 @@ export class RolesRepository extends BaseRepository {
     return role ?? null;
   }
 
-  /** Create a new role. */
-  async create(data: typeof schema.roles.$inferInsert, tx?: Db): Promise<Role> {
-    const client = tx ?? this.db;
-    const [created] = await client
-      .insert(schema.roles)
-      .values(data)
-      .returning();
-    return created;
+  /** Create a new role with audit tracking. */
+  async create(data: typeof schema.roles.$inferInsert, createdBy: number, tx?: DbTransaction): Promise<Role> {
+    return this.insertOneAudited(schema.roles, data, createdBy, tx);
   }
 
-  /** Update mutable role fields. */
+  /** Update mutable role fields with audit tracking. */
   async update(
     id: number,
     data: Partial<typeof schema.roles.$inferInsert>,
-    tx?: Db,
+    modifiedBy: number,
+    tx?: DbTransaction,
   ): Promise<Role | null> {
-    const client = tx ?? this.db;
-    const [updated] = await client
-      .update(schema.roles)
-      .set(data)
-      .where(and(eq(schema.roles.id, id), eq(schema.roles.isActive, true)))
-      .returning();
-    return updated ?? null;
+    return this.updateOneAudited(
+      schema.roles,
+      data,
+      and(eq(schema.roles.id, id), eq(schema.roles.isActive, true))!,
+      modifiedBy,
+      tx,
+    );
   }
 
-  /** Soft-delete a role. */
-  async softDelete(id: number, deletedBy: number, tx?: Db): Promise<void> {
-    const client = tx ?? this.db;
-    await client
-      .update(schema.roles)
-      .set({ isActive: false, deletedAt: new Date(), deletedBy })
-      .where(and(eq(schema.roles.id, id), isNull(schema.roles.deletedAt)));
+  /** Soft-delete a role with audit tracking. */
+  async softDelete(id: number, deletedBy: number, tx?: DbTransaction): Promise<void> {
+    await this.softDeleteAudited(
+      schema.roles,
+      and(eq(schema.roles.id, id), isNull(schema.roles.deletedAt))!,
+      deletedBy,
+      tx,
+    );
   }
 
   /**
@@ -596,7 +594,7 @@ export class RolesRepository extends BaseRepository {
    * the partial unique index on (user_fk) WHERE is_primary=true is not violated.
    */
   async assignRoleWithinTransaction(
-    tx: Db,
+    tx: DbTransaction,
     userId: number,
     roleCode: string,
     isPrimary: boolean = true,
@@ -657,7 +655,7 @@ export class RolesRepository extends BaseRepository {
    * hashtext('super_admin_bootstrap') produces a stable, namespaced lock ID.
    */
   async resolveInitialRoleWithinTransaction(
-    tx: Db,
+    tx: DbTransaction,
     superAdminRoleId: number,
   ): Promise<'SUPER_ADMIN' | 'USER'> {
     await tx.execute(

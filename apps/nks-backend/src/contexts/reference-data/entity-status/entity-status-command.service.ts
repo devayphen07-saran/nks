@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { EntityStatusRepository } from './repositories/entity-status.repository';
 import { StatusQueryService } from '../status/status-query.service';
 import { AuditCommandService } from '../../compliance/audit/audit-command.service';
@@ -6,9 +6,29 @@ import { EntityStatusMapper } from './mapper/entity-status.mapper';
 import { EntityCodeValidator, EntityStatusValidator } from './validators';
 import type { AssignStatusDto, EntityStatusResponse } from './dto/entity-status.dto';
 
+/**
+ * EntityStatusCommandService
+ *
+ * Manages entity status lifecycle (assign, remove).
+ * Public endpoint — no authorization checks required.
+ *
+ * Authorization Contract:
+ *   - No permission checks needed (marked with @Public() at controller level)
+ *   - userId parameter identifies who performed the audit action only
+ *   - Anyone can assign/remove entity status mappings
+ *
+ * Business Rule Validation:
+ *   - Entity code is validated and normalized
+ *   - Status must exist and be active
+ *   - Entity-status mapping cannot already exist on assignment (idempotency)
+ *   - Assignment must exist before removal
+ *
+ * Audit Trail:
+ *   - All operations tracked via AuditCommandService
+ *   - userId parameter identifies who performed the operation
+ */
 @Injectable()
 export class EntityStatusCommandService {
-  private readonly logger = new Logger(EntityStatusCommandService.name);
 
   constructor(
     private readonly repository:   EntityStatusRepository,

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { AuditRepository } from './repositories/audit.repository';
 import { AuditMapper } from './mapper/audit.mapper';
 import { NotFoundException } from '../../../common/exceptions';
@@ -9,8 +9,6 @@ import type { AuditLogResponseDto } from './dto/responses';
 
 @Injectable()
 export class AuditQueryService {
-  private readonly logger = new Logger(AuditQueryService.name);
-
   constructor(private readonly auditRepository: AuditRepository) {}
 
   async listLogs(query: AuditListQuery): Promise<PaginatedResult<AuditLogResponseDto>> {

@@ -69,29 +69,20 @@ export class StatusRepository extends BaseRepository {
     return row ?? null;
   }
 
-  async create(data: NewStatus): Promise<Status> {
-    const [row] = await this.db
-      .insert(status)
-      .values(data)
-      .returning();
-    return row;
+  async create(data: NewStatus, createdBy: number): Promise<Status> {
+    return this.insertOneAudited(status, data, createdBy);
   }
 
-  async update(id: number, data: UpdateStatus): Promise<Status | null> {
-    const [row] = await this.db
-      .update(status)
-      .set(data)
-      .where(and(eq(status.id, id), isNull(status.deletedAt)))
-      .returning();
-    return row ?? null;
+  async update(id: number, data: UpdateStatus, modifiedBy: number): Promise<Status | null> {
+    return this.updateOneAudited(
+      status,
+      data,
+      and(eq(status.id, id), isNull(status.deletedAt))!,
+      modifiedBy,
+    );
   }
 
   async softDelete(id: number, deletedBy: number): Promise<Status | null> {
-    const [row] = await this.db
-      .update(status)
-      .set({ deletedAt: new Date(), deletedBy })
-      .where(eq(status.id, id))
-      .returning();
-    return row ?? null;
+    return this.softDeleteAudited(status, eq(status.id, id), deletedBy);
   }
 }

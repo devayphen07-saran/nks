@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { NotFoundException } from '../../../common/exceptions';
 import { ErrorCode, errPayload } from '../../../common/constants/error-codes.constants';
 import { AuthUsersRepository } from '../auth/repositories/auth-users.repository';
@@ -9,8 +9,6 @@ import type { UserResponseDto } from './dto';
 
 @Injectable()
 export class UsersService {
-  private readonly logger = new Logger(UsersService.name);
-
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
   ) {}
@@ -28,8 +26,7 @@ export class UsersService {
   }
 
   /**
-   * Fetch a single user by their external `iamUserId`. Mirrors ayphen's
-   * `UsersServiceImpl.getUserProfile(String iamUserId)` — controller passes
+   * Fetch a single user by their external `iamUserId`. Controller passes
    * the path variable through unchanged; service resolves to the domain DTO
    * and throws NotFound on miss or soft-delete.
    */

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { AuditRepository } from './repositories/audit.repository';
@@ -42,8 +42,6 @@ export interface AuditLogEntry {
  */
 @Injectable()
 export class AuditService {
-  private readonly logger = new Logger(AuditService.name);
-
   constructor(
     private readonly auditRepository: AuditRepository,
     private readonly eventEmitter: EventEmitter2,

@@ -1,7 +1,7 @@
 export interface AuditLogResponseDto {
   guuid: string;
   userGuuid: string | null;
-  /** External (ayphen) identifier of the actor — null for unauthenticated events. */
+  /** External identifier of the actor — null for unauthenticated events. */
   userIamUserId: string | null;
   storeGuuid: string | null;
   sessionGuuid: string | null;

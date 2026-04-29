@@ -1,6 +1,6 @@
 # Architecture vs Implementation: Detailed Comparison Analysis
 
-**Reference:** `/Users/saran/ayphen/projects/offline-first-sync-architecture.md`  
+**Reference:** `.offline-first-sync-architecture.md`  
 **Current:** NKS Mobile + Backend  
 **Date:** 2026-04-17  
 **Status:** 18% Alignment to Best Practices
@@ -389,16 +389,16 @@ Triggers:
 ### Check Commands
 ```bash
 # Check for AppState listener
-grep -r "AppState" /Users/saran/ayphen/projects/nks/apps/nks-mobile
+grep -r "AppState" ./apps/nks-mobile
 
 # Check for NetInfo listener
-grep -r "NetInfo" /Users/saran/ayphen/projects/nks/apps/nks-mobile
+grep -r "NetInfo" ./apps/nks-mobile
 
 # Check for setTimeout debounce
-grep -r "debounce\|setTimeout.*sync" /Users/saran/ayphen/projects/nks/apps/nks-mobile
+grep -r "debounce\|setTimeout.*sync" ./apps/nks-mobile
 
 # Check for background task
-grep -r "expo-background-fetch\|expo-task-manager" /Users/saran/ayphen/projects/nks/apps/nks-mobile
+grep -r "expo-background-fetch\|expo-task-manager" ./apps/nks-mobile
 ```
 
 ### Fix Priority: 🟡 HIGH (but lower than critical bugs)

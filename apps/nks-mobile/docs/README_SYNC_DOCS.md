@@ -225,7 +225,7 @@ lib/utils/write-guard.ts                  ✅ Complete
 
 ### Backend: Is the stub really there?
 ```bash
-cd /Users/saran/ayphen/projects/nks/apps/nks-backend
+cd ./apps/nks-backend
 grep -A 10 "private async processOperation" src/modules/sync/sync.service.ts
 ```
 
@@ -236,7 +236,7 @@ this.logger.warn(`No handler registered for sync table "${op.table}" — operati
 
 ### Mobile: Which handlers are missing?
 ```bash
-cd /Users/saran/ayphen/projects/nks/apps/nks-mobile
+cd ./apps/nks-mobile
 grep -c "^  [a-z_]*: {" lib/sync/sync-table-handlers.ts
 ```
 
@@ -244,7 +244,7 @@ Expected: 2 (state and district only)
 
 ### Check the bug:
 ```bash
-cd /Users/saran/ayphen/projects/nks/apps/nks-mobile
+cd ./apps/nks-mobile
 grep -A 5 "roles:" store/persist-login.ts | head -10
 ```
 

@@ -527,4 +527,4 @@ NKS has **two distinct permission systems** that solve different problems. They 
 
 ### Security invariant
 
-A user who bypasses the UI and types an API URL directly (Postman, `curl`, direct `fetch`) hits `RBACGuard`. The `role_route_mapping` row is irrelevant to that code path — it only ever drives sidebar rendering. Therefore *lack* of a server-side route guard is **not** a vulnerability in NKS (unlike ayphen's Java backend, which has no API-layer guard at all).
+A user who bypasses the UI and types an API URL directly (Postman, `curl`, direct `fetch`) hits `RBACGuard`. The `role_route_mapping` row is irrelevant to that code path — it only ever drives sidebar rendering. NKS has API-layer guards in place for all protected endpoints.

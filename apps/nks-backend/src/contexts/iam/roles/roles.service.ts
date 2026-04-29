@@ -9,6 +9,43 @@ import { AuditCommandService } from '../../compliance/audit/audit-command.servic
 import type { CreateRoleDto, UpdateRoleDto } from './dto';
 import type { RoleResponseDto, RoleEntityPermissions } from './dto/role-response.dto';
 
+/**
+ * RolesService
+ *
+ * Manages role lifecycle (create, update, delete, assign to users).
+ *
+ * Authorization Contract:
+ *   - createRole(): Requires ROLE.CREATE entity permission. Validates target storeGuuid matches activeStoreId.
+ *   - updateRoleByGuuid(): Requires ROLE.EDIT entity permission. Validates role.storeFk matches activeStoreId.
+ *   - deleteRole(): Requires ROLE.DELETE entity permission. Validates role.storeFk matches activeStoreId.
+ *   - assignRoleToUser() / removeRoleFromUser() / removeAllUserStoreRoles(): Internal only.
+ *     If ever exposed via a controller endpoint, the controller MUST pass activeStoreId
+ *     and the method MUST be updated to call RolesValidator.assertRoleStoreAccess().
+ *
+ * Cross-Tenant Defense (Pattern 6):
+ *   Every public mutation method receives activeStoreId from the controller and validates
+ *   that the resource being modified belongs to that store. This prevents a user with
+ *   ROLE.* permission in Store A from modifying roles in Store B by passing a known guuid.
+ *   Permission decorators alone are NOT sufficient — they only check the action, not the
+ *   resource scope.
+ *
+ * Business Rule Validation:
+ *   - Store membership is enforced: roles are scoped to a single store (RolesValidator.assertStoreMatch)
+ *   - System roles (isSystem=true) cannot be modified or deleted
+ *   - Role codes cannot use reserved/system role codes
+ *   - Permission ceiling check via RolePermissionService.updateRolePermissions()
+ *   - Prevents privilege escalation: callers cannot grant permissions they don't have
+ *
+ * Audit Trail:
+ *   - All operations tracked via AuditCommandService
+ *   - userId/assignedBy/removedBy/deletedBy parameters identify operation performer
+ *   - RolePermissionService handles permission-specific audit logging
+ *
+ * Transactionality:
+ *   - updateRoleByGuuid() uses atomic transaction for metadata + permission changes
+ *   - deleteRole() soft-deletes in transaction, with async changelog fan-out
+ *   - assignRoleToUser() wraps DB operations in transaction for consistency
+ */
 @Injectable()
 export class RolesService {
   private readonly logger = new Logger(RolesService.name);
@@ -36,7 +73,7 @@ export class RolesService {
       sortOrder: dto.sortOrder ?? null,
       isSystem: false,
       storeFk,
-    });
+    }, userId);
 
     this.auditCommand.logRoleCreated(userId, role.id, role.code, storeFk);
     this.logger.log(`Role created: id=${role.id} code=${role.code} by user=${userId}`);
@@ -86,7 +123,7 @@ export class RolesService {
     // Atomic write: metadata + permissions in one transaction
     const updated = await this.txService.run(async (tx) => {
       const r = hasMetaChanges
-        ? await this.rolesRepository.update(role.id, metaData, tx)
+        ? await this.rolesRepository.update(role.id, metaData, userId, tx)
         : role;
       if (hasPermChanges) {
         await this.rolePermission.updateRolePermissions(
@@ -149,10 +186,11 @@ export class RolesService {
     }
   }
 
-  async deleteRole(deletedBy: number, guuid: string): Promise<void> {
+  async deleteRole(deletedBy: number, guuid: string, activeStoreId: number | null): Promise<void> {
     const role = await this.rolesRepository.findByGuuid(guuid);
     RolesValidator.assertFound(role);
     RolesValidator.assertRoleNotSystem(role.isSystem);
+    RolesValidator.assertRoleStoreAccess(role.storeFk, activeStoreId);
 
     // Wrap soft-delete and audit in transaction — ensures consistency if logic grows
     // Changelog fan-out is async and outside transaction (non-blocking, fire-and-forget)

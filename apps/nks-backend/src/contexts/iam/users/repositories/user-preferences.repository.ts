@@ -30,13 +30,8 @@ export class UserPreferencesRepository extends BaseRepository {
     return prefs ?? null;
   }
 
-  async create(data: NewUserPreferences): Promise<UserPreferences | null> {
-    const [prefs] = await this.db
-      .insert(schema.userPreferences)
-      .values(data)
-      .returning();
-
-    return prefs ?? null;
+  async create(data: NewUserPreferences, createdBy: number): Promise<UserPreferences | null> {
+    return this.insertOneAudited(schema.userPreferences, data, createdBy);
   }
 
   async update(
@@ -44,21 +39,17 @@ export class UserPreferencesRepository extends BaseRepository {
     data: Partial<
       Omit<UserPreferences, 'id' | 'userFk' | 'createdAt' | 'createdBy'>
     >,
+    modifiedBy: number,
   ): Promise<UserPreferences | null> {
-    const [prefs] = await this.db
-      .update(schema.userPreferences)
-      .set({
-        ...data,
-      })
-      .where(
-        and(
-          eq(schema.userPreferences.userFk, userId),
-          isNull(schema.userPreferences.deletedAt),
-        ),
-      )
-      .returning();
-
-    return prefs ?? null;
+    return this.updateOneAudited(
+      schema.userPreferences,
+      data,
+      and(
+        eq(schema.userPreferences.userFk, userId),
+        isNull(schema.userPreferences.deletedAt),
+      )!,
+      modifiedBy,
+    );
   }
 
   async softDelete(userId: number, deletedBy: number): Promise<void> {

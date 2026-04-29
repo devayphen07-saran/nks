@@ -28,9 +28,8 @@ export interface SessionUser {
   userId: number;
   guuid: string;
   /**
-   * Cross-service external user identifier (consumed by ayphen-frontend,
-   * ayphen-next, and ayphen-iam as a URL path parameter). Required —
-   * minted at user creation, never null.
+   * Cross-service external user identifier used as a URL path parameter.
+   * Required — minted at user creation, never null.
    */
   iamUserId: string;
 

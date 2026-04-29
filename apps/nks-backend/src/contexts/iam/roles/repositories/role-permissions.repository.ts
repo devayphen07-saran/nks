@@ -105,11 +105,16 @@ export class PermissionsRepository extends BaseRepository implements OnModuleIni
   /**
    * Bulk upsert permissions for a role — one row per entity.
    * Pass `tx` to run inside a caller-managed transaction.
+   * @param roleId - The role being updated
+   * @param entries - Permission entries to upsert
+   * @param modifiedBy - User ID of who is modifying these permissions (for audit trail)
+   * @param tx - Optional transaction context
    * @returns number of rows upserted (skips unknown entity codes)
    */
   async bulkUpsert(
     roleId: number,
     entries: BulkUpsertEntry[],
+    modifiedBy: number,
     tx?: DbTransaction,
   ): Promise<number> {
     if (entries.length === 0) return 0;
@@ -155,7 +160,6 @@ export class PermissionsRepository extends BaseRepository implements OnModuleIni
           deny:      sql`excluded.deny`,
           isActive:  true,
           deletedAt: null,
-          updatedAt: new Date(),
         },
       });
 

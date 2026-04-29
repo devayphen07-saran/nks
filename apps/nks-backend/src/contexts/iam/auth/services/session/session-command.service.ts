@@ -18,6 +18,31 @@ export interface SessionCreateInput extends DeviceInfo {
   loginMethod?: string;
 }
 
+/**
+ * SessionCommandService
+ *
+ * Manages user session lifecycle (create, invalidate, terminate, revoke tokens).
+ * Called during and after authentication flows.
+ *
+ * Authorization Contract:
+ *   - No explicit permission checks needed — sessions are session-user scoped
+ *   - createSession(): Called by AuthFlowOrchestratorService after user authentication
+ *   - invalidateSession()/invalidateSessionByToken(): Internal logout operations
+ *   - terminateSession(): Requires userId ownership — user can only terminate own sessions
+ *   - terminateAllSessions(): User terminates all their own sessions (no permission check needed)
+ *
+ * Business Rule Validation:
+ *   - Max sessions per user enforced (AUTH_CONSTANTS.SESSION.MAX_PER_USER)
+ *   - Device type and login method validated before session creation
+ *   - terminateSession checks session belongs to the terminating user
+ *   - Device revocation tracked when session has device binding
+ *
+ * Audit Trail:
+ *   - userId parameter identifies session owner
+ *   - Session termination reason tracked (LOGOUT, TERMINATED)
+ *   - Device revocation history maintained for security
+ *   - JTI blocklist captures all revoked token identifiers
+ */
 @Injectable()
 export class SessionCommandService {
   private readonly logger = new Logger(SessionCommandService.name);

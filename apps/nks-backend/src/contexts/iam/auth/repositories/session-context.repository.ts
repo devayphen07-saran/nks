@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { eq, and, isNotNull, gt, lt, or, sql, inArray, asc, desc, notInArray } from 'drizzle-orm';
+import { eq, and, isNotNull, isNull, gt, lt, or, sql, inArray, asc, desc, notInArray } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';

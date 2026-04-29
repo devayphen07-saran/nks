@@ -18,13 +18,30 @@ interface PermissionEntry {
 }
 
 /**
- * RolePermissionService — narrow concern for role permission management.
+ * RolePermissionService — Role permission management with ceiling enforcement.
  *
  * Handles:
- * - Permission assignment and updates for roles
+ * - Permission assignment and updates for roles (with permission ceiling check)
  * - Permission changelog recording
  * - Transactional permission updates with audit logging
  * - Permission cache invalidation
+ *
+ * Authorization Contract:
+ *   - updateRolePermissions() enforces permission ceiling:
+ *     * Caller cannot grant permissions they don't have (ceiling check)
+ *     * Validates against callerPerms parameter (passed from controller)
+ *     * Prevents privilege escalation via role manipulation
+ *
+ * Critical Security Property:
+ *   - Permission ceiling check (RolesValidator.assertPermissionCeiling) MUST run
+ *     before any repository changes are persisted
+ *   - If callerPerms is not provided/validated at controller level, privilege
+ *     escalation is possible — ALWAYS pass validated callerPerms from RBACGuard context
+ *
+ * Audit Trail:
+ *   - All permission changes tracked via AuditCommandService
+ *   - userId parameter identifies who made the permission change
+ *   - Changelog records entity permission modifications for compliance
  *
  * Separated from RolesService to reduce coupling and improve testability.
  * Dependencies: rolePermissionsRepository, permissionEvaluator, txService,
@@ -81,11 +98,11 @@ export class RolePermissionService {
     RolesValidator.assertPermissionCeiling(entityEntries, callerPerms);
 
     if (tx) {
-      await this.rolePermissionsRepository.bulkUpsert(roleId, permEntries, tx);
+      await this.rolePermissionsRepository.bulkUpsert(roleId, permEntries, userId, tx);
     } else {
       await this.txService.run(
         async (innerTx) => {
-          await this.rolePermissionsRepository.bulkUpsert(roleId, permEntries, innerTx);
+          await this.rolePermissionsRepository.bulkUpsert(roleId, permEntries, userId, innerTx);
         },
         { name: 'UpdateRolePermissions' },
       );

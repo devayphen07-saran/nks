@@ -16,7 +16,7 @@ import { SessionBootstrapService } from '../services/session/session-bootstrap.s
 import { SessionCleanupService } from '../services/session/session-cleanup.service';
 import { AuthContextService } from '../services/session/auth-context.service';
 import { DeviceRevocationQueryService } from '../services/session/device-revocation-query.service';
-import { SessionRotationPolicyService } from '../services/session/session-rotation-policy.service';
+import { SessionRotationPolicy } from '../services/session/session-rotation-policy.service';
 
 // Listeners
 import { SessionRevocationListener } from '../listeners/session-revocation.listener';
@@ -43,7 +43,7 @@ import { SessionRevocationListener } from '../listeners/session-revocation.liste
     CsrfService,
 
     // Services
-    SessionRotationPolicyService,
+    SessionRotationPolicy,
     SessionCommandService,
     SessionQueryService,
     SessionBootstrapService,

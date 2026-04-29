@@ -14,6 +14,9 @@ type Db = NodePgDatabase<typeof schema>;
  * SessionRevocationRepository - Session revocation and JTI blocklist management
  * Handles: revoke operations, JTI blocklisting, rotation status
  * Does NOT handle: CRUD, token lifecycle, or cleanup
+ *
+ * Note: Audit logging is handled at the service layer (SessionCommandService)
+ * via AuditCommandService, not here in the repository.
  */
 @Injectable()
 export class SessionRevocationRepository extends BaseRepository {

@@ -4,7 +4,7 @@ import { baseEntity, auditFields } from '../../base.entity';
 import { users } from '../../auth/users';
 
 /**
- * lookup_type — registry of all lookup categories (ayphen pattern).
+ * lookup_type — registry of all lookup categories.
  *
  * has_table = false → values live in the generic `lookup` table (standard code/label/description)
  * has_table = true  → values live in a dedicated table with domain-specific columns

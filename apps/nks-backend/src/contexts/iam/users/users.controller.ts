@@ -45,9 +45,7 @@ export class UsersController {
   }
 
   /**
-   * Mirrors ayphen's `GET /users/{iamUserId}` — the iamUserId URL segment
-   * is the external identifier consumed across the ayphen ecosystem.
-   * Platform admin read, gated by USER.view entity permission.
+   * Get user by external identifier. Platform admin read, gated by USER.view entity permission.
    */
   @Get(':iamUserId')
   @RequireEntityPermission({
@@ -58,9 +56,9 @@ export class UsersController {
   @ApiOperation({
     summary: 'Get a single user by iamUserId',
     description:
-      'Looks up a user by their external identifier (ayphen `iamUserId`). Soft-deleted users return 404.',
+      'Looks up a user by their external identifier. Soft-deleted users return 404.',
   })
-  @ApiParam({ name: 'iamUserId', description: 'External user identifier (ayphen iamUserId)' })
+  @ApiParam({ name: 'iamUserId', description: 'External user identifier' })
   async getUserByIamUserId(
     @Param('iamUserId') iamUserId: string,
   ): Promise<UserResponseDto> {

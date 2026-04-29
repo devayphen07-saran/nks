@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { eq, and, isNotNull, gt, or, lt } from 'drizzle-orm';
+import { eq, and, isNotNull, isNull, gt, or, lt } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
@@ -149,7 +149,7 @@ export class SessionTokenRepository extends BaseRepository {
         and(
           eq(schema.userSession.token, oldToken),
           or(
-            schema.userSession.lastRotatedAt === null,
+            isNull(schema.userSession.lastRotatedAt),
             lt(schema.userSession.lastRotatedAt, rotationThreshold),
           ),
         ),

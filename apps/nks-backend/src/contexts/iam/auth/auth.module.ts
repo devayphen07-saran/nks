@@ -124,13 +124,11 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
   exports: [
     // Only export what external modules explicitly inject.
     JWTConfigService,
+    // SessionModule exports these for external consumers.
+    SessionModule,
     // GuardsModule (common/guards) injects AuthGuard's dependencies.
-    AuthContextService,
     UserContextLoaderService,
     AuthPolicyService,
-    // SyncModule injects this instead of RevokedDevicesRepository directly,
-    // so the repository layer stays inside iam/auth.
-    DeviceRevocationQueryService,
     // UsersModule injects this for admin user management queries.
     AuthUsersRepository,
   ],

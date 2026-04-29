@@ -1,100 +1,153 @@
+import { Logger } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { SQL } from 'drizzle-orm';
+import type { PgTable } from 'drizzle-orm/pg-core';
 import { InjectDb } from './inject-db.decorator';
 import * as schema from './schema';
 import type { DbTransaction } from './transaction.service';
+import {
+  BadRequestException,
+  InternalServerException,
+} from '../../common/exceptions';
+import {
+  ErrorCode,
+  errPayload,
+} from '../../common/constants/error-codes.constants';
 
 type Db = NodePgDatabase<typeof schema>;
 
-/**
- * BaseRepository
+type CreateAuditKeys = 'createdBy' | 'createdAt';
+type UpdateAuditKeys = 'modifiedBy' | 'updatedAt';
+
+/*
+ * ── Conventions ──────────────────────────────────────────────────────────
  *
- * Abstract base for all Drizzle repositories. Provides:
- *   - `protected db` — the main database connection (injected via @InjectDb())
- *   - `conn(tx?)` — returns tx if inside a transaction, otherwise db
+ * Audit columns:  These helpers require tables built with `auditFields()`
+ *   from `schema/base.entity.ts`. Tables from `betterAuthEntity` /
+ *   `junctionEntity` / `appendOnlyEntity` lack audit columns and must use
+ *   raw `db.insert(...)` / `db.update(...)`. Drizzle's generic `PgTable`
+ *   cannot enforce this at the type level — enforce via code review.
  *
- * Subclasses that only need the db connection can omit a constructor entirely;
- * NestJS will resolve the @InjectDb() dependency via the inherited constructor.
+ * Error strategy:
+ *   • insertOneAudited  → always throws on failure (caller expects a row)
+ *   • updateOneAudited  → returns null when WHERE matches nothing
+ *   • softDeleteAudited → returns null when WHERE matches nothing
+ *   Services map null to 404 or treat as no-op. This is intentional — a
+ *   zero-match update is a valid outcome, a zero-row insert is not.
  *
- * Subclasses that need additional injectables (TransactionService, etc.) must
- * declare their own constructor and call super(db).
+ * Transactions:  All write helpers accept an optional `tx`. Services that
+ *   group multiple writes MUST pass a transaction. This is not enforced
+ *   here — enforce at the service layer.
  *
- * @example
- * // Simple repo — no extra deps
- * @Injectable()
- * export class OtpRepository extends BaseRepository {
- *   async findOtp(id: number) {
- *     return this.db.select().from(schema.otpVerification).where(eq(schema.otpVerification.id, id));
- *   }
- * }
+ * Pagination:  Callers MUST apply an explicit ORDER BY to the data query.
+ *   Without stable ordering, paginated results are non-deterministic.
  *
- * @example
- * // Repo with additional dep
- * @Injectable()
- * export class SessionsRepository extends BaseRepository {
- *   constructor(
- *     @InjectDb() db: Db,
- *     private readonly txService: TransactionService,
- *   ) { super(db); }
- * }
+ * Bulk operations:  These helpers handle single rows. For multi-row
+ *   inserts/updates, use `db.insert(table).values([...])` directly.
+ *
+ * Page/pageSize bounds:  Clamp at DTO validation, not here.
+ * ─────────────────────────────────────────────────────────────────────────
  */
+
 export abstract class BaseRepository {
+  // Kept for the one critical failure case (insert returning no row).
+  // All other logging belongs in the service layer.
+  private readonly baseLogger = new Logger(BaseRepository.name);
+
   constructor(@InjectDb() protected readonly db: Db) {}
 
-  /**
-   * Returns the transaction connection if one is in progress, otherwise the
-   * main db. Use this in methods that accept an optional `tx` parameter so
-   * they can participate in an outer transaction without changing callers.
-   */
-  protected conn(tx?: DbTransaction): Db | DbTransaction {
-    return tx ?? this.db;
-  }
-
-  /** Converts 1-based page + pageSize to a SQL offset. */
   protected static toOffset(page: number, pageSize: number): number {
-    return (page - 1) * pageSize;
+    return (Math.max(page, 1) - 1) * Math.max(pageSize, 1);
   }
 
-  /**
-   * Fetches a page of rows, skipping the count query when the result is
-   * clearly the last page (`rows.length < pageSize`). In that case total is
-   * inferred as `offset + rows.length` — exact and free.
-   *
-   * `countFactory` is only invoked when the full count is needed, so the
-   * count query is never executed when browsing past the last page.
-   *
-   * **Shape contract:** This method intentionally returns the raw DB shape
-   * `{ rows, total }`. Services that expose paginated results to controllers
-   * must convert this using the `paginated()` factory from
-   * `src/common/utils/paginated-result.ts`, which produces `PaginatedResult<T>`
-   * (`{ data, meta }`). The TransformInterceptor detects PaginatedResult by
-   * checking for `data[]` + `meta.page` + `meta.total` — passing `{ rows, total }`
-   * directly would be treated as a plain object, not as a paginated response.
-   *
-   * @example
-   * // In repository:
-   * const offset = BaseRepository.toOffset(page, pageSize);
-   * return this.paginate(
-   *   this.db.select().from(t).where(where).orderBy(...).limit(pageSize).offset(offset),
-   *   () => this.db.select({ total: count() }).from(t).where(where),
-   *   page, pageSize,
-   * );
-   *
-   * // In service, before returning to controller:
-   * const { rows, total } = await this.repo.listUsers(query);
-   * return paginated({ items: rows, page: query.page, pageSize: query.pageSize, total });
-   */
+  protected async insertOneAudited<T extends PgTable>(
+    table: T,
+    values: Omit<T['$inferInsert'], CreateAuditKeys>,
+    userId: number,
+    tx?: DbTransaction,
+  ): Promise<T['$inferSelect']> {
+    const rows = (await (tx ?? this.db)
+      .insert(table)
+      .values({
+        ...values,
+        createdBy: userId,
+        createdAt: new Date(),
+      } as T['$inferInsert'])
+      .returning()) as T['$inferSelect'][];
+
+    const row = rows[0];
+    if (!row) {
+      this.baseLogger.error('insertOneAudited returned no row', { userId });
+      throw new InternalServerException(
+        errPayload(ErrorCode.INTERNAL_SERVER_ERROR),
+      );
+    }
+    return row;
+  }
+
+  protected async updateOneAudited<T extends PgTable>(
+    table: T,
+    set: Partial<Omit<T['$inferInsert'], CreateAuditKeys | UpdateAuditKeys>>,
+    where: SQL,
+    userId: number,
+    tx?: DbTransaction,
+  ): Promise<T['$inferSelect'] | null> {
+    if (!set || Object.keys(set).length === 0) {
+      throw new BadRequestException(errPayload(ErrorCode.VALIDATION_ERROR));
+    }
+
+    const rows = (await (tx ?? this.db)
+      .update(table)
+      .set({
+        ...set,
+        modifiedBy: userId,
+        updatedAt: new Date(),
+      } as Partial<T['$inferInsert']>)
+      .where(where)
+      .returning()) as T['$inferSelect'][];
+
+    return rows[0] ?? null;
+  }
+
+  protected async softDeleteAudited<T extends PgTable>(
+    table: T,
+    where: SQL,
+    userId: number,
+    tx?: DbTransaction,
+  ): Promise<T['$inferSelect'] | null> {
+    const rows = (await (tx ?? this.db)
+      .update(table)
+      .set({
+        deletedBy: userId,
+        deletedAt: new Date(),
+        isActive: false,
+      } as Partial<T['$inferInsert']>)
+      .where(where)
+      .returning()) as T['$inferSelect'][];
+
+    return rows[0] ?? null;
+  }
+
   protected async paginate<T>(
-    dataPromise:  Promise<T[]>,
+    dataPromise: Promise<T[]>,
     countFactory: () => Promise<{ total: number }[]>,
     page: number,
     pageSize: number,
   ): Promise<{ rows: T[]; total: number }> {
     const rows = await dataPromise;
-    const offset = (page - 1) * pageSize;
+    const offset = BaseRepository.toOffset(page, pageSize);
+
     if (rows.length < pageSize) {
       return { rows, total: offset + rows.length };
     }
+
     const countRows = await countFactory();
-    return { rows, total: countRows[0]?.total ?? 0 };
+    const total = countRows[0]?.total;
+    if (total === undefined) {
+      throw new InternalServerException(
+        errPayload(ErrorCode.INTERNAL_SERVER_ERROR),
+      );
+    }
+    return { rows, total };
   }
 }

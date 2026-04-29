@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InternalServerException } from '../../../../../common/exceptions';
 import {
   ErrorCode,
@@ -19,14 +19,29 @@ import { PasswordService } from '../security/password.service';
  *   - Adding email + password after phone-OTP login
  *   - Adding phone number after email login
  *
- * OTP sending is intentionally done outside the transaction so that DB changes
- * are committed before the external API call, and a failed OTP send does not
- * roll back the credential update.
+ * Authorization Contract:
+ *   - Called ONLY by authenticated users (userId must be their own session user ID)
+ *   - No permission checks needed — user can only complete their own onboarding
+ *   - Caller (auth controller) is responsible for validating userId matches session
+ *
+ * Business Rule Validation:
+ *   - User must exist in the database
+ *   - Email must not already be registered to another user
+ *   - Phone number duplication check (allows re-registering same phone to same user)
+ *   - Password is required when adding email credential
+ *   - Profile marked complete only when no new credentials are added
+ *
+ * Audit Trail:
+ *   - userId parameter identifies which user's credentials are being updated
+ *   - Changes tracked via AuthUsersRepository and AuthProviderRepository
+ *
+ * Transactionality:
+ *   - All credential updates wrapped in transaction for consistency
+ *   - OTP sends happen AFTER transaction commits (non-blocking failures)
+ *   - Failed OTP send does not roll back credential update
  */
 @Injectable()
 export class OnboardingService {
-  private readonly logger = new Logger(OnboardingService.name);
-
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly authProviderRepository: AuthProviderRepository,
@@ -57,7 +72,7 @@ export class OnboardingService {
       await this.authUsersRepository.update(userId, {
         ...(dto.firstName.trim() ? { firstName: dto.firstName.trim() } : {}),
         ...(dto.lastName.trim() ? { lastName: dto.lastName.trim() } : {}),
-      }, tx);
+      }, userId, tx);
 
       if (dto.email) {
         if (!passwordHash) throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
@@ -72,6 +87,7 @@ export class OnboardingService {
         await this.authUsersRepository.update(
           userId,
           { email: dto.email, emailVerified: false },
+          userId,
           tx,
         );
 
@@ -106,6 +122,7 @@ export class OnboardingService {
           await this.authUsersRepository.update(
             userId,
             { phoneNumber: dto.phoneNumber, phoneNumberVerified: false },
+            userId,
             tx,
           );
         }

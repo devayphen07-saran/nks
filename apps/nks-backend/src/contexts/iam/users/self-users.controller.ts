@@ -9,10 +9,8 @@ import type { UserResponseDto } from './dto';
 /**
  * Self-service user endpoints.
  *
- * Mirrors the ayphen Java backend's `GET /{iamUserId}` convention while
- * closing its known ownership-check gap: every route here is protected by
- * `OwnershipGuard`, which rejects requests where the URL `iamUserId` does
- * not match `req.user.iamUserId` (SUPER_ADMIN bypasses).
+ * Every route here is protected by `OwnershipGuard`, which rejects requests
+ * where the URL `iamUserId` does not match `req.user.iamUserId` (SUPER_ADMIN bypasses).
  *
  * For admin-scoped lookup of any user, see UsersController at /admin/users.
  */
@@ -31,7 +29,7 @@ export class SelfUsersController {
     description:
       'Returns the user identified by the URL `iamUserId`. Caller must be the same user (or SUPER_ADMIN).',
   })
-  @ApiParam({ name: 'iamUserId', description: 'External user identifier (ayphen iamUserId)' })
+  @ApiParam({ name: 'iamUserId', description: 'External user identifier' })
   async getSelf(
     @Param('iamUserId') iamUserId: string,
   ): Promise<UserResponseDto> {

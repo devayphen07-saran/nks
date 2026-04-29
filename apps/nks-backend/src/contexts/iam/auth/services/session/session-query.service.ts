@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { SessionRepository } from '../../repositories/session.repository';
 import { SessionMapper } from '../../mapper/session.mapper';
 import type { UserSession } from '../../../../../core/database/schema/auth/user-session';
@@ -17,8 +17,6 @@ export interface PublicSession {
 
 @Injectable()
 export class SessionQueryService {
-  private readonly logger = new Logger(SessionQueryService.name);
-
   constructor(private readonly sessionRepository: SessionRepository) {}
 
   async getUserSessions(userId: number): Promise<SessionInfoDto[]> {

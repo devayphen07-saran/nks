@@ -57,7 +57,7 @@ export class AuthUsersRepository extends BaseRepository {
   /**
    * Find user by email
    */
-  async findByEmail(email: string, tx?: Db): Promise<DbUser | null> {
+  async findByEmail(email: string, tx?: DbTransaction): Promise<DbUser | null> {
     const conn = tx ?? this.db;
     const [user] = await conn
       .select()
@@ -176,39 +176,38 @@ export class AuthUsersRepository extends BaseRepository {
   }
 
   /**
-   * Create a new user
+   * Create a new user with audit tracking
    * Returns the created user or null if creation failed.
    * Caller should decide how to handle null result.
    */
-  async create(data: NewUser): Promise<DbUser | null> {
-    const [user] = await this.db.insert(schema.users).values(data).returning();
-    return user ?? null;
+  async create(data: NewUser, createdBy: number): Promise<DbUser | null> {
+    return this.insertOneAudited(schema.users, data, createdBy);
   }
 
   /**
-   * Update user (partial update)
+   * Update user (partial update) with audit tracking
    * Returns the updated user or null if user not found.
    * Caller should decide how to handle null result.
    */
   async update(
     userId: number,
     data: Partial<Omit<DbUser, 'id' | 'createdAt' | 'guuid'>>,
-    tx?: Db,
+    modifiedBy: number,
+    tx?: DbTransaction,
   ): Promise<DbUser | null> {
-    const conn = tx ?? this.db;
-    const [user] = await conn
-      .update(schema.users)
-      .set(data)
-      .where(eq(schema.users.id, userId))
-      .returning();
-
-    return user ?? null;
+    return this.updateOneAudited(
+      schema.users,
+      data,
+      eq(schema.users.id, userId),
+      modifiedBy,
+      tx,
+    );
   }
 
   /**
    * Mark email as verified
    */
-  async verifyEmail(userId: number, tx?: Db): Promise<void> {
+  async verifyEmail(userId: number, tx?: DbTransaction): Promise<void> {
     const conn = tx ?? this.db;
     await conn
       .update(schema.users)
@@ -229,7 +228,7 @@ export class AuthUsersRepository extends BaseRepository {
   /**
    * Mark profile as complete
    */
-  async markProfileComplete(userId: number, tx?: Db): Promise<void> {
+  async markProfileComplete(userId: number, tx?: DbTransaction): Promise<void> {
     const conn = tx ?? this.db;
     await conn
       .update(schema.users)
@@ -331,7 +330,7 @@ export class AuthUsersRepository extends BaseRepository {
   async emailExistsForOtherUser(
     email: string,
     excludeUserId: number,
-    tx?: Db,
+    tx?: DbTransaction,
   ): Promise<boolean> {
     const conn = tx ?? this.db;
     const [row] = await conn
@@ -353,7 +352,7 @@ export class AuthUsersRepository extends BaseRepository {
    * Check whether a phone number is already linked to a specific user.
    * Used in profileComplete() to skip re-setting the same phone.
    */
-  async phoneLinkedToUser(phone: string, userId: number, tx?: Db): Promise<boolean> {
+  async phoneLinkedToUser(phone: string, userId: number, tx?: DbTransaction): Promise<boolean> {
     const conn = tx ?? this.db;
     const [row] = await conn
       .select({ id: schema.users.id })
@@ -455,6 +454,7 @@ export class AuthUsersRepository extends BaseRepository {
    *
    * @param userData - User creation data (name, email, iamUserId)
    * @param authProviderData - Auth provider data (providerId, accountId, password, isVerified)
+   * @param createdBy - User ID of who is creating this user (for audit trail)
    * @param onRoleAssignment - Callback to assign the initial role within the transaction
    *                           Receives (tx, userId) to handle role assignment with proper context
    * @returns The created user or null if creation failed
@@ -471,6 +471,7 @@ export class AuthUsersRepository extends BaseRepository {
       password: string | null;
       isVerified: boolean;
     } | null,
+    createdBy: number,
     onRoleAssignment: (
       tx: DbTransaction,
       userId: number,
@@ -478,11 +479,8 @@ export class AuthUsersRepository extends BaseRepository {
   ): Promise<DbUser | null> {
     try {
       const user = await this.txService.run(async (tx) => {
-        // Step 1: Create user
-        const [created] = await tx
-          .insert(schema.users)
-          .values(userData)
-          .returning();
+        // Step 1: Create user with audit fields
+        const created = await this.insertOneAudited(schema.users, userData, createdBy, tx);
 
         if (!created) return null;
 

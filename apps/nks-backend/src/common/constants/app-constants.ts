@@ -52,6 +52,18 @@ export const AUTH_CONSTANTS = {
 } as const;
 
 // ============================================================================
+// SYSTEM IDENTITY
+// ============================================================================
+
+/**
+ * Synthetic user ID used for the audit/createdBy fields when an action is
+ * performed by the system itself rather than a real user — e.g. self-registration
+ * (no logged-in actor exists yet) or background jobs. Use this constant instead
+ * of hardcoded `0` so the intent is searchable and consistent.
+ */
+export const SYSTEM_USER_ID = 0;
+
+// ============================================================================
 // SERVER CONFIGURATION
 // ============================================================================
 

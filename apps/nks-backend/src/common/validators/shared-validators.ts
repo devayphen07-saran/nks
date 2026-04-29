@@ -14,7 +14,7 @@ export class SharedValidators {
   static validateEmail(email: string | null | undefined): string {
     if (!email || typeof email !== 'string' || email.trim().length === 0) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'Email is required'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
@@ -24,14 +24,14 @@ export class SharedValidators {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(trimmed)) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'Invalid email format'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
     // Max length check (RFC 5321)
     if (trimmed.length > 254) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'Email too long (max 254 characters)'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
@@ -45,31 +45,31 @@ export class SharedValidators {
   static validatePassword(password: string | null | undefined): string {
     if (!password || typeof password !== 'string') {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'Password is required'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
     if (password.length < 8) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'Password must be at least 8 characters'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
     if (!/[A-Z]/.test(password)) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'Password must contain at least one uppercase letter'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
     if (!/[a-z]/.test(password)) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'Password must contain at least one lowercase letter'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
     if (!/\d/.test(password)) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'Password must contain at least one digit'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
@@ -84,7 +84,7 @@ export class SharedValidators {
   static validatePhoneNumber(phone: string | null | undefined): string {
     if (!phone || typeof phone !== 'string' || phone.trim().length === 0) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'Phone number is required'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
@@ -95,7 +95,7 @@ export class SharedValidators {
     const phoneRegex = /^\+?91[\s\-]?[6-9]\d{9}$|^[6-9]\d{9}$/;
     if (!phoneRegex.test(trimmed)) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'Invalid phone number format. Use: +91-XXXXX XXXXX'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
@@ -105,7 +105,7 @@ export class SharedValidators {
 
     if (normalized.length !== 10) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'Phone number must have 10 digits'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
@@ -118,13 +118,13 @@ export class SharedValidators {
   static validateOtp(otp: string | null | undefined): string {
     if (!otp || typeof otp !== 'string') {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'OTP is required'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
     if (!/^\d{6}$/.test(otp)) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, 'OTP must be 6 digits'),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
@@ -141,7 +141,7 @@ export class SharedValidators {
   ): string {
     if (!value || typeof value !== 'string' || value.trim().length === 0) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, `${fieldName} is required`),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
@@ -149,10 +149,7 @@ export class SharedValidators {
 
     if (maxLength && trimmed.length > maxLength) {
       throw new BadRequestException(
-        errPayload(
-          ErrorCode.VALIDATION_ERROR,
-          `${fieldName} must not exceed ${maxLength} characters`,
-        ),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
@@ -165,14 +162,14 @@ export class SharedValidators {
   static validateUUID(uuid: string | null | undefined, fieldName: string = 'ID'): string {
     if (!uuid || typeof uuid !== 'string') {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, `${fieldName} is required`),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(uuid)) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, `Invalid UUID format for ${fieldName}`),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 
@@ -188,7 +185,7 @@ export class SharedValidators {
   ): number {
     if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
       throw new BadRequestException(
-        errPayload(ErrorCode.VALIDATION_ERROR, `${fieldName} must be a positive integer`),
+        errPayload(ErrorCode.VALIDATION_ERROR),
       );
     }
 

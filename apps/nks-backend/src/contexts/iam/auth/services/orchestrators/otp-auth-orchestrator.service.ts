@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { OtpService } from '../otp/otp.service';
 import { UserCreationService } from '../flows/user-creation.service';
 import { AuthFlowOrchestratorService } from './auth-flow-orchestrator.service';
@@ -7,8 +7,6 @@ import type { AuthResponseEnvelope } from '../../dto';
 
 @Injectable()
 export class OtpAuthOrchestrator {
-  private readonly logger = new Logger(OtpAuthOrchestrator.name);
-
   constructor(
     private readonly otpService: OtpService,
     private readonly userCreationService: UserCreationService,

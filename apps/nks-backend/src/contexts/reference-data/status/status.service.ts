@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { StatusRepository } from './repositories/status.repository';
 import { StatusMapper } from './mapper/status.mapper';
 import { AuditService } from '../../compliance/audit/audit.service';
@@ -11,12 +11,33 @@ import type {
   GetAllStatusesQueryDto,
   StatusResponse,
 } from './dto/status.dto';
-import type { Status } from '../../../core/database/schema/entity-system/status/status.table';
+import type { Status, UpdateStatus } from '../../../core/database/schema/entity-system/status/status.table';
 
+/**
+ * StatusService
+ *
+ * Manages status lifecycle (read, create, update, delete).
+ * NOTE: This service mirrors StatusCommandService. Command operations should use
+ * StatusCommandService (has explicit permission ceiling docs). This service is
+ * kept for combined query+command operations.
+ *
+ * Authorization Contract:
+ *   - getActiveStatuses(), listStatuses(): Public reads (no auth needed)
+ *   - createStatus(), updateStatus(), deleteStatus(): Require STATUS.CREATE/EDIT/DELETE
+ *     permissions (checked by @RequirePermission decorator at controller level)
+ *   - Authorization is enforced at controller level, not service level
+ *
+ * Business Rule Validation:
+ *   - System statuses (isSystem=true) are immutable — cannot be modified or deleted
+ *   - Status codes must be unique
+ *   - Prevents accidental modification of critical system states
+ *
+ * Audit Trail:
+ *   - All mutations tracked via AuditService
+ *   - createdBy/modifiedBy/deletedBy parameters identify who performed the operation
+ */
 @Injectable()
 export class StatusService {
-  private readonly logger = new Logger(StatusService.name);
-
   constructor(
     private readonly repository: StatusRepository,
     private readonly auditService: AuditService,
@@ -48,8 +69,7 @@ export class StatusService {
       borderColor: dto.borderColor ?? null,
       isBold: dto.isBold ?? false,
       sortOrder: dto.sortOrder,
-      createdBy,
-    });
+    }, createdBy);
 
     const response = StatusMapper.buildStatusDto(row);
     this.auditService.logStatusCreated(createdBy, response.guuid, response.code);
@@ -63,28 +83,29 @@ export class StatusService {
   ): Promise<StatusResponse> {
     if (existing.isSystem) throw new ForbiddenException(errPayload(ErrorCode.STA_SYSTEM_IMMUTABLE));
 
-    const row = await this.repository.update(existing.id, {
-      name: dto.name,
-      description: dto.description,
-      fontColor: dto.fontColor ?? undefined,
-      bgColor: dto.bgColor ?? undefined,
-      borderColor: dto.borderColor ?? undefined,
-      isBold: dto.isBold,
-      sortOrder: dto.sortOrder,
-      isActive: dto.isActive,
-      modifiedBy,
-    });
+    const set: UpdateStatus = {};
+    if (dto.name !== undefined) set.name = dto.name;
+    if (dto.description !== undefined) set.description = dto.description;
+    if (dto.fontColor !== undefined) set.fontColor = dto.fontColor;
+    if (dto.bgColor !== undefined) set.bgColor = dto.bgColor;
+    if (dto.borderColor !== undefined) set.borderColor = dto.borderColor;
+    if (dto.isBold !== undefined) set.isBold = dto.isBold;
+    if (dto.sortOrder !== undefined) set.sortOrder = dto.sortOrder;
+    if (dto.isActive !== undefined) set.isActive = dto.isActive;
+
+    const row = await this.repository.update(existing.id, set, modifiedBy);
 
     if (!row) throw new NotFoundException(errPayload(ErrorCode.STA_STATUS_NOT_FOUND));
     const response = StatusMapper.buildStatusDto(row);
-    this.auditService.logStatusUpdated(modifiedBy, response.guuid, response.code, { ...dto });
+    this.auditService.logStatusUpdated(modifiedBy, response.guuid, response.code, set);
     return response;
   }
 
   async deleteStatus(existing: Status, deletedBy: number): Promise<void> {
     if (existing.isSystem) throw new ForbiddenException(errPayload(ErrorCode.STA_SYSTEM_IMMUTABLE));
 
-    await this.repository.softDelete(existing.id, deletedBy);
+    const deleted = await this.repository.softDelete(existing.id, deletedBy);
+    if (!deleted) throw new NotFoundException(errPayload(ErrorCode.STA_STATUS_NOT_FOUND));
     this.auditService.logStatusDeleted(deletedBy, existing.guuid, existing.code);
   }
 

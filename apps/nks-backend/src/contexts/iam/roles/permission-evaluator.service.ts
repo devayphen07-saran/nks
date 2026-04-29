@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PermissionsRepository } from './repositories/role-permissions.repository';
 import type { EntityPermission } from './dto/role-response.dto';
@@ -149,7 +149,6 @@ class PermissionCache {
  */
 @Injectable()
 export class PermissionEvaluatorService {
-  private readonly logger = new Logger(PermissionEvaluatorService.name);
   private readonly cache: PermissionCache;
 
   constructor(

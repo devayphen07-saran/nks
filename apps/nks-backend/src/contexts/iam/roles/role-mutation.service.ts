@@ -1,9 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '../../../core/database/schema';
+import { Injectable } from '@nestjs/common';
 import { RolesRepository } from './repositories/roles.repository';
-
-type Db = NodePgDatabase<typeof schema>;
+import type { DbTransaction } from '../../../core/database/transaction.service';
 
 /**
  * RoleMutationService — narrow mutation surface for role assignments
@@ -19,8 +16,6 @@ type Db = NodePgDatabase<typeof schema>;
  */
 @Injectable()
 export class RoleMutationService {
-  private readonly logger = new Logger(RoleMutationService.name);
-
   constructor(private readonly rolesRepository: RolesRepository) {}
 
   /**
@@ -32,7 +27,7 @@ export class RoleMutationService {
    * partial unique index on (user_fk) WHERE is_primary=true is not violated.
    */
   assignRoleWithinTransaction(
-    tx: Db,
+    tx: DbTransaction,
     userId: number,
     roleCode: string,
     isPrimary: boolean = true,
@@ -46,7 +41,7 @@ export class RoleMutationService {
    * registrations serialize deterministically — only one wins.
    */
   resolveInitialRoleWithinTransaction(
-    tx: Db,
+    tx: DbTransaction,
     superAdminRoleId: number,
   ): Promise<'SUPER_ADMIN' | 'USER'> {
     return this.rolesRepository.resolveInitialRoleWithinTransaction(

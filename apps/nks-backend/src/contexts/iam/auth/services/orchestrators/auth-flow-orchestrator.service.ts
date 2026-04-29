@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { SessionCommandService } from '../session/session-command.service';
 import { TokenService } from '../token/token.service';
 import type { AuthResponseEnvelope } from '../../dto';
@@ -23,10 +23,12 @@ export interface AuthUserContext {
  *
  * Handles: create session → generate tokens → build auth envelope.
  * Called by PasswordAuthService (login/register) and OtpAuthOrchestratorService.
+ *
+ * No authorization validation needed — caller (PasswordAuthService/OtpAuthOrchestratorService)
+ * is responsible for user authentication before invoking this orchestrator.
  */
 @Injectable()
 export class AuthFlowOrchestratorService {
-  private readonly logger = new Logger(AuthFlowOrchestratorService.name);
 
   constructor(
     private readonly sessions: SessionCommandService,

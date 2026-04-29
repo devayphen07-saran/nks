@@ -1,6 +1,6 @@
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { SanitizerValidator } from '../../../../../common/validators/sanitizer.validator';
 import { PasswordAuthValidator } from '../../validators';
 import { LoginDto, RegisterDto } from '../../dto';
@@ -14,6 +14,7 @@ import { RoleQueryService } from '../../../roles/role-query.service';
 import { AccountSecurityService } from './account-security.service';
 import { InitialRoleAssignmentService } from './initial-role-assignment.service';
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
+import { SYSTEM_USER_ID } from '../../../../../common/constants/app-constants';
 import type { DeviceInfo } from '../../interfaces/device-info.interface';
 
 // Pre-computed once at module load — same cost as PasswordService.BCRYPT_ROUNDS.
@@ -46,8 +47,6 @@ type AuditMeta = { deviceId?: string; deviceType?: string };
  */
 @Injectable()
 export class PasswordAuthService {
-  private readonly logger = new Logger(PasswordAuthService.name);
-
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly passwordService: PasswordService,
@@ -129,6 +128,7 @@ export class PasswordAuthService {
         password: passwordHash,
         isVerified: false,
       },
+      SYSTEM_USER_ID, // self-registration — no logged-in actor exists
       async (tx, userId) => {
         await this.initialRoleAssignmentService.assignInitialRoleInTransaction(userId, tx);
       },

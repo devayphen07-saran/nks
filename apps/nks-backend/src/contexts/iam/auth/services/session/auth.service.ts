@@ -101,7 +101,7 @@ export class AuthService {
       userAgent?: string;
     },
   ): Promise<{ token: string; expiresAt: Date }> {
-    const session = await this.sessionsRepository.findByToken(oldToken);
+    const session = await this.sessionRepository.findByToken(oldToken);
     SessionAuthValidator.assertSessionOwnership(session, userId);
 
     // Create the new session BEFORE deleting the old one.
@@ -112,12 +112,12 @@ export class AuthService {
       userId,
       deviceInfo,
     );
-    await this.sessionsRepository.delete(session.id);
+    await this.sessionRepository.delete(session.id);
     return newSession;
   }
 
   async cleanupExpiredSessions(): Promise<{ deletedCount: number }> {
-    const deletedCount = await this.sessionsRepository.deleteExpired();
+    const deletedCount = await this.sessionContextRepository.deleteExpired();
     return { deletedCount };
   }
 }
