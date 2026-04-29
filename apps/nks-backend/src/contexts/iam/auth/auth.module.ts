@@ -69,6 +69,8 @@ import { SessionRevocationListener } from './listeners/session-revocation.listen
 import { AuthFlowOrchestratorService } from './services/orchestrators/auth-flow-orchestrator.service';
 import { OtpAuthOrchestrator } from './services/orchestrators/otp-auth-orchestrator.service';
 import { PasswordAuthService } from './services/flows/password-auth.service';
+import { AccountSecurityService } from './services/flows/account-security.service';
+import { InitialRoleAssignmentService } from './services/flows/initial-role-assignment.service';
 import { OnboardingService } from './services/flows/onboarding.service';
 import { UserCreationService } from './services/flows/user-creation.service';
 
@@ -164,6 +166,8 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
     AuthFlowOrchestratorService,
     OtpAuthOrchestrator,
     PasswordAuthService,
+    AccountSecurityService,
+    InitialRoleAssignmentService,
     OnboardingService,
     UserCreationService,
 
