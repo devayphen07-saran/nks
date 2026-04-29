@@ -2,24 +2,22 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { signOfflineSession } from '../../../../../common/utils/offline-session-hmac';
 import { JWTConfigService, JWTPayload } from '../../../../../config/jwt.config';
-import { RefreshTokenService } from '../session/refresh-token.service';
-import { SessionsRepository } from '../../repositories/sessions.repository';
 import { RoleQueryService } from '../../../roles/role-query.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
+import { TokenPairGeneratorService } from './token-pair-generator.service';
 import { AuthMapper, type TokenPair } from '../../mapper/auth-mapper';
 import type { AuthResponseEnvelope } from '../../dto';
 import {
   JWT_AUDIENCE,
   OFFLINE_JWT_TTL_DAYS,
   OFFLINE_JWT_EXPIRATION,
-  ACCESS_TOKEN_TTL_MS,
   REFRESH_TOKEN_TTL_MS,
 } from '../../auth.constants';
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
 
 /**
- * TokenService — token creation and auth response assembly.
+ * TokenService — auth response assembly and session coordination.
  *
  * Token lifecycle responsibilities:
  *   session token  — opaque 64-char hex; primary auth credential for cookie/bearer transport;
@@ -32,7 +30,7 @@ import { SystemRoleCodes } from '../../../../../common/constants/system-role-cod
  *
  * Methods:
  *   createAccessToken  — raw RS256 JWT wrapper
- *   createTokenPair    — access JWT + opaque refresh token stored in session
+ *   createTokenPair    — delegates to TokenPairGeneratorService for token generation
  *   buildAuthResponse  — full AuthResponseEnvelope (permissions, offline token, HMAC)
  */
 @Injectable()
@@ -41,8 +39,7 @@ export class TokenService {
 
   constructor(
     private readonly jwtConfigService: JWTConfigService,
-    private readonly refreshTokenService: RefreshTokenService,
-    private readonly sessionsRepository: SessionsRepository,
+    private readonly tokenPairGenerator: TokenPairGeneratorService,
     private readonly roleQuery: RoleQueryService,
     private readonly permissionsService: PermissionsService,
     private readonly configService: ConfigService,
@@ -75,7 +72,7 @@ export class TokenService {
 
   /**
    * Create an RS256 access token + opaque refresh token pair.
-   * Persists the refresh token hash to the session row.
+   * Delegates to TokenPairGeneratorService for token generation and persistence.
    */
   async createTokenPair(
     userGuuid: string,
@@ -88,37 +85,17 @@ export class TokenService {
     firstName?: string,
     lastName?: string,
   ): Promise<TokenPair> {
-    const accessToken = this.createAccessToken({
-      sub: userGuuid,
-      sid: sessionGuuid,
+    return this.tokenPairGenerator.generateTokenPair(
+      userGuuid,
+      sessionGuuid,
+      sessionToken,
+      userRoles,
+      userEmail,
       jti,
       iamUserId,
-      ...(firstName ? { firstName } : {}),
-      ...(lastName ? { lastName } : {}),
-      ...(userEmail ? { email: userEmail } : {}),
-      roles: userRoles.map((r) => r.roleCode),
-      iss: 'nks-auth',
-      aud: JWT_AUDIENCE,
-    });
-
-    const { token: refreshToken, tokenHash: refreshTokenHash } =
-      this.refreshTokenService.generateRefreshToken();
-
-    const now = new Date();
-    const jwtExpiresAt = new Date(now.getTime() + ACCESS_TOKEN_TTL_MS);
-    const refreshTokenExpiresAt = new Date(now.getTime() + REFRESH_TOKEN_TTL_MS);
-
-    await this.sessionsRepository.setRefreshTokenData(sessionToken, {
-      refreshTokenHash,
-      refreshTokenExpiresAt,
-      accessTokenExpiresAt: jwtExpiresAt,
-    });
-
-    this.logger.log(
-      `Token pair created for ${userGuuid}. Access: 15 min. Refresh: 7 days.`,
+      firstName,
+      lastName,
     );
-
-    return { accessToken, refreshToken, jwtExpiresAt, refreshTokenExpiresAt };
   }
 
   // ─── Auth Response Assembly ────────────────────────────────────────────────
