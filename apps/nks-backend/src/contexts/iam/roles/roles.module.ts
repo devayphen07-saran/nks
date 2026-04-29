@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { RolesService } from './roles.service';
 import { RolesRepository } from './repositories/roles.repository';
 import { PermissionsRepository } from './repositories/role-permissions.repository';
+import { RolePermissionService } from './role-permission.service';
 import { RolesController } from './roles.controller';
 import { RBACGuard } from '../../../common/guards/rbac.guard';
 import { PermissionEvaluatorService } from './permission-evaluator.service';
@@ -23,6 +24,7 @@ import { StoresModule } from '../../organization/stores/stores.module';
     PermissionsRepository,
     RBACGuard,
     PermissionEvaluatorService,
+    RolePermissionService,
     RoleQueryService,
     RoleMutationService,
     TransactionService,
@@ -34,6 +36,7 @@ import { StoresModule } from '../../organization/stores/stores.module';
     PermissionsRepository,
     RBACGuard,
     PermissionEvaluatorService,
+    RolePermissionService,
     RoleQueryService,
     RoleMutationService,
   ],

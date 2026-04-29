@@ -87,7 +87,9 @@ export class TokenPairGeneratorService {
     // Step 4: Calculate expiry timestamps
     const now = new Date();
     const jwtExpiresAt = new Date(now.getTime() + ACCESS_TOKEN_TTL_MS);
-    const refreshTokenExpiresAt = new Date(now.getTime() + REFRESH_TOKEN_TTL_MS);
+    const refreshTokenExpiresAt = new Date(
+      now.getTime() + REFRESH_TOKEN_TTL_MS,
+    );
 
     // Step 5: Persist refresh token hash to session
     await this.sessionsRepository.setRefreshTokenData(sessionToken, {
