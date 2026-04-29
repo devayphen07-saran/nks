@@ -1,93 +1,66 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable } from '@nestjs/common';
 import { OtpValidator } from '../../validators';
-import * as crypto from 'crypto';
-import { Msg91Service } from '../providers/msg91.service';
 import { SendOtpDto, VerifyOtpDto } from '../../dto/otp.dto';
 import { VerifyEmailOtpDto } from '../../dto/email-verify.dto';
 // NOTE: OtpService intentionally does NOT import AuthService
 // This breaks the circular dependency. Session creation is now handled by OtpAuthOrchestrator.
-import { OtpRateLimitService } from './otp-rate-limit.service';
 import { OtpRepository } from '../../repositories/otp.repository';
 import { AuthProviderRepository } from '../../repositories/auth-provider.repository';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
-import { MailService } from '../../../../../shared/mail/mail.service';
-import { OTP_EXPIRY_MS, OTP_MAX_ATTEMPTS } from '../../auth.constants';
+import { OTP_MAX_ATTEMPTS } from '../../auth.constants';
 import { TransactionService } from '../../../../../core/database/transaction.service';
+import { OtpDeliveryService } from './otp-delivery.service';
+import { Msg91Service } from '../providers/msg91.service';
+import { OtpRateLimitService } from './otp-rate-limit.service';
 
 /**
- * OTP Hashing Strategy: HMAC-SHA256 (not bcrypt)
+ * OtpService — Core OTP verification logic.
  *
- * Why not bcrypt?
- * - bcrypt is designed for passwords (intentionally slow: 100-300ms per operation)
- * - OTP has 10-minute expiry + 5-attempt rate limit
- * - Slowness adds latency with zero security benefit
+ * This service is focused on OTP verification and user/email validation.
+ * OTP delivery (SMS/email sending, rate limiting, hashing) is delegated to OtpDeliveryService.
  *
- * Why HMAC-SHA256?
- * - Instant verification (< 1ms)
- * - Designed for short-lived tokens
- * - Standard for TOTP/HOTP schemes (RFC 6238)
+ * Dependencies (7):
+ * - otpRepository: OTP record lookup
+ * - authProviderRepository: Email provider management
+ * - authUsersRepository: User lookup
+ * - txService: Transactional operations
+ * - otpDeliveryService: OTP delivery and hash verification
+ * - msg91Service: SMS verification (OTP verification requires MSG91 access)
+ * - rateLimitService: Track verification failures
+ *
+ * ARCHITECTURE: OtpService is pure OTP verification logic.
+ * User find/create is handled by UserCreationService (injected via OtpAuthOrchestrator).
+ * OtpAuthOrchestrator orchestrates: verify OTP → find/create user → create session.
+ *
+ * NOTE: msg91Service and rateLimitService are kept here (not in OtpDeliveryService)
+ * because they are required for verification, not delivery. OtpDeliveryService handles
+ * sending and rate limiting of send requests, while OtpService handles verification
+ * and failure tracking.
  */
-
 @Injectable()
 export class OtpService {
-  private readonly logger = new Logger(OtpService.name);
-  private readonly otpHmacSecret: string;
-
   constructor(
-    private readonly msg91: Msg91Service,
-    private readonly rateLimitService: OtpRateLimitService,
     private readonly otpRepository: OtpRepository,
     private readonly authProviderRepository: AuthProviderRepository,
     private readonly authUsersRepository: AuthUsersRepository,
-    private readonly configService: ConfigService,
-    private readonly mailService: MailService,
     private readonly txService: TransactionService,
-  ) {
-    this.otpHmacSecret = this.configService.getOrThrow<string>('OTP_HMAC_SECRET');
-  }
+    private readonly otpDeliveryService: OtpDeliveryService,
+    private readonly msg91: Msg91Service,
+    private readonly rateLimitService: OtpRateLimitService,
+  ) {}
 
   /**
-   * Send OTP via MSG91 and log the attempt for rate limiting.
+   * Send OTP via SMS (MSG91).
    *
-   * Rate Limit Rules:
-   * - Max 100 OTP requests per phone number per 24-hour window
-   * - If limit exceeded, throws HttpException(429) with retry-after time
-   * - Window resets after 24 hours of inactivity
+   * Delegates to OtpDeliveryService for SMS delivery, rate limiting, and OTP record storage.
    *
+   * @param dto - Contains phone number
    * @throws HttpException(429 TOO_MANY_REQUESTS) if rate limit exceeded
-   * @returns OTP send response from MSG91
+   * @returns OTP send response with reqId and mobile number
    */
   async sendOtp(dto: SendOtpDto): Promise<{ reqId: string; mobile: string }> {
     const { phone } = dto;
-
-    // Phone already validated by ZodValidationPipe at controller level
-    // Check rate limit — throws 429 if exceeded with retry-after message
-    await this.rateLimitService.checkAndRecordRequest(phone);
-
-    const response = await this.msg91.sendOtp(phone);
-
-    // MSG91 returns { type: "error", message: "..." } on failure
-    if (response?.type === 'error') {
-      this.logger.warn(
-        `MSG91 sendOtp rejected for ${phone}: ${response.message}`,
-      );
-    }
-    OtpValidator.assertMsg91SendSuccess(response);
-
-    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
-    const reqId = response.reqId ?? response.message;
-
-    // Store reqId in OTP record — required for verification to prevent replay
-    await this.otpRepository.insertOtpRecord(
-      phone,
-      'PHONE_VERIFY',
-      'MSG91_MANAGED',
-      expiresAt,
-      reqId,
-    );
-
-    return { reqId, mobile: phone };
+    return this.otpDeliveryService.sendSmsOtp(phone);
   }
 
   /**
@@ -143,28 +116,15 @@ export class OtpService {
 
   /**
    * Send OTP to email for verification (onboarding).
+   *
+   * Delegates to OtpDeliveryService for email delivery, rate limiting, OTP generation, hashing, and storage.
+   *
+   * @param email - Email address to send OTP to (must be present, validated by caller)
+   * @throws HttpException(429 TOO_MANY_REQUESTS) if rate limit exceeded
    */
   async sendEmailOtp(email: string | null | undefined): Promise<void> {
     OtpValidator.assertEmailPresent(email);
-    await this.rateLimitService.checkAndRecordRequest(email);
-
-    // Generate 6-digit OTP
-    const otp = crypto.randomInt(100000, 1000000).toString();
-
-    // Hash with HMAC-SHA256 before persisting — the plaintext OTP never touches the database
-    const otpHash = this.hashOtp(otp);
-
-    // Store hashed OTP record with EMAIL_VERIFY purpose
-    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
-    await this.otpRepository.insertOtpRecord(
-      email,
-      'EMAIL_VERIFY',
-      otpHash,
-      expiresAt,
-    );
-
-    // Deliver OTP via mail service (stub logs in dev; replace with real provider)
-    await this.mailService.sendOtp(email, otp);
+    return this.otpDeliveryService.sendEmailOtp(email);
   }
 
   /**
@@ -182,7 +142,10 @@ export class OtpService {
 
     OtpValidator.assertOtpFound(otpRecord);
     OtpValidator.assertOtpNotExpired(otpRecord.expiresAt);
-    OtpValidator.assertAttemptsNotExceeded(otpRecord.attempts, OTP_MAX_ATTEMPTS);
+    OtpValidator.assertAttemptsNotExceeded(
+      otpRecord.attempts,
+      OTP_MAX_ATTEMPTS,
+    );
 
     // Claim the OTP atomically before verifying the value.
     // Two concurrent requests with the correct OTP both pass the in-memory checks
@@ -195,7 +158,8 @@ export class OtpService {
 
     // OTP is now claimed. Verify the value against the stored hash.
     // A wrong code here still consumes the OTP — the user must request a new one.
-    const isValid = this.verifyOtpHash(otp, otpRecord.value);
+    // Verification is delegated to OtpDeliveryService which holds the HMAC secret.
+    const isValid = this.otpDeliveryService.verifyOtpHash(otp, otpRecord.value);
     if (!isValid) {
       await this.otpRepository.incrementAttempts(otpRecord.id);
       OtpValidator.assertOtpValid(isValid);
@@ -224,13 +188,16 @@ export class OtpService {
           tx,
         );
       } else {
-        await this.authProviderRepository.create({
-          userId: user.id,
-          providerId: 'email',
-          accountId: email,
-          isVerified: true,
-          verifiedAt: new Date(),
-        }, tx);
+        await this.authProviderRepository.create(
+          {
+            userId: user.id,
+            providerId: 'email',
+            accountId: email,
+            isVerified: true,
+            verifiedAt: new Date(),
+          },
+          tx,
+        );
       }
 
       // Mark email as verified in users table
@@ -243,66 +210,13 @@ export class OtpService {
 
   /**
    * Resend OTP using the original request ID from MSG91.
-   * Echoes `mobile` in the response (matches the shape of `sendOtp`) so
-   * clients don't need to stash it separately between send and resend.
+   *
+   * Delegates to OtpDeliveryService for MSG91 resend, validation, and response formatting.
+   *
+   * @param reqId - Original request ID from MSG91
+   * @returns OTP resend response with reqId and mobile
    */
   async resendOtp(reqId: string): Promise<{ reqId: string; mobile: string }> {
-    const record = await this.otpRepository.findByReqId(reqId);
-    OtpValidator.assertOtpFound(record);
-
-    const response = await this.msg91.resendOtp(reqId);
-
-    if (response?.type === 'error') {
-      this.logger.warn(
-        `MSG91 resendOtp rejected for reqId ${reqId}: ${response.message}`,
-      );
-    }
-    OtpValidator.assertMsg91SendSuccess(response);
-
-    // Normalize: MSG91 may return reqId in "message" field
-    return {
-      reqId: response.reqId ?? response.message,
-      mobile: record.identifier,
-    };
-  }
-
-  // ─── Private Helpers ───────────────────────────────────────────────────────
-
-  /**
-   * Hash OTP for email verification using HMAC-SHA256.
-   *
-   * Why HMAC-SHA256 instead of bcrypt?
-   * - OTP has 10-minute expiry + 5-attempt limit
-   * - bcrypt slowness (100-300ms) adds latency with zero security benefit
-   * - HMAC-SHA256 is instant (<1ms) and designed for short-lived tokens
-   *
-   * @param otp - 6-digit OTP code
-   * @returns Hex-encoded HMAC-SHA256 hash
-   */
-  private hashOtp(otp: string): string {
-    return crypto
-      .createHmac('sha256', this.otpHmacSecret)
-      .update(otp)
-      .digest('hex');
-  }
-
-  /**
-   * Verify OTP using timing-safe comparison.
-   *
-   * @param otp - Plaintext OTP from user
-   * @param storedHash - HMAC-SHA256 hash from database
-   * @returns true if OTP matches hash
-   */
-  private verifyOtpHash(otp: string, storedHash: string): boolean {
-    const computed = this.hashOtp(otp);
-    try {
-      return crypto.timingSafeEqual(
-        Buffer.from(storedHash),
-        Buffer.from(computed),
-      );
-    } catch {
-      // timingSafeEqual throws if lengths don't match
-      return false;
-    }
+    return this.otpDeliveryService.resendSmsOtp(reqId);
   }
 }

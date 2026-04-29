@@ -39,6 +39,7 @@ import { PermissionsService } from './services/permissions/permissions.service';
 
 // OTP
 import { OtpService } from './services/otp/otp.service';
+import { OtpDeliveryService } from './services/otp/otp-delivery.service';
 import { OtpRateLimitService } from './services/otp/otp-rate-limit.service';
 
 // Token
@@ -137,6 +138,7 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
 
     // OTP
     OtpService,
+    OtpDeliveryService,
     OtpRateLimitService,
 
     // Token
