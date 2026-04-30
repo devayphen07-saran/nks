@@ -1,4 +1,5 @@
 import {
+  GET_PUBLIC_LOOKUP,
   GET_SALUTATIONS,
   GET_COUNTRIES,
   GET_ADDRESS_TYPES,
@@ -9,6 +10,14 @@ import {
   GET_CURRENCIES,
   GET_VOLUMES,
 } from "./api-data";
+
+// ─── Generic Public Lookup ──────────────────────────────────────────────────
+// Use this for any lookup type that doesn't have a per-type thunk below.
+// Caller passes the lookup_type.code (or kebab-slug) via pathParam.typeCode.
+
+export const getPublicLookup = GET_PUBLIC_LOOKUP.generateAsyncThunk(
+  "lookups/getPublicLookup"
+);
 
 // ─── Salutations ────────────────────────────────────────────────────────────
 

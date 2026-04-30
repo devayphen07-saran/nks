@@ -209,6 +209,26 @@ export interface UpdateStoreCategoryRequest {
   description?: string;
 }
 
+// ─── Batch Lookup ────────────────────────────────────────────────────────────
+
+export interface BatchLookupRequest {
+  types: string[];
+}
+
+// Key = the type code/slug passed in; value = the item list for that type.
+// Item shape varies by type — use the per-type response interfaces for stricter
+// typing when you know which types you're requesting.
+export type BatchLookupItem = {
+  guuid: string;
+  code: string;
+  title?: string;
+  label?: string;
+  description?: string | null;
+  [key: string]: unknown;
+};
+
+export type BatchLookupResponse = Record<string, BatchLookupItem[]>;
+
 // ─── Admin: Lookup Configuration ────────────────────────────────────────────
 
 // Request DTOs

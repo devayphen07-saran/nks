@@ -105,7 +105,7 @@ export class AuthController {
   @Post('refresh-token')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @RateLimit(30)
+  @RateLimit(10)
   @ResponseMessage('Token refreshed successfully')
   @ApiOperation({
     summary: 'Refresh access token using refresh token',
@@ -245,7 +245,7 @@ export class AuthController {
 
   @Get('session-status')
   @Public()
-  @RateLimit(5)
+  @RateLimit(3)
   @HttpCode(HttpStatus.OK)
   @ResponseMessage('Session status checked')
   @ApiOperation({
@@ -255,13 +255,18 @@ export class AuthController {
   })
   async getSessionStatus(
     @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<{ active: boolean; revoked: boolean; wipe: boolean }> {
+    res.set('Cache-Control', 'no-store');
+
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith('Bearer ')
       ? authHeader.slice(7)
       : this.parseSessionCookie(req);
 
-    if (!token) {
+    // Reject obviously invalid tokens before touching the DB.
+    // Real session tokens are 64-char hex; anything shorter is a probe.
+    if (!token || token.length < 32 || token.length > 512) {
       return { active: false, revoked: true, wipe: false };
     }
 

@@ -15,7 +15,29 @@ import type {
   UpdateLookupValueDto,
 } from '../dto/admin-lookups.dto';
 
-const DEFAULT_LOOKUP_PAGE_SIZE = 200;
+export const DEFAULT_LOOKUP_PAGE_SIZE = 200;
+
+/** Standard lookup tables — structurally identical (code, label, description, …). */
+type StandardLookupTable =
+  | typeof schema.billingFrequency
+  | typeof schema.communicationType
+  | typeof schema.designationType
+  | typeof schema.entityType
+  | typeof schema.notificationStatus
+  | typeof schema.staffInviteStatus
+  | typeof schema.taxFilingFrequency
+  | typeof schema.addressType;
+
+const STANDARD_LOOKUP_TABLES: Partial<Record<string, StandardLookupTable>> = {
+  [LookupTypeCodes.BILLING_FREQUENCY]:    schema.billingFrequency,
+  [LookupTypeCodes.COMMUNICATION_TYPE]:   schema.communicationType,
+  [LookupTypeCodes.DESIGNATION_TYPE]:     schema.designationType,
+  [LookupTypeCodes.ENTITY_TYPE]:          schema.entityType,
+  [LookupTypeCodes.NOTIFICATION_STATUS]:  schema.notificationStatus,
+  [LookupTypeCodes.STAFF_INVITE_STATUS]:  schema.staffInviteStatus,
+  [LookupTypeCodes.TAX_FILING_FREQUENCY]: schema.taxFilingFrequency,
+  [LookupTypeCodes.ADDRESS_TYPE]:         schema.addressType,
+};
 
 // ─── Row Types ──────────────────────────────────────────────────────────────
 
@@ -38,7 +60,9 @@ type CommunicationTypeRow = typeof schema.communicationType.$inferSelect;
 type CurrencyRow = typeof currency.$inferSelect;
 type VolumesRow = typeof schema.volumes.$inferSelect;
 type LookupTypeWithCount = { code: string; title: string; isSystem: boolean; sortOrder: number | null; valueCount: number };
-type LookupTypeRef = { id: number; code: string; title: string; hasTable: boolean };
+
+/** Minimal lookup_type row used for routing decisions (has_table) and validation. */
+export type LookupTypeRef = { id: number; code: string; title: string; hasTable: boolean };
 
 type FindOpts = {
   page: number;
@@ -67,20 +91,6 @@ const lookupValueSelect = {
 @Injectable()
 export class LookupsRepository extends BaseRepository {
   constructor(@InjectDb() db: NodePgDatabase<typeof schema>) { super(db); }
-
-  private getValueOrderColumn(sortBy: string = 'sortOrder') {
-    switch (sortBy) {
-      case 'code':      return lookup.code;
-      case 'label':     return lookup.label;
-      case 'createdAt': return lookup.createdAt;
-      case 'sortOrder':
-      default:          return lookup.sortOrder;
-    }
-  }
-
-  private applySortDirection(column: AnyColumn, sortOrder: string = 'asc') {
-    return sortOrder === 'desc' ? desc(column) : asc(column);
-  }
 
   /** Generic — fetch all active, visible global values for a lookup type code */
   async getValuesByType(typeCode: string, limit = DEFAULT_LOOKUP_PAGE_SIZE): Promise<LookupValueRow[]> {
@@ -209,6 +219,13 @@ export class LookupsRepository extends BaseRepository {
   ): Promise<{ rows: LookupValueRow[]; total: number }> {
     const { page, pageSize, search, sortBy = 'sortOrder', sortOrder = 'asc', isActive } = opts;
     const offset = LookupsRepository.toOffset(page, pageSize);
+    const dir = sortOrder === 'desc' ? desc : asc;
+
+    const orderCol =
+      sortBy === 'code'      ? lookup.code      :
+      sortBy === 'label'     ? lookup.label     :
+      sortBy === 'createdAt' ? lookup.createdAt :
+                               lookup.sortOrder;
 
     const where = and(
       eq(lookupType.code, typeCode),
@@ -219,8 +236,17 @@ export class LookupsRepository extends BaseRepository {
     );
 
     return this.paginate(
-      this.db.select(lookupValueSelect).from(lookup).innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id)).where(where).orderBy(this.applySortDirection(this.getValueOrderColumn(sortBy), sortOrder)).limit(pageSize).offset(offset),
-      () => this.db.select({ total: count() }).from(lookup).innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id)).where(where),
+      this.db.select(lookupValueSelect)
+        .from(lookup)
+        .innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id))
+        .where(where)
+        .orderBy(dir(orderCol))
+        .limit(pageSize)
+        .offset(offset),
+      () => this.db.select({ total: count() })
+        .from(lookup)
+        .innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id))
+        .where(where),
       page, pageSize,
     );
   }
@@ -238,40 +264,15 @@ export class LookupsRepository extends BaseRepository {
     const offset = LookupsRepository.toOffset(page, pageSize);
     const dir = sortOrder === 'desc' ? desc : asc;
 
-    // Route to type-safe method per lookup type
+    const standardTable = STANDARD_LOOKUP_TABLES[typeCode];
+    if (standardTable) {
+      return this.queryStandardLookupTable(standardTable, page, pageSize, offset, dir, search, sortBy, isActive);
+    }
+
     switch (typeCode) {
-      case LookupTypeCodes.BILLING_FREQUENCY:
-        return this.queryStandardLookupTable(schema.billingFrequency, page, pageSize, offset, dir, search, sortBy, isActive);
-
-      case LookupTypeCodes.COMMUNICATION_TYPE:
-        return this.queryStandardLookupTable(schema.communicationType, page, pageSize, offset, dir, search, sortBy, isActive);
-
-      case LookupTypeCodes.DESIGNATION_TYPE:
-        return this.queryStandardLookupTable(schema.designationType, page, pageSize, offset, dir, search, sortBy, isActive);
-
-      case LookupTypeCodes.ENTITY_TYPE:
-        return this.queryStandardLookupTable(schema.entityType, page, pageSize, offset, dir, search, sortBy, isActive);
-
-      case LookupTypeCodes.NOTIFICATION_STATUS:
-        return this.queryStandardLookupTable(schema.notificationStatus, page, pageSize, offset, dir, search, sortBy, isActive);
-
-      case LookupTypeCodes.STAFF_INVITE_STATUS:
-        return this.queryStandardLookupTable(schema.staffInviteStatus, page, pageSize, offset, dir, search, sortBy, isActive);
-
-      case LookupTypeCodes.TAX_FILING_FREQUENCY:
-        return this.queryStandardLookupTable(schema.taxFilingFrequency, page, pageSize, offset, dir, search, sortBy, isActive);
-
-      case LookupTypeCodes.ADDRESS_TYPE:
-        return this.queryStandardLookupTable(schema.addressType, page, pageSize, offset, dir, search, sortBy, isActive);
-
-      case LookupTypeCodes.CURRENCY:
-        return this.queryCurrencyTable(page, pageSize, offset, dir, search, sortBy, isActive);
-
-      case LookupTypeCodes.VOLUMES:
-        return this.queryVolumesTable(page, pageSize, offset, dir, search, sortBy, isActive);
-
-      default:
-        throw new BadRequestException(`Unknown lookup type: ${typeCode}`);
+      case LookupTypeCodes.CURRENCY: return this.queryCurrencyTable(page, pageSize, offset, dir, search, sortBy, isActive);
+      case LookupTypeCodes.VOLUMES:  return this.queryVolumesTable(page, pageSize, offset, dir, search, sortBy, isActive);
+      default: throw new BadRequestException(`Unknown lookup type: ${typeCode}`);
     }
   }
 
@@ -285,40 +286,7 @@ export class LookupsRepository extends BaseRepository {
         hasTable: lookupType.hasTable,
       })
       .from(lookupType)
-      .where(and(eq(lookupType.code, code), isNull(lookupType.deletedAt)))
-      .limit(1);
-    return row ?? null;
-  }
-
-  /** Find a single lookup value by id */
-  async findLookupValueById(id: number): Promise<LookupValueRow | null> {
-    const [row] = await this.db
-      .select(lookupValueSelect)
-      .from(lookup)
-      .where(and(eq(lookup.id, id), isNull(lookup.deletedAt)))
-      .limit(1);
-    return row ?? null;
-  }
-
-  /**
-   * Fetch a lookup value by id and verify it belongs to typeCode in one query.
-   * Returns null if the value does not exist, is deleted, or belongs to a different type.
-   */
-  async findLookupValueByIdAndType(
-    id: number,
-    typeCode: string,
-  ): Promise<LookupValueRow | null> {
-    const [row] = await this.db
-      .select(lookupValueSelect)
-      .from(lookup)
-      .innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id))
-      .where(
-        and(
-          eq(lookup.id, id),
-          eq(lookupType.code, typeCode),
-          isNull(lookup.deletedAt),
-        ),
-      )
+      .where(and(eq(lookupType.code, code), eq(lookupType.isActive, true), isNull(lookupType.deletedAt)))
       .limit(1);
     return row ?? null;
   }
@@ -336,6 +304,7 @@ export class LookupsRepository extends BaseRepository {
         and(
           eq(lookup.guuid, guuid),
           eq(lookupType.code, typeCode),
+          eq(lookup.isActive, true),
           isNull(lookup.deletedAt),
         ),
       )
@@ -370,7 +339,7 @@ export class LookupsRepository extends BaseRepository {
     return this.updateOneAudited(
       lookup,
       set,
-      and(eq(lookup.id, id), isNull(lookup.deletedAt))!,
+      and(eq(lookup.id, id), eq(lookup.isActive, true), isNull(lookup.deletedAt))!,
       modifiedBy,
     );
   }
@@ -379,36 +348,9 @@ export class LookupsRepository extends BaseRepository {
   async deleteLookupValue(id: number, deletedBy: number): Promise<typeof lookup.$inferSelect | null> {
     return this.softDeleteAudited(
       lookup,
-      and(eq(lookup.id, id), isNull(lookup.deletedAt))!,
+      and(eq(lookup.id, id), eq(lookup.isActive, true), isNull(lookup.deletedAt))!,
       deletedBy,
     );
-  }
-
-  /** Lightweight existence check — true if an active lookup with this guuid exists under typeCode. */
-  async existsByGuuidAndType(guuid: string, typeCode: string): Promise<boolean> {
-    const [row] = await this.db
-      .select({ id: lookup.id })
-      .from(lookup)
-      .innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id))
-      .where(
-        and(
-          eq(lookup.guuid, guuid),
-          eq(lookupType.code, typeCode),
-          eq(lookup.isActive, true),
-          isNull(lookup.deletedAt),
-        ),
-      )
-      .limit(1);
-    return row !== undefined;
-  }
-
-  async findStoreIdByGuuid(guuid: string): Promise<number | null> {
-    const [row] = await this.db
-      .select({ id: schema.store.id })
-      .from(schema.store)
-      .where(eq(schema.store.guuid, guuid))
-      .limit(1);
-    return row?.id ?? null;
   }
 
   /**

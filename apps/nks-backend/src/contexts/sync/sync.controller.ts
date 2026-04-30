@@ -7,7 +7,6 @@ import {
   Query,
   Req,
   UseGuards,
-  ConflictException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import type { AuthenticatedRequest } from '../../common/guards/auth.guard';
@@ -19,8 +18,8 @@ import {
   SyncChangesQueryDto,
 } from './dto/requests';
 import {
-  SUPPORTED_SYNC_SCHEMA_VERSIONS,
   SYNC_SCHEMA_VERSION_HEADER,
+  assertSupportedSchemaVersion,
 } from './sync.constants';
 
 @ApiTags('Sync')
@@ -29,16 +28,6 @@ import {
 @ApiBearerAuth()
 export class SyncController {
   constructor(private readonly syncService: SyncService) {}
-
-  private assertSchemaVersion(version: string | undefined): void {
-    const v = version?.trim() ?? '';
-    if (!SUPPORTED_SYNC_SCHEMA_VERSIONS.has(v)) {
-      throw new ConflictException(
-        `Unsupported sync schema version "${v}". ` +
-        `Supported: [${[...SUPPORTED_SYNC_SCHEMA_VERSIONS].join(', ')}]. Please update the app.`,
-      );
-    }
-  }
 
   @Get('changes')
   @RateLimit(300)
@@ -52,7 +41,7 @@ export class SyncController {
     @Query() query: SyncChangesQueryDto,
     @Headers(SYNC_SCHEMA_VERSION_HEADER) schemaVersion: string | undefined,
   ): Promise<ChangesResponse> {
-    this.assertSchemaVersion(schemaVersion);
+    assertSupportedSchemaVersion(schemaVersion);
     return this.syncService.getChanges({
       userId: req.user.userId,
       sessionActiveStoreId: req.user.activeStoreId,
@@ -75,7 +64,7 @@ export class SyncController {
     @Body() body: SyncPushDto,
     @Headers(SYNC_SCHEMA_VERSION_HEADER) schemaVersion: string | undefined,
   ): Promise<PushResponse> {
-    this.assertSchemaVersion(schemaVersion);
+    assertSupportedSchemaVersion(schemaVersion);
     return this.syncService.processPushBatch(
       body.operations,
       req.user.userId,

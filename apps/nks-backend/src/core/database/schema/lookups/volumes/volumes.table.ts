@@ -24,6 +24,18 @@ import { users } from '../../auth/users';
  *   - Products module (product.volumeFk → volumes.id)
  *   - POS / order line items (quantity in this unit)
  *   - Stock adjustments
+ *
+ * ⚠ DO NOT CONSOLIDATE INTO `lookup` TABLE.
+ * Reason: This is the most structurally distinct of the lookup-like tables.
+ *   - `base_volume_fk` is a SELF-REFERENTIAL FK for unit conversion (kg ↔ g)
+ *   - `conversion_factor NUMERIC(18,6)` carries 6-digit precision math
+ *   - `volume_type` and `decimal_places` drive product / inventory rounding
+ *   - 2 CHECK constraints prevent corrupt conversion graphs
+ *   None of this can be represented in the generic (code, label, description)
+ *   shape of `lookup`.
+ * Registered in `lookup_type` with has_table=true for catalog discoverability.
+ * Confirmed against Ayphen reference (2026-04-30): Volume is also kept
+ *   dedicated there with conversion_factor as a business column.
  */
 export const volumes = pgTable(
   'volumes',

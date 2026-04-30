@@ -36,8 +36,16 @@ export class SessionRevocationRepository extends BaseRepository {
   }
 
   /**
-   * Soft-revoke a session: mark refreshTokenRevokedAt + reason, blocklist the JTI
-   * Row is NOT deleted — retained for audit trail and theft detection
+   * Soft-revoke a session: mark refreshTokenRevokedAt + reason, blocklist the JTI,
+   * and null out refreshTokenHash.
+   *
+   * Clearing refreshTokenHash is critical: if it stays set, a post-logout refresh
+   * attempt finds the session row (hash still matches), then TokenTheftDetectionService
+   * sees refreshTokenRevokedAt is set and terminates ALL sessions for that user.
+   * Nulling the hash makes findByRefreshTokenHashForUpdate return nothing, so the
+   * refresh fails cleanly with AUTH_REFRESH_TOKEN_INVALID instead.
+   *
+   * Row is NOT deleted — retained for audit trail.
    */
   async revokeSession(
     sessionId: number,
@@ -54,7 +62,7 @@ export class SessionRevocationRepository extends BaseRepository {
       }
       await tx
         .update(schema.userSession)
-        .set({ refreshTokenRevokedAt: new Date(), revokedReason })
+        .set({ refreshTokenRevokedAt: new Date(), revokedReason, refreshTokenHash: null })
         .where(eq(schema.userSession.id, sessionId));
     }, { name: 'SessionRevocationRepo.revokeSession' });
   }

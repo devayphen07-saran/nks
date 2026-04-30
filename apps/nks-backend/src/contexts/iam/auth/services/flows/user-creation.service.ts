@@ -8,7 +8,7 @@ import * as crypto from 'crypto';
 import type { DbTransaction } from '../../../../../core/database/transaction.service';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { RoleQueryService } from '../../../roles/role-query.service';
-import { RoleMutationService } from '../../../roles/role-mutation.service';
+import { RoleCommandService } from '../../../roles/role-command.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
 import { UserCreationValidator } from '../../validators';
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
@@ -46,7 +46,7 @@ export class UserCreationService {
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly roleQuery: RoleQueryService,
-    private readonly roleMutation: RoleMutationService,
+    private readonly roleMutation: RoleCommandService,
     private readonly authUtils: AuthUtilsService,
   ) {}
 
@@ -187,4 +187,3 @@ export class UserCreationService {
     }
   }
 }
-

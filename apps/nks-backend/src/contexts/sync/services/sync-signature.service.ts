@@ -2,7 +2,6 @@ import * as crypto from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { verifyOfflineSession } from '../../../common/utils/offline-session-hmac';
-import { SyncDataValidator } from '../validators/sync-data.validator';
 import { SyncAccessValidator } from '../validators/sync-access.validator';
 import { DeviceRevocationQueryService } from '../../iam/auth/services/session/device-revocation-query.service';
 import { JWTConfigService } from '../../../config/jwt.config';
@@ -15,7 +14,7 @@ import type { z } from 'zod';
 type OfflineSessionPayload = NonNullable<z.infer<typeof OfflineSessionContextSchema>>;
 
 /**
- * SyncValidationService — Offline-first sync validation and authorization.
+ * SyncSignatureService — Cryptographic verification for sync push operations.
  *
  * Authorization Contract (Signature-Based, NOT Permission-Based):
  *   - Operations validated via cryptographic HMAC signatures (not permission ceiling)
@@ -29,11 +28,10 @@ type OfflineSessionPayload = NonNullable<z.infer<typeof OfflineSessionContextSch
  *   - Device revocation ensures compromised devices cannot replay old signatures
  *   - Idempotency based on operation hash, not request duplication detection
  *
- * Business Rule Validation:
- *   - Operation type must be known (isValidOp)
- *   - Offline session HMAC must be valid and not expired
- *   - Device must not be revoked (cross-context check)
- *   - Offline JWT claims must match HMAC-verified session payload
+ * Responsibilities:
+ *   - Per-op signature verification (verifyOperationSignature)
+ *   - Idempotency request hash (hashOperation)
+ *   - Offline session HMAC + JWT cross-validation (validateOfflineSession)
  *   - Graceful degradation for older clients (optional signatures/tokens)
  *
  * Audit Trail:
@@ -60,26 +58,14 @@ function canonicalJson(value: unknown): string {
 }
 
 @Injectable()
-export class SyncValidationService {
-  private readonly logger = new Logger(SyncValidationService.name);
+export class SyncSignatureService {
+  private readonly logger = new Logger(SyncSignatureService.name);
 
   constructor(
     private readonly configService: ConfigService,
     private readonly deviceRevocationQuery: DeviceRevocationQueryService,
     private readonly jwtConfigService: JWTConfigService,
   ) {}
-
-  /**
-   * Validates an op type is known before opening a transaction.
-   * Returns true if valid; caller should count rejections.
-   */
-  isValidOp(op: SyncOperation): boolean {
-    if (!SyncDataValidator.isValidOp(op.op)) {
-      this.logger.warn(`Unknown op "${op.op}" for ${op.id} — rejected`);
-      return false;
-    }
-    return true;
-  }
 
   /**
    * Verify a single operation's signature against the session signing key.

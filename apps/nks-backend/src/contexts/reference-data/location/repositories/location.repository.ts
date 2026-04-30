@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, and, isNull, count, asc, desc } from 'drizzle-orm';
+import { eq, and, isNull, count, asc, desc, or, sql } from 'drizzle-orm';
 import type { AnyColumn } from 'drizzle-orm/column';
 import { ilikeAny } from '../../../../core/database/query-helpers';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
@@ -10,6 +10,35 @@ import * as schema from '../../../../core/database/schema';
 type State = typeof schema.state.$inferSelect;
 type District = typeof schema.district.$inferSelect;
 type Pincode = typeof schema.pincode.$inferSelect;
+
+/**
+ * Pull-sync row shapes — narrow projections returned by `findXxxChangesAfter`
+ * methods. Live with the producer (this repo) and are consumed by the
+ * domain's sync handler + the SyncDataMapper.
+ */
+export interface StateChangeRow {
+  id: number;
+  guuid: string;
+  stateName: string;
+  stateCode: string;
+  gstStateCode: string | null;
+  isUnionTerritory: boolean;
+  isActive: boolean;
+  updatedAt: Date | null;
+  deletedAt: Date | null;
+}
+
+export interface DistrictChangeRow {
+  id: number;
+  guuid: string;
+  districtName: string;
+  districtCode: string | null;
+  lgdCode: string | null;
+  stateGuuid: string | null;
+  isActive: boolean;
+  updatedAt: Date | null;
+  deletedAt: Date | null;
+}
 
 @Injectable()
 export class LocationRepository extends BaseRepository {
@@ -177,6 +206,82 @@ export class LocationRepository extends BaseRepository {
     );
 
     return { rows: rows.map((p) => ({ ...p, districtGuuid })), total };
+  }
+
+  /**
+   * Pull-sync read for `state`. Compound cursor (updatedAt, id) breaks ties when
+   * rows share an updated_at — without it pagination silently skips or duplicates
+   * rows committed in the same millisecond. Fetches `limit + 1` so callers
+   * detect `hasMore` without a separate COUNT.
+   */
+  async findStateChangesAfter(
+    cursorMs: number,
+    cursorId: number,
+    limit: number,
+  ): Promise<StateChangeRow[]> {
+    const cursorDate = new Date(cursorMs);
+    return this.db
+      .select({
+        id: schema.state.id,
+        guuid: schema.state.guuid,
+        stateName: schema.state.stateName,
+        stateCode: schema.state.stateCode,
+        gstStateCode: schema.state.gstStateCode,
+        isUnionTerritory: schema.state.isUnionTerritory,
+        isActive: schema.state.isActive,
+        updatedAt: schema.state.updatedAt,
+        deletedAt: schema.state.deletedAt,
+      })
+      .from(schema.state)
+      .where(
+        or(
+          sql`${schema.state.updatedAt} > ${cursorDate}`,
+          and(
+            sql`${schema.state.updatedAt} = ${cursorDate}`,
+            sql`${schema.state.id} > ${cursorId}`,
+          ),
+        ),
+      )
+      .orderBy(schema.state.updatedAt, schema.state.id)
+      .limit(limit);
+  }
+
+  /**
+   * Pull-sync read for `district`. Same compound-cursor semantics as
+   * `findStateChangesAfter`. Joins state for `stateGuuid` so mobile resolves
+   * the FK without a follow-up query.
+   */
+  async findDistrictChangesAfter(
+    cursorMs: number,
+    cursorId: number,
+    limit: number,
+  ): Promise<DistrictChangeRow[]> {
+    const cursorDate = new Date(cursorMs);
+    return this.db
+      .select({
+        id: schema.district.id,
+        guuid: schema.district.guuid,
+        districtName: schema.district.districtName,
+        districtCode: schema.district.districtCode,
+        lgdCode: schema.district.lgdCode,
+        stateGuuid: schema.state.guuid,
+        isActive: schema.district.isActive,
+        updatedAt: schema.district.updatedAt,
+        deletedAt: schema.district.deletedAt,
+      })
+      .from(schema.district)
+      .leftJoin(schema.state, eq(schema.district.stateFk, schema.state.id))
+      .where(
+        or(
+          sql`${schema.district.updatedAt} > ${cursorDate}`,
+          and(
+            sql`${schema.district.updatedAt} = ${cursorDate}`,
+            sql`${schema.district.id} > ${cursorId}`,
+          ),
+        ),
+      )
+      .orderBy(schema.district.updatedAt, schema.district.id)
+      .limit(limit);
   }
 
   async getPincodeByCode(code: string): Promise<(Pincode & { districtGuuid: string }) | null> {

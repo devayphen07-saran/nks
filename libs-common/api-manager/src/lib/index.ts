@@ -5,4 +5,3 @@ export * from "./roles";
 export * from "./routes";
 export * from "./lookups";
 export * from "./users";
-export * from "./codes";

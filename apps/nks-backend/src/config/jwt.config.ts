@@ -29,9 +29,11 @@ export interface JWTPayload {
   kid?: string;
 }
 
-/** Offline JWT payload — identity + authorization only, no session binding */
+/** Offline JWT payload — identity + authorization + session binding */
 export interface OfflineJWTPayload {
   sub: string;
+  /** Session guuid — lets mobile detect revocation when coming online. */
+  sid: string;
   jti: string;
   email?: string;
   roles: string[];
@@ -64,6 +66,7 @@ const JWTPayloadSchema = z.object({
 
 const OfflineJWTPayloadSchema = z.object({
   sub: z.string(),
+  sid: z.string(),
   jti: z.string(),
   email: z.string().optional(),
   roles: z.array(z.string()),
@@ -250,6 +253,7 @@ export class JWTConfigService {
   signOfflineToken(
     payload: {
       sub: string;
+      sid: string;
       email?: string;
       roles: string[];
       stores: Array<{ guuid: string; name: string }>;
@@ -262,6 +266,7 @@ export class JWTConfigService {
 
     const tokenPayload: OfflineJWTPayload = {
       sub: payload.sub,
+      sid: payload.sid,
       jti: crypto.randomUUID(),
       ...(payload.email ? { email: payload.email } : {}),
       roles: payload.roles,

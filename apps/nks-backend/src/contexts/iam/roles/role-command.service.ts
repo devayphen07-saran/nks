@@ -3,7 +3,7 @@ import { RolesRepository } from './repositories/roles.repository';
 import type { DbTransaction } from '../../../core/database/transaction.service';
 
 /**
- * RoleMutationService — narrow mutation surface for role assignments
+ * RoleCommandService — narrow mutation surface for role assignments
  * that must run inside an externally-managed transaction.
  *
  * Separated from `RoleQueryService` because transactional mutations can't
@@ -15,7 +15,7 @@ import type { DbTransaction } from '../../../core/database/transaction.service';
  * See BACKEND_ARCHITECTURE.md § Module-boundary rules.
  */
 @Injectable()
-export class RoleMutationService {
+export class RoleCommandService {
   constructor(private readonly rolesRepository: RolesRepository) {}
 
   /**
@@ -32,7 +32,12 @@ export class RoleMutationService {
     roleCode: string,
     isPrimary: boolean = true,
   ): Promise<boolean> {
-    return this.rolesRepository.assignRoleWithinTransaction(tx, userId, roleCode, isPrimary);
+    return this.rolesRepository.assignRoleWithinTransaction(
+      tx,
+      userId,
+      roleCode,
+      isPrimary,
+    );
   }
 
   /**

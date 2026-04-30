@@ -6,12 +6,9 @@ import {
   ErrorCode,
   errPayload,
 } from '../../../common/constants/error-codes.constants';
+import type { LookupTypeRef } from './repositories/lookups.repository';
 
-interface LookupTypeRef {
-  id: number;
-  code: string;
-  hasTable: boolean;
-}
+type LookupValueRef = { isSystem: boolean };
 
 /**
  * LookupsValidator — validation logic for lookup operations.
@@ -33,6 +30,14 @@ export class LookupsValidator {
     if (type.hasTable)
       throw new ForbiddenException(
         errPayload(ErrorCode.LOOKUP_SYSTEM_TYPE_READONLY),
+      );
+  }
+
+  /** Assert that an individual lookup value is not system-seeded and can be mutated. */
+  static assertLookupValueEditable(value: LookupValueRef): void {
+    if (value.isSystem)
+      throw new ForbiddenException(
+        errPayload(ErrorCode.LOOKUP_SYSTEM_VALUE_READONLY),
       );
   }
 }

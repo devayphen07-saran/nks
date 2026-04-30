@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { DbTransaction } from '../../../../../core/database/transaction.service';
-import { RoleMutationService } from '../../../roles/role-mutation.service';
+import { RoleCommandService } from '../../../roles/role-command.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
 import { RoleQueryService } from '../../../roles/role-query.service';
 import {
@@ -31,7 +31,7 @@ export class InitialRoleAssignmentService {
   private readonly logger = new Logger(InitialRoleAssignmentService.name);
 
   constructor(
-    private readonly roleMutation: RoleMutationService,
+    private readonly roleMutation: RoleCommandService,
     private readonly authUtils: AuthUtilsService,
     private readonly roleQuery: RoleQueryService,
   ) {}

@@ -328,56 +328,6 @@ export class AuditCommandService {
     });
   }
 
-  // ─── Code Management ────────────────────────────────────────────────────────
-
-  logCodeCategoryCreated(actorId: number, categoryId: number, code: string): void {
-    this.log({
-      action: 'CREATE',
-      userId: actorId,
-      description: `Code category '${code}' created`,
-      metadata: { categoryId, code },
-      severity: 'info',
-      resourceType: 'code_category',
-      resourceId: categoryId,
-    });
-  }
-
-  logCodeValueCreated(actorId: number, valueId: number, code: string, categoryCode: string): void {
-    this.log({
-      action: 'CREATE',
-      userId: actorId,
-      description: `Code value '${code}' created in '${categoryCode}'`,
-      metadata: { valueId, code, categoryCode },
-      severity: 'info',
-      resourceType: 'code_value',
-      resourceId: valueId,
-    });
-  }
-
-  logCodeValueUpdated(actorId: number, valueId: number, changes: Record<string, unknown>): void {
-    this.log({
-      action: 'UPDATE',
-      userId: actorId,
-      description: `Code value ${valueId} updated`,
-      metadata: { valueId, changes },
-      severity: 'info',
-      resourceType: 'code_value',
-      resourceId: valueId,
-    });
-  }
-
-  logCodeValueDeleted(actorId: number, valueId: number): void {
-    this.log({
-      action: 'DELETE',
-      userId: actorId,
-      description: `Code value ${valueId} deleted`,
-      metadata: { valueId },
-      severity: 'info',
-      resourceType: 'code_value',
-      resourceId: valueId,
-    });
-  }
-
   // ─── Status Management ──────────────────────────────────────────────────────
 
   logStatusCreated(actorId: number, guuid: string, code: string): void {

@@ -7,7 +7,7 @@ import { RolesController } from './roles.controller';
 import { RBACGuard } from '../../../common/guards/rbac.guard';
 import { PermissionEvaluatorService } from './permission-evaluator.service';
 import { RoleQueryService } from './role-query.service';
-import { RoleMutationService } from './role-mutation.service';
+import { RoleCommandService } from './role-command.service';
 import { TransactionService } from '../../../core/database/transaction.service';
 import { StoresModule } from '../../organization/stores/stores.module';
 
@@ -26,7 +26,7 @@ import { StoresModule } from '../../organization/stores/stores.module';
     PermissionEvaluatorService,
     RolePermissionService,
     RoleQueryService,
-    RoleMutationService,
+    RoleCommandService,
     TransactionService,
   ],
   exports: [
@@ -38,7 +38,7 @@ import { StoresModule } from '../../organization/stores/stores.module';
     PermissionEvaluatorService,
     RolePermissionService,
     RoleQueryService,
-    RoleMutationService,
+    RoleCommandService,
   ],
 })
 export class RolesModule {}

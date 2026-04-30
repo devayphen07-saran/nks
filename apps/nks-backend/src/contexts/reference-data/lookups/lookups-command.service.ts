@@ -67,6 +67,7 @@ export class LookupsCommandService {
     );
     if (!value)
       throw new NotFoundException(errPayload(ErrorCode.LOOKUP_VALUE_NOT_FOUND));
+    LookupsValidator.assertLookupValueEditable(value);
     const updated = await this.repository.updateLookupValue(
       value.numericId,
       dto,
@@ -91,6 +92,7 @@ export class LookupsCommandService {
     );
     if (!value)
       throw new NotFoundException(errPayload(ErrorCode.LOOKUP_VALUE_NOT_FOUND));
+    LookupsValidator.assertLookupValueEditable(value);
     await this.repository.deleteLookupValue(value.numericId, userId);
     this.auditCommand.logLookupValueDeleted(userId, value.numericId, typeCode);
   }

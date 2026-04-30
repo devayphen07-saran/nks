@@ -5,6 +5,13 @@ import { users } from '../../auth/users';
 /**
  * Designation Type Lookup
  * Staff designations (Manager, Cashier, Accountant, Supervisor, Delivery Executive)
+ *
+ * ⚠ DO NOT CONSOLIDATE INTO `lookup` TABLE.
+ * Reason: `department` (org grouping) and `reporting_level` (1=director,
+ *   2=manager, 3=executive — used for hierarchy queries and approval routing)
+ *   are business columns that cannot live in the generic (code, label,
+ *   description) shape of `lookup`.
+ * Registered in `lookup_type` with has_table=true for catalog discoverability.
  */
 export const designationType = pgTable('designation_type', {
   ...baseEntity(),

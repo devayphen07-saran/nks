@@ -104,16 +104,17 @@ Use `expo-sqlite` directly, or with an ORM like `drizzle-orm` or WatermelonDB.
 
 Every domain table (e.g., `sales`, `sale_items`, `customers`, `products`, `payments`) includes these sync-aware columns:
 
-| Column | Type | Purpose |
-|---|---|---|
-| `id` | TEXT (UUID) | Primary key, generated on device |
-| `updated_at` | DATETIME | Local timestamp of last change |
-| `deleted_at` | DATETIME NULL | Soft delete marker |
-| `sync_status` | TEXT | `pending` / `syncing` / `synced` / `failed` |
-| `version` | INTEGER | Incremented on every update, used for conflict detection |
-| `server_version` | INTEGER NULL | Last version confirmed by the server |
+| Column           | Type          | Purpose                                                  |
+| ---------------- | ------------- | -------------------------------------------------------- |
+| `id`             | TEXT (UUID)   | Primary key, generated on device                         |
+| `updated_at`     | DATETIME      | Local timestamp of last change                           |
+| `deleted_at`     | DATETIME NULL | Soft delete marker                                       |
+| `sync_status`    | TEXT          | `pending` / `syncing` / `synced` / `failed`              |
+| `version`        | INTEGER       | Incremented on every update, used for conflict detection |
+| `server_version` | INTEGER NULL  | Last version confirmed by the server                     |
 
 **`sync_status` lifecycle:**
+
 - `pending` — local change not yet sent to server
 - `syncing` — domain row is actively being pushed (set when its queue op transitions to `in_progress`; useful for "uploading…" UI indicators). Reset to `pending` on app launch if stuck.
 - `synced` — server has confirmed the latest local version
@@ -192,14 +193,14 @@ Any operation that fails more than N retries or is explicitly rejected by the se
 
 Every syncable table has:
 
-| Column | Purpose |
-|---|---|
-| `id` (UUID PK) | Same UUID as the mobile row |
-| `updated_at` (TIMESTAMPTZ) | Set to `NOW()` on every write, indexed |
-| `deleted_at` (TIMESTAMPTZ NULL) | Soft delete |
-| `version` (INTEGER) | Incremented on every update |
-| `created_by_device` (TEXT) | Which device originated the row |
-| `tenant_id` / `store_id` | Multi-tenant isolation |
+| Column                          | Purpose                                |
+| ------------------------------- | -------------------------------------- |
+| `id` (UUID PK)                  | Same UUID as the mobile row            |
+| `updated_at` (TIMESTAMPTZ)      | Set to `NOW()` on every write, indexed |
+| `deleted_at` (TIMESTAMPTZ NULL) | Soft delete                            |
+| `version` (INTEGER)             | Incremented on every update            |
+| `created_by_device` (TEXT)      | Which device originated the row        |
+| `tenant_id` / `store_id`        | Multi-tenant isolation                 |
 
 Add an index on `updated_at` per table. Without it, delta queries get slow as data grows.
 
@@ -246,7 +247,7 @@ Prefer **soft deletes** (`deleted_at` on the row itself) whenever possible — t
 ## 5. Write Path — Offline Data Capture
 
 When the cashier performs any action (new sale, edit customer, etc.), regardless of network state:
-
+2
 ### 5.1 Steps
 
 1. **Generate a UUID** for the new entity on the device.
@@ -278,7 +279,7 @@ async function createSale(saleData: SaleInput) {
       `INSERT INTO sales (id, customer_id, total, created_at, updated_at,
                            sync_status, version)
        VALUES (?, ?, ?, ?, ?, 'pending', 1)`,
-      [saleId, saleData.customerId, saleData.total, now, now]
+      [saleId, saleData.customerId, saleData.total, now, now],
     );
 
     // 2. Write sale_items (each also with its own UUID)
@@ -287,14 +288,14 @@ async function createSale(saleData: SaleInput) {
         `INSERT INTO sale_items (id, sale_id, product_id, qty, price,
                                   updated_at, sync_status, version)
          VALUES (?, ?, ?, ?, ?, ?, 'pending', 1)`,
-        [uuid(), saleId, item.productId, item.qty, item.price, now]
+        [uuid(), saleId, item.productId, item.qty, item.price, now],
       );
     }
 
     // 3. Write outbox row — one op for the whole sale
     // SAFE in SQLite due to single-writer serialization.
     const nextSeq = await tx.queryOne(
-      `SELECT COALESCE(MAX(sequence), 0) + 1 AS seq FROM sync_queue`
+      `SELECT COALESCE(MAX(sequence), 0) + 1 AS seq FROM sync_queue`,
     );
 
     await tx.execute(
@@ -302,7 +303,7 @@ async function createSale(saleData: SaleInput) {
                                operation, payload, sequence, priority,
                                status, created_at)
        VALUES (?, ?, 'sale', ?, 'create', ?, ?, 10, 'pending', ?)`,
-      [uuid(), opId, saleId, JSON.stringify(saleData), nextSeq.seq, now]
+      [uuid(), opId, saleId, JSON.stringify(saleData), nextSeq.seq, now],
     );
   });
 
@@ -394,13 +395,13 @@ X-Device-Id: abc-123
 
 Possible `status` values:
 
-| Status | Meaning | Mobile action |
-|---|---|---|
-| `ok` | Server applied the change | Mark queue row `done`, update domain row `sync_status = 'synced'` |
-| `duplicate` | Already processed (idempotent hit) | Same as `ok` — use cached result |
-| `conflict` | Server has newer version | Mark queue row `failed`, set domain `sync_status = 'failed'`, run conflict resolution |
-| `rejected` | Invalid data, permission denied | Move to `failed_operations`, set domain `sync_status = 'failed'`, notify user |
-| `error` | Transient server error | Keep as `pending`, retry with backoff |
+| Status      | Meaning                            | Mobile action                                                                         |
+| ----------- | ---------------------------------- | ------------------------------------------------------------------------------------- |
+| `ok`        | Server applied the change          | Mark queue row `done`, update domain row `sync_status = 'synced'`                     |
+| `duplicate` | Already processed (idempotent hit) | Same as `ok` — use cached result                                                      |
+| `conflict`  | Server has newer version           | Mark queue row `failed`, set domain `sync_status = 'failed'`, run conflict resolution |
+| `rejected`  | Invalid data, permission denied    | Move to `failed_operations`, set domain `sync_status = 'failed'`, notify user         |
+| `error`     | Transient server error             | Keep as `pending`, retry with backoff                                                 |
 
 ### 6.4 Chunking rules
 
@@ -490,14 +491,15 @@ After N retries (e.g., 10), move the operation to `failed_operations` and notify
 GET /sync/pull?since=2026-04-19T08:00:00Z&entity=products&limit=500
 ```
 
-| Query param | Purpose |
-|---|---|
-| `since` | ISO timestamp — the server's `updated_at` cursor from the last pull for this entity. `null` for initial sync. |
-| `entity` | Single entity type to pull (e.g., `products`, `customers`). |
-| `limit` | Max rows per response page (pagination). |
-| `cursor` | Optional opaque cursor for continuing a paginated pull. |
+| Query param | Purpose                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------- |
+| `since`     | ISO timestamp — the server's `updated_at` cursor from the last pull for this entity. `null` for initial sync. |
+| `entity`    | Single entity type to pull (e.g., `products`, `customers`).                                                   |
+| `limit`     | Max rows per response page (pagination).                                                                      |
+| `cursor`    | Optional opaque cursor for continuing a paginated pull.                                                       |
 
 > **Why one entity per request (not a comma-separated list):**
+>
 > - Aligns with the per-entity cursor model — each entity has its own `last_pulled_at` that advances independently.
 > - Pagination semantics are clean: one entity, one `has_more`, one `next_cursor`.
 > - A multi-entity batch endpoint requires per-entity pagination state, which complicates both server and client. The marginal round-trip savings aren't worth the complexity for a typical POS catalog.
@@ -510,7 +512,13 @@ GET /sync/pull?since=2026-04-19T08:00:00Z&entity=products&limit=500
   "server_time": "2026-04-19T10:15:00Z",
   "entity": "products",
   "upserted": [
-    { "id": "p1", "name": "Coffee 250ml", "price": 40, "version": 3, "updated_at": "..." }
+    {
+      "id": "p1",
+      "name": "Coffee 250ml",
+      "price": 40,
+      "version": 3,
+      "updated_at": "..."
+    }
   ],
   "deleted": ["p99"],
   "has_more": false,
@@ -592,6 +600,7 @@ Each entity advances its `last_pulled_at` cursor independently, **as soon as tha
 **Con:** The cursors can drift. If `products` finishes at `T1` but `customers` is interrupted at `T0`, the next pull for `customers` re-fetches everything since `T0`, including some rows already pulled for `products` in the same time window. No data is lost — just a small amount of redundant work.
 
 **Why this is the right choice for a POS:**
+
 - Catalogs (products) are typically much larger than transactional reference data (customers, taxes). You'd rather refetch a few customer rows than refetch 50,000 products because the loop crashed on the last entity.
 - The redundant fetches are bounded — at most one entity's worth, and only between cursor saves.
 - The alternative (a single global cursor saved only after the entire loop completes) means all entities re-sync from the old cursor on any interruption, which is much worse.
@@ -600,12 +609,12 @@ If you need to track "fully consistent through" for the UI or telemetry, write `
 
 ### 7.6 Initial sync vs. incremental
 
-| | Initial sync | Incremental sync |
-|---|---|---|
-| `since` | `null` | last `server_time` |
-| Size | Large (entire catalog) | Small (recent changes) |
-| Frequency | Once, after login | Every sync cycle |
-| UI | Progress bar, "Loading your store data…" | Silent background |
+|           | Initial sync                             | Incremental sync       |
+| --------- | ---------------------------------------- | ---------------------- |
+| `since`   | `null`                                   | last `server_time`     |
+| Size      | Large (entire catalog)                   | Small (recent changes) |
+| Frequency | Once, after login                        | Every sync cycle       |
+| UI        | Progress bar, "Loading your store data…" | Silent background      |
 
 ---
 
@@ -615,15 +624,15 @@ Multiple overlapping triggers — no single one is enough.
 
 ### 8.1 Triggers
 
-| Trigger | What runs | Why |
-|---|---|---|
-| **App launch / foreground** | Push + Pull | Get back in sync after any time away |
-| **Network reconnect** (NetInfo listener) | Push + Pull | Drain the queue as soon as possible |
-| **After local mutation** (debounced 2–3s) | Push only | Keep server near-live when online |
-| **Periodic timer** (every 5–10 min while app open) | Pull only | Catch catalog/price changes |
-| **Pull-to-refresh** on list screens | Pull only | User-initiated |
-| **Before day-close / Z-report** | Push (forced, blocking) | Guarantee day's data is on server before closing |
-| **Background fetch** (best-effort) | Push + Pull | Nice-to-have; don't rely on it |
+| Trigger                                            | What runs               | Why                                              |
+| -------------------------------------------------- | ----------------------- | ------------------------------------------------ |
+| **App launch / foreground**                        | Push + Pull             | Get back in sync after any time away             |
+| **Network reconnect** (NetInfo listener)           | Push + Pull             | Drain the queue as soon as possible              |
+| **After local mutation** (debounced 2–3s)          | Push only               | Keep server near-live when online                |
+| **Periodic timer** (every 5–10 min while app open) | Pull only               | Catch catalog/price changes                      |
+| **Pull-to-refresh** on list screens                | Pull only               | User-initiated                                   |
+| **Before day-close / Z-report**                    | Push (forced, blocking) | Guarantee day's data is on server before closing |
+| **Background fetch** (best-effort)                 | Push + Pull             | Nice-to-have; don't rely on it                   |
 
 ### 8.2 Order in a full sync cycle
 
@@ -653,13 +662,13 @@ After a local mutation, don't push immediately — wait 2–3 seconds in case mo
 
 ### 9.1 Where conflicts happen
 
-| Entity | Conflict likelihood | Strategy |
-|---|---|---|
-| Sales, payments | Near-zero (always new, UUID-based) | Accept all |
-| Inventory stock levels | High (multi-device) | Store deltas, not absolutes |
-| Product price / tax | Low (admin-only) | Server wins |
-| Customer edits | Medium | Last-write-wins with version check |
-| Settings | Low | Server wins |
+| Entity                 | Conflict likelihood                | Strategy                           |
+| ---------------------- | ---------------------------------- | ---------------------------------- |
+| Sales, payments        | Near-zero (always new, UUID-based) | Accept all                         |
+| Inventory stock levels | High (multi-device)                | Store deltas, not absolutes        |
+| Product price / tax    | Low (admin-only)                   | Server wins                        |
+| Customer edits         | Medium                             | Last-write-wins with version check |
+| Settings               | Low                                | Server wins                        |
 
 ### 9.2 Append-only wins
 
@@ -668,6 +677,7 @@ For sales and payments, just accept. New rows don't conflict.
 ### 9.3 Inventory: use stock movements, not absolute counts
 
 **Wrong:**
+
 ```
 products.stock = 9  (from device A)
 products.stock = 9  (from device B, both started at 10)
@@ -675,6 +685,7 @@ Result: stock is 9, but two units were sold.
 ```
 
 **Right:**
+
 ```
 stock_movements table:
 - movement {id: m1, product: p, delta: -1, device: A, ts: ...}
@@ -700,6 +711,7 @@ For mutable records (customer, product), include `expected_version` in the push 
 ```
 
 Server logic:
+
 ```
 if server.version != op.expected_version:
   return { status: 'conflict', server_state: current_row }
@@ -727,15 +739,15 @@ For non-interactive conflicts (e.g., product price pushed by a cashier when admi
 
 A sync cycle can fail at many points. Each has a safe outcome:
 
-| Failure point | What's on the device | What's on the server | Recovery |
-|---|---|---|---|
-| Network drops mid-request | Queue rows still `in_progress` | Nothing received | On next sync, reset `in_progress` → `pending`, retry |
-| Server saved but response lost | Queue rows `in_progress` | Operation processed, cached in `processed_operations` | Retry sends same `client_op_id`, server returns cached result |
-| App crashes mid-sync | Queue rows `in_progress` | Partial | On app launch, reset `in_progress` → `pending`, retry |
-| Auth token expired | Queue rows `in_progress` | Nothing | Refresh token, retry chunk |
-| One op has bad data | Other ops succeed, bad op gets `rejected` | Valid ops applied | Bad op → `failed_operations`, surface to user |
-| Server down | Push returns 5xx | Nothing | Exponential backoff, retry later |
-| Pull interrupted between entities | Some entities advanced their cursor, others not | Unchanged | Per-entity cursor — finished entities keep progress, unfinished ones resume from old cursor |
+| Failure point                     | What's on the device                            | What's on the server                                  | Recovery                                                                                    |
+| --------------------------------- | ----------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Network drops mid-request         | Queue rows still `in_progress`                  | Nothing received                                      | On next sync, reset `in_progress` → `pending`, retry                                        |
+| Server saved but response lost    | Queue rows `in_progress`                        | Operation processed, cached in `processed_operations` | Retry sends same `client_op_id`, server returns cached result                               |
+| App crashes mid-sync              | Queue rows `in_progress`                        | Partial                                               | On app launch, reset `in_progress` → `pending`, retry                                       |
+| Auth token expired                | Queue rows `in_progress`                        | Nothing                                               | Refresh token, retry chunk                                                                  |
+| One op has bad data               | Other ops succeed, bad op gets `rejected`       | Valid ops applied                                     | Bad op → `failed_operations`, surface to user                                               |
+| Server down                       | Push returns 5xx                                | Nothing                                               | Exponential backoff, retry later                                                            |
+| Pull interrupted between entities | Some entities advanced their cursor, others not | Unchanged                                             | Per-entity cursor — finished entities keep progress, unfinished ones resume from old cursor |
 
 **In no scenario is data lost**, provided:
 
@@ -793,6 +805,7 @@ Scenario: A village shop's POS was offline for 10 days. 1000 operations piled up
 **T+2.5s** — Server responds: 48 ok, 1 conflict (customer edit clashed), 1 rejected (product reference no longer exists).
 
 **T+2.6s** —
+
 - 48 rows → `done`, domain rows → `synced`
 - 1 conflict row → `failed`, domain row → `failed`, server_state saved
 - 1 rejected row → moved to `failed_operations`, domain row → `failed`
@@ -868,12 +881,12 @@ src/
 ### 12.2 Push controller skeleton
 
 ```typescript
-@Controller('sync')
+@Controller("sync")
 @UseGuards(DeviceAuthGuard)
 export class SyncController {
   constructor(private readonly syncService: SyncService) {}
 
-  @Post('push')
+  @Post("push")
   async push(
     @Body() body: PushRequestDto,
     @CurrentDevice() device: DeviceContext,
@@ -889,9 +902,9 @@ export class SyncController {
     };
   }
 
-  @Get('pull')
+  @Get("pull")
   async pull(
-    @Query() query: PullQueryDto,            // { entity, since, limit, cursor }
+    @Query() query: PullQueryDto, // { entity, since, limit, cursor }
     @CurrentDevice() device: DeviceContext,
   ): Promise<PullResponseDto> {
     return this.syncService.pullEntity(query, device);
@@ -952,7 +965,7 @@ export class SyncService {
     const { serverTime, upserted, deleted, hasMore, nextCursor } =
       await this.dataSource.transaction(async (tx) => {
         const serverTime = await tx
-          .query('SELECT NOW() AS now')
+          .query("SELECT NOW() AS now")
           .then((r: any[]) => r[0].now as Date);
 
         const result = await service.getChangesSince(
@@ -982,11 +995,15 @@ export class SyncService {
 @Injectable()
 export class SalesSyncService {
   async apply(op: Operation, device: DeviceContext, tx: EntityManager) {
-    if (op.operation === 'create') {
-      const existing = await tx.findOne(Sale, { where: { id: op.client_id }});
+    if (op.operation === "create") {
+      const existing = await tx.findOne(Sale, { where: { id: op.client_id } });
       if (existing) {
-        return { client_op_id: op.client_op_id, status: 'duplicate',
-                 server_id: existing.id, version: existing.version };
+        return {
+          client_op_id: op.client_op_id,
+          status: "duplicate",
+          server_id: existing.id,
+          version: existing.version,
+        };
       }
       const sale = tx.create(Sale, {
         id: op.client_id,
@@ -995,27 +1012,34 @@ export class SalesSyncService {
         created_by_device: device.id,
       });
       await tx.save(sale);
-      return { client_op_id: op.client_op_id, status: 'ok',
-               server_id: sale.id, version: sale.version };
+      return {
+        client_op_id: op.client_op_id,
+        status: "ok",
+        server_id: sale.id,
+        version: sale.version,
+      };
     }
     // update, delete ...
   }
 
   async getChangesSince(since: Date | null, storeId: string, limit: number) {
-    const qb = this.repo.createQueryBuilder('s')
-      .where('s.store_id = :storeId', { storeId })
-      .orderBy('s.updated_at', 'ASC')
-      .limit(limit + 1);   // fetch one extra to detect has_more
+    const qb = this.repo
+      .createQueryBuilder("s")
+      .where("s.store_id = :storeId", { storeId })
+      .orderBy("s.updated_at", "ASC")
+      .limit(limit + 1); // fetch one extra to detect has_more
 
-    if (since) qb.andWhere('s.updated_at > :since', { since });
+    if (since) qb.andWhere("s.updated_at > :since", { since });
 
     const rows = await qb.getMany();
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
-    const nextCursor = hasMore ? page[page.length - 1].updated_at.toISOString() : null;
+    const nextCursor = hasMore
+      ? page[page.length - 1].updated_at.toISOString()
+      : null;
 
-    const upserted = page.filter(r => !r.deleted_at);
-    const deleted = page.filter(r => r.deleted_at).map(r => r.id);
+    const upserted = page.filter((r) => !r.deleted_at);
+    const deleted = page.filter((r) => r.deleted_at).map((r) => r.id);
     return { upserted, deleted, hasMore, nextCursor };
   }
 }
@@ -1071,7 +1095,7 @@ class SyncManager {
 }
 
 type SyncState = {
-  status: 'idle' | 'pushing' | 'pulling' | 'offline' | 'error';
+  status: "idle" | "pushing" | "pulling" | "offline" | "error";
   pendingCount: number;
   failedCount: number;
   lastSyncAt: Date | null;
@@ -1122,12 +1146,14 @@ Ship these to your backend so you can answer "Which stores haven't synced in 3 d
 ## 15. Checklist Before Going Live
 
 Data model:
+
 - [ ] All PKs are UUIDs generated on the device
 - [ ] Every syncable table has `updated_at`, `deleted_at`, `version`, `sync_status`
 - [ ] Indexes on `updated_at` on the backend
 - [ ] Stock changes use movement deltas, not absolute values
 
 Push flow:
+
 - [ ] Domain write and queue write happen in one SQLite transaction
 - [ ] Every op has a `client_op_id`
 - [ ] Server has a `processed_operations` table with unique index on `client_op_id`
@@ -1138,6 +1164,7 @@ Push flow:
 - [ ] `last_pushed_at` updated per entity at end of push cycle (using server's `server_time`)
 
 Pull flow:
+
 - [ ] Single `/sync/pull` endpoint, one entity per request
 - [ ] Cursor uses server time, not device time
 - [ ] Pagination via `has_more` / `next_cursor`
@@ -1145,6 +1172,7 @@ Pull flow:
 - [ ] Per-entity `last_pulled_at` updated only when that entity finishes successfully
 
 Scheduling:
+
 - [ ] Foreground trigger
 - [ ] Network reconnect trigger
 - [ ] Debounced after-mutation trigger
@@ -1153,6 +1181,7 @@ Scheduling:
 - [ ] Forced sync before day-close
 
 Reliability:
+
 - [ ] App-launch recovery resets `in_progress` → `pending`
 - [ ] Only ONE push cycle runs at a time (mutex)
 - [ ] Only ONE pull cycle runs at a time (mutex)
@@ -1161,12 +1190,14 @@ Reliability:
 - [ ] Schema version field in sync payloads for forward compatibility
 
 Observability:
+
 - [ ] Queue depth telemetry per device
 - [ ] `last_pushed_at` / `last_pulled_at` / `last_full_sync` per entity in telemetry
 - [ ] Server-side latency and error dashboards
 - [ ] Alerting on stale devices
 
 Security:
+
 - [ ] JWT auth + device ID on every sync request
 - [ ] Tenant isolation on every query
 - [ ] Rate limiting on sync endpoints
@@ -1176,21 +1207,21 @@ Security:
 
 ## Summary Decision Table
 
-| Question | Answer |
-|---|---|
-| Multiple APIs or single API for push? | **Single endpoint**, chunked batches of 50 |
-| Multiple APIs or single API for pull? | **Single endpoint, one entity per request** |
-| What if offline for 10 days with 1000 ops? | ~20 chunked batches, resumable, no data loss |
-| What if sync stops mid-way? | Completed ops stay done, rest stay `pending`, retried next cycle |
-| How often to sync? | On foreground, on reconnect, debounced after mutations, every 5–10 min for pull |
-| Push first or pull first? | **Always push first**, then pull |
-| How to prevent duplicates on retry? | `client_op_id` + server-side `processed_operations` table |
-| How to detect conflicts? | `version` field + optimistic concurrency check |
-| How to handle inventory? | Stock **movements** (deltas), not absolute counts |
-| Where is the source of truth on mobile? | Local SQLite; `sync_queue` is the outbox |
-| Where is the sync cursor time from? | Server's clock, returned in every pull response |
-| What stops pull from clobbering local edits? | Pull skips rows where `sync_status ∈ {pending, syncing, failed}` |
-| How is cursor drift handled? | Per-entity cursors; redundant fetches accepted as the trade-off for resumability |
+| Question                                     | Answer                                                                           |
+| -------------------------------------------- | -------------------------------------------------------------------------------- |
+| Multiple APIs or single API for push?        | **Single endpoint**, chunked batches of 50                                       |
+| Multiple APIs or single API for pull?        | **Single endpoint, one entity per request**                                      |
+| What if offline for 10 days with 1000 ops?   | ~20 chunked batches, resumable, no data loss                                     |
+| What if sync stops mid-way?                  | Completed ops stay done, rest stay `pending`, retried next cycle                 |
+| How often to sync?                           | On foreground, on reconnect, debounced after mutations, every 5–10 min for pull  |
+| Push first or pull first?                    | **Always push first**, then pull                                                 |
+| How to prevent duplicates on retry?          | `client_op_id` + server-side `processed_operations` table                        |
+| How to detect conflicts?                     | `version` field + optimistic concurrency check                                   |
+| How to handle inventory?                     | Stock **movements** (deltas), not absolute counts                                |
+| Where is the source of truth on mobile?      | Local SQLite; `sync_queue` is the outbox                                         |
+| Where is the sync cursor time from?          | Server's clock, returned in every pull response                                  |
+| What stops pull from clobbering local edits? | Pull skips rows where `sync_status ∈ {pending, syncing, failed}`                 |
+| How is cursor drift handled?                 | Per-entity cursors; redundant fetches accepted as the trade-off for resumability |
 
 ---
 
@@ -1280,9 +1311,9 @@ Both clients hit the same domain services under the hood. Only the API layer dif
 
 **Add these two columns to every domain table:**
 
-| Column | Type | Purpose |
-|---|---|---|
-| `created_by_user_id` | UUID FK → users | Who created the row |
+| Column                     | Type            | Purpose                 |
+| -------------------------- | --------------- | ----------------------- |
+| `created_by_user_id`       | UUID FK → users | Who created the row     |
 | `last_modified_by_user_id` | UUID FK → users | Who last edited the row |
 
 Keep `created_by_device` (already exists) — `NULL` means the row came from web; set means mobile.
@@ -1335,7 +1366,7 @@ export class CustomersService {
     id: string,
     payload: Partial<Customer>,
     expectedVersion: number,
-    actor: { source: 'mobile' | 'web'; userId: string; deviceId?: string },
+    actor: { source: "mobile" | "web"; userId: string; deviceId?: string },
   ): Promise<Customer> {
     return this.dataSource.transaction(async (tx) => {
       const current = await tx.findOne(Customer, { where: { id } });
@@ -1505,13 +1536,13 @@ src/
 
 ### 16.8 Authentication — Two Flows, One Signing Key
 
-| | Mobile | Web |
-|---|---|---|
-| Token type | Long-lived JWT + refresh token | Short-lived JWT, refresh via cookie |
-| Identifier | User + `device_id` | User + browser session |
-| Storage | Secure storage (Keychain / Keystore) | HttpOnly cookie |
-| Audience (`aud`) | `'mobile'` | `'web'` |
-| Typical role | Cashier | Manager / Admin |
+|                  | Mobile                               | Web                                 |
+| ---------------- | ------------------------------------ | ----------------------------------- |
+| Token type       | Long-lived JWT + refresh token       | Short-lived JWT, refresh via cookie |
+| Identifier       | User + `device_id`                   | User + browser session              |
+| Storage          | Secure storage (Keychain / Keystore) | HttpOnly cookie                     |
+| Audience (`aud`) | `'mobile'`                           | `'web'`                             |
+| Typical role     | Cashier                              | Manager / Admin                     |
 
 Same JWT signing key, different `aud` claims. Each guard validates its own audience.
 
@@ -1589,20 +1620,20 @@ Sale line items must store `price_at_time_of_sale` — a copied value, never a l
 
 ### 16.11 Summary Decision Table
 
-| Question | Answer |
-|---|---|
-| Does web use `/sync/push` and `/sync/pull`? | No. Web uses standard REST CRUD. |
-| Does mobile change at all? | No. Mobile sync flow stays exactly as designed. |
-| New DB columns needed? | `created_by_user_id` + `last_modified_by_user_id` only. |
-| What about source tracking (`mobile`/`web`)? | Infer from `created_by_device IS NULL`. Build `audit_log` if you need full history. |
-| Does web need an outbox? | No. Web is online-only; writes go straight to the API. |
-| How does mobile pick up web changes? | Existing `/sync/pull`. Web bumps `updated_at`; mobile sees it next pull. |
-| How does web pick up mobile changes? | Just queries the DB. Mobile-pushed rows are immediately visible. |
-| Do mobile and web share business logic? | Yes — domain services called by both layers. |
-| Real-time on web? | Optional WebSocket / SSE. 30-second polling is fine for sales/inventory/reports. Required for KDS / live order screens. |
-| Authentication? | Same signing key, different `aud`. Mobile: long-lived JWT + device_id. Web: short-lived + cookie. |
-| New conflict scenario? | Web-deletes-product-mobile-uses → add validation in `SalesSyncService.apply`. |
-| Most critical rule? | Web writes must always bump `updated_at` + `version` via shared domain service. |
+| Question                                     | Answer                                                                                                                  |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Does web use `/sync/push` and `/sync/pull`?  | No. Web uses standard REST CRUD.                                                                                        |
+| Does mobile change at all?                   | No. Mobile sync flow stays exactly as designed.                                                                         |
+| New DB columns needed?                       | `created_by_user_id` + `last_modified_by_user_id` only.                                                                 |
+| What about source tracking (`mobile`/`web`)? | Infer from `created_by_device IS NULL`. Build `audit_log` if you need full history.                                     |
+| Does web need an outbox?                     | No. Web is online-only; writes go straight to the API.                                                                  |
+| How does mobile pick up web changes?         | Existing `/sync/pull`. Web bumps `updated_at`; mobile sees it next pull.                                                |
+| How does web pick up mobile changes?         | Just queries the DB. Mobile-pushed rows are immediately visible.                                                        |
+| Do mobile and web share business logic?      | Yes — domain services called by both layers.                                                                            |
+| Real-time on web?                            | Optional WebSocket / SSE. 30-second polling is fine for sales/inventory/reports. Required for KDS / live order screens. |
+| Authentication?                              | Same signing key, different `aud`. Mobile: long-lived JWT + device_id. Web: short-lived + cookie.                       |
+| New conflict scenario?                       | Web-deletes-product-mobile-uses → add validation in `SalesSyncService.apply`.                                           |
+| Most critical rule?                          | Web writes must always bump `updated_at` + `version` via shared domain service.                                         |
 
 ---
 

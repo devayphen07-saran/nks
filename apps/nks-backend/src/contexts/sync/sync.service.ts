@@ -1,12 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SyncRepository } from './repositories/sync.repository';
-import { SyncDataMapper } from './mapper/sync-data.mapper';
 import { SyncAccessValidator } from './validators/sync-access.validator';
 import { SyncHandlerFactory } from './handlers/sync-handler.factory';
-import { SyncValidationService } from './services/sync-validation.service';
+import { SyncSignatureService } from './services/sync-signature.service';
 import { SyncIdempotencyService } from './services/sync-idempotency.service';
+import { parseCursor } from './sync-cursor';
 import type {
   SyncOperation,
+  SyncChange,
   ChangesResponse,
   OfflineSessionContext,
   PushResponse,
@@ -55,36 +56,6 @@ function sanitizeOpData(
   return result;
 }
 
-/**
- * Single source of truth for pull-sync tables.
- * Adding a new table: add one entry here — handler, mapper, and SUPPORTED_TABLES stay in sync.
- *
- * NOTE: Only include tables that mobile clients have handlers for. Currently only state and district.
- */
-const TABLE_REGISTRY = {
-  state: {
-    fetch: (
-      repo: SyncRepository,
-      cursorMs: number,
-      cursorId: number,
-      limit: number,
-    ) => repo.getStateChanges(cursorMs, cursorId, limit),
-    map: SyncDataMapper.buildStateChange,
-  },
-  district: {
-    fetch: (
-      repo: SyncRepository,
-      cursorMs: number,
-      cursorId: number,
-      limit: number,
-    ) => repo.getDistrictChanges(cursorMs, cursorId, limit),
-    map: SyncDataMapper.buildDistrictChange,
-  },
-} as const;
-
-type SyncTableKey = keyof typeof TABLE_REGISTRY;
-const SUPPORTED_TABLES = new Set<string>(Object.keys(TABLE_REGISTRY));
-
 @Injectable()
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
@@ -92,7 +63,7 @@ export class SyncService {
   constructor(
     private readonly syncRepository: SyncRepository,
     private readonly syncHandlerFactory: SyncHandlerFactory,
-    private readonly syncValidation: SyncValidationService,
+    private readonly syncSignature: SyncSignatureService,
     private readonly syncIdempotency: SyncIdempotencyService,
   ) {}
 
@@ -117,7 +88,7 @@ export class SyncService {
     const serverTime = new Date().toISOString();
 
     if (offlineSession) {
-      await this.syncValidation.validateOfflineSession(offlineSession, userId);
+      await this.syncSignature.validateOfflineSession(offlineSession, userId);
 
       // When offlineToken is absent the JWT write-guard's assertStoreMatch is
       // skipped. Fill the gap: resolve offlineSession.storeGuuid to a numeric ID
@@ -138,14 +109,10 @@ export class SyncService {
 
     for (const op of operations) {
       // ── Phase 1: pre-transaction validation ────────────────────────────────
-      if (!this.syncValidation.isValidOp(op)) {
-        results.push({ opId: op.id, status: 'rejected', reason: 'INVALID_OP' });
-        continue;
-      }
-
+      // Op type ('create'|'update'|'delete') validated by Zod enum on the DTO.
       if (
         signingKey &&
-        !this.syncValidation.verifyOperationSignature(op, signingKey)
+        !this.syncSignature.verifyOperationSignature(op, signingKey)
       ) {
         this.logger.warn(`Operation ${op.id} rejected — signature mismatch`, {
           table: op.table,
@@ -161,7 +128,7 @@ export class SyncService {
       try {
         opResult = await this.syncRepository.withTransaction(async (tx) => {
           const idempotencyKey = `${op.clientId}-${op.id}`;
-          const requestHash = this.syncValidation.hashOperation(op);
+          const requestHash = this.syncSignature.hashOperation(op);
 
           const claim = await this.syncIdempotency.claim(
             idempotencyKey,
@@ -170,17 +137,35 @@ export class SyncService {
           );
 
           if (claim === 'replay') {
-            return { opId: op.id, status: 'rejected' as const, reason: 'PAYLOAD_TAMPERED' };
+            return { opId: op.id, status: 'rejected' as const, reason: 'IDEMPOTENCY_REPLAY' };
           }
           if (claim === 'duplicate') {
             return { opId: op.id, status: 'duplicate' as const };
           }
 
-          const wasHandled = await this.syncHandlerFactory.handle(op, userId, activeStoreId, tx);
-          if (!wasHandled) {
+          const handlerResult = await this.syncHandlerFactory.handle(op, userId, activeStoreId, tx);
+          if (handlerResult === null) {
             return { opId: op.id, status: 'rejected' as const, reason: 'UNKNOWN_TABLE' };
           }
-          return { opId: op.id, status: 'ok' as const };
+          if (handlerResult.status === 'rejected') {
+            return { opId: op.id, status: 'rejected' as const, reason: handlerResult.reason };
+          }
+          if (handlerResult.status === 'conflict') {
+            // The base class read with FOR UPDATE before detecting the version
+            // mismatch and DID NOT write — the transaction commits the
+            // idempotency claim only, not any data change. Mobile receives
+            // serverState and is expected to merge or re-queue.
+            return {
+              opId: op.id,
+              status: 'conflict' as const,
+              serverState: handlerResult.serverState,
+            };
+          }
+          return {
+            opId: op.id,
+            status: 'ok' as const,
+            serverState: handlerResult.serverState,
+          };
         });
       } catch (err) {
         const reason = err instanceof Error ? err.message : 'INTERNAL_ERROR';
@@ -224,53 +209,41 @@ export class SyncService {
     SyncAccessValidator.assertStoreMembership(storeId);
     SyncAccessValidator.assertPullStoreMatchesSession(storeId, sessionActiveStoreId);
 
+    // Filter requested tables to those with a registered handler. Pull and
+    // push share the same handler registry — adding a new sync table now
+    // means writing one handler and registering it; no edits here.
+    const known = this.syncHandlerFactory.knownTables();
     const requestedTables = tablesCsv
       .split(',')
       .map((t) => t.trim())
-      .filter((t) => SUPPORTED_TABLES.has(t));
+      .filter((t) => known.has(t));
 
     this.logger.debug(
-      `SYNC: requested tables="${tablesCsv}", supported="${[...SUPPORTED_TABLES].join(',')}",filtered=[${requestedTables.join(',')}]`,
+      `SYNC: requested tables="${tablesCsv}", known="${[...known].join(',')}", filtered=[${requestedTables.join(',')}]`,
     );
 
-    // Fetch limit+1 rows per table to detect hasMore without a separate COUNT.
-    const fetchLimit = limit + 1;
-
-    // Each table uses its own cursor — eliminates re-fetching already-synced tables
-    // when one table's cursor is behind (e.g. initial sync of a new table).
-    const fetched = await Promise.all(
-      requestedTables.map((table) => {
+    const batches = await Promise.all(
+      requestedTables.map(async (table) => {
         const cursorStr = cursors[table] ?? '0:0';
-        const { ts, id } = this.parseCursor(cursorStr);
-        this.logger.debug(`[SYNC] Fetching ${table}: cursor="${cursorStr}" → ts=${ts}, id=${id}`);
-        return TABLE_REGISTRY[table as SyncTableKey]
-          .fetch(this.syncRepository, ts, id, fetchLimit)
-          .then((rows) => {
-            this.logger.debug(`[SYNC] Got ${rows.length} rows for ${table}`);
-            return { table: table as SyncTableKey, rows };
-          });
+        const { ts, id } = parseCursor(cursorStr);
+        const handler = this.syncHandlerFactory.get(table);
+        // Filter above guarantees handler exists; defensive fallback:
+        if (!handler) {
+          return { table, batch: { changes: [] as SyncChange[], nextCursor: cursorStr, hasMore: false } };
+        }
+        const batch = await handler.getChanges(ts, id, limit);
+        return { table, batch };
       }),
     );
 
-    const allChanges: import('./dto/responses').SyncChange[] = [];
-    // Per-table next cursors — mobile advances each table independently.
+    const allChanges: SyncChange[] = [];
     const nextCursors: Record<string, string> = {};
     let hasMore = false;
 
-    for (const { table, rows } of fetched) {
-      this.logger.debug(`SYNC: table="${table}" returned ${rows.length} rows (fetchLimit=${fetchLimit})`);
-      if (rows.length > fetchLimit - 1) hasMore = true;
-      const slice = rows.slice(0, limit);
-      const { map } = TABLE_REGISTRY[table];
-      allChanges.push(
-        ...slice.map(
-          map as (
-            r: (typeof rows)[number],
-          ) => import('./dto/responses').SyncChange,
-        ),
-      );
-      // Build per-table next cursor from the last row in this table's slice.
-      nextCursors[table] = this.buildTableCursor(slice, cursors[table] ?? '0:0');
+    for (const { table, batch } of batches) {
+      allChanges.push(...batch.changes);
+      nextCursors[table] = batch.nextCursor;
+      if (batch.hasMore) hasMore = true;
     }
 
     this.logger.debug(
@@ -278,24 +251,5 @@ export class SyncService {
     );
 
     return { serverTime, nextCursors, hasMore, changes: allChanges };
-  }
-
-  private parseCursor(cursor: string): { ts: number; id: number } {
-    const parts = cursor.split(':');
-    if (parts.length !== 2) return { ts: 0, id: 0 };
-    const ts = parseInt(parts[0], 10);
-    const id = parseInt(parts[1], 10);
-    if (isNaN(ts) || isNaN(id)) return { ts: 0, id: 0 };
-    return { ts, id };
-  }
-
-  /** Build the next cursor for a single table from its result slice. */
-  private buildTableCursor(
-    rows: Array<{ id: number; updatedAt: Date | null }>,
-    fallback: string,
-  ): string {
-    if (rows.length === 0) return fallback;
-    const last = rows[rows.length - 1];
-    return `${(last.updatedAt ?? new Date(0)).getTime()}:${last.id}`;
   }
 }

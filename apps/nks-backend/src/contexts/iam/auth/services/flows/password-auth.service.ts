@@ -17,9 +17,9 @@ import { SystemRoleCodes } from '../../../../../common/constants/system-role-cod
 import { SYSTEM_USER_ID } from '../../../../../common/constants/app-constants';
 import type { DeviceInfo } from '../../interfaces/device-info.interface';
 
-// Pre-computed once at module load — same cost as PasswordService.BCRYPT_ROUNDS.
+// Pre-computed once at module load with the same cost factor used by PasswordService.
 // Used to normalize response time when the email is not found — prevents timing-based enumeration.
-const DUMMY_BCRYPT_HASH = bcrypt.hashSync('__nks_timing_guard__', PasswordService.BCRYPT_ROUNDS);
+const DUMMY_BCRYPT_HASH = bcrypt.hashSync('__nks_timing_guard__', 12);
 
 type AuthUser = NonNullable<
   Awaited<ReturnType<AuthUsersRepository['findByEmail']>>

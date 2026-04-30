@@ -20,7 +20,8 @@ import { baseEntity, auditFields } from '../../base.entity';
  *
  * Polymorphic address storage for any entity (customer, vendor, store, etc.)
  * India-only. Location resolved via state/district/pincode FK references.
- * addressTypeFk references code_value (ADDRESS_TYPE category).
+ * addressTypeFk references the dedicated `address_type` table (registered in
+ * lookup_type with has_table=true; carries the is_shipping_applicable flag).
  */
 export const address = pgTable(
   'address',
@@ -34,7 +35,7 @@ export const address = pgTable(
     recordId: bigint('record_id', { mode: 'number' }).notNull(),
 
     // Address type (HOME, OFFICE, BILLING, SHIPPING, WAREHOUSE, REGISTERED_OFFICE, etc.)
-    // NORMALIZED: Dedicated table instead of code_value pattern
+    // Dedicated table (has_table=true) — carries is_shipping_applicable.
     addressTypeFk: bigint('address_type_fk', { mode: 'number' })
       .notNull()
       .references(() => addressType.id, { onDelete: 'restrict' }),

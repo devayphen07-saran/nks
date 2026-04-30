@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  BATCH_LOOKUP,
+  GET_PUBLIC_LOOKUP,
   GET_LOOKUP_TYPES,
   GET_LOOKUP_VALUES,
   CREATE_SALUTATION,
@@ -32,6 +34,8 @@ import {
   GET_SUBSCRIPTION_STATUSES,
 } from "./api-data";
 import type {
+  BatchLookupRequest,
+  BatchLookupResponse,
   LookupTypesResponse,
   LookupValuesResponse,
   SalutationsListResponse,
@@ -66,6 +70,8 @@ export const lookupKeys = {
   all: ["lookups"] as const,
   types: () => [...lookupKeys.all, "types"] as const,
   values: (code: string) => [...lookupKeys.all, "values", code] as const,
+  publicLookup: (typeCode: string) =>
+    [...lookupKeys.all, "public", typeCode] as const,
   salutations: () => [...lookupKeys.all, "salutations"] as const,
   countries: () => [...lookupKeys.all, "countries"] as const,
   addressTypes: () => [...lookupKeys.all, "addressTypes"] as const,
@@ -75,6 +81,7 @@ export const lookupKeys = {
   storeCategories: () => [...lookupKeys.all, "storeCategories"] as const,
   currencies: () => [...lookupKeys.all, "currencies"] as const,
   volumes: () => [...lookupKeys.all, "volumes"] as const,
+  batch: (types: string[]) => [...lookupKeys.all, "batch", [...types].sort()] as const,
 };
 
 // ── Admin: Lookup Configuration Queries ────────────────────────────────────────
@@ -99,6 +106,57 @@ export const useLookupValues = (
     queryKey: lookupKeys.values(code),
     staleTime: 1000 * 60 * 5,
     enabled: (options?.enabled ?? true) && !!code,
+  });
+};
+
+// ── Public: Batch Lookup ────────────────────────────────────────────────────────
+//
+// Fetches multiple lookup types in a single POST /lookups/batch round-trip.
+// Pass type codes or kebab-slugs; the backend resolves each one and returns a
+// map keyed by exactly the string you passed in.
+// Unknown or non-public types come back as empty arrays — the hook never errors
+// due to a single missing type.
+//
+// Usage:
+//   const { data } = useBatchLookups(['salutations', 'COUNTRY', 'address-types']);
+//   data?.['salutations']   → LookupValueResponse[]
+//   data?.['COUNTRY']       → CountryResponse[]
+
+export const useBatchLookups = (
+  types: string[],
+  options?: { enabled?: boolean },
+) => {
+  return useQuery({
+    ...BATCH_LOOKUP.queryOptions<BatchLookupResponse>({
+      bodyParam: { types } satisfies BatchLookupRequest,
+    }),
+    queryKey: lookupKeys.batch(types),
+    staleTime: 1000 * 60 * 5,
+    enabled: (options?.enabled ?? true) && types.length > 0,
+  });
+};
+
+// ── Public: Generic Lookup (DB-driven) ─────────────────────────────────────────
+//
+// Single hook that works for any lookup_type registered on the backend.
+// Pass either the canonical code ("ADDRESS_TYPE") or a kebab-slug ("address-types").
+// The response shape is LookupValuesResponse — sufficient for has_table=false
+// types and any has_table=true type that returns the standard
+// (guuid, code, label, description) shape. For lookups with richer DTOs
+// (Country, Currency, Volume), prefer the dedicated hooks below for stricter
+// typing.
+
+export const usePublicLookup = (
+  typeCode: string,
+  options?: { enabled?: boolean },
+) => {
+  return useQuery({
+    ...GET_PUBLIC_LOOKUP.queryOptions<LookupValuesResponse>({
+      pathParam: { code: typeCode },
+    }),
+    queryKey: lookupKeys.publicLookup(typeCode),
+    staleTime: 1000 * 60 * 5,
+    enabled: (options?.enabled ?? true) && !!typeCode,
   });
 };
 

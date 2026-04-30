@@ -1,15 +1,16 @@
 /**
  * lookups.mapper.ts
  *
- * Mappers for lookup entities that have their own dedicated tables
- * (country, communication-type, currency, volume).
+ * Mappers for lookup entities with their own dedicated tables and richer
+ * response shapes (country, communication-type, currency, volume).
  *
- * Code-value–backed lookups (salutation, address-type, designation,
- * store-legal-type, store-category) live in code-value.mapper.ts.
+ * Generic value-list rows from the `lookup` table — and dedicated tables that
+ * fit the same (guuid, code, label, description) shape — are mapped via
+ * {@link LookupValueMapper} in lookup-value.mapper.ts.
  */
 
-export { CodeValueMapper } from './code-value.mapper';
-export type { CodeValueRow } from './code-value.mapper';
+export { LookupValueMapper } from './lookup-value.mapper';
+export type { LookupSummaryRow } from './lookup-value.mapper';
 
 import type {
   CountryResponse,

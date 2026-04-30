@@ -1,62 +1,22 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { eq, sql, and, isNull, or } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/pg-core';
 import { InjectDb } from '../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../core/database/base.repository';
 import { TransactionService } from '../../../core/database/transaction.service';
+import type { DbTransaction } from '../../../core/database/transaction.service';
 import * as schema from '../../../core/database/schema';
 
 type Db = NodePgDatabase<typeof schema>;
 
-const parentRoutes = alias(schema.routes, 'parent_routes');
-
-export interface RouteChangeRow {
-  id: number;
-  guuid: string;
-  parentRouteGuuid: string | null;
-  routeName: string;
-  routePath: string;
-  fullPath: string;
-  description: string | null;
-  iconName: string | null;
-  routeType: string;
-  routeScope: string;
-  isPublic: boolean;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date | null;
-  deletedAt: Date | null;
-}
-
-export interface StateChangeRow {
-  id: number;
-  guuid: string;
-  stateName: string;
-  stateCode: string;
-  gstStateCode: string | null;
-  isUnionTerritory: boolean;
-  isActive: boolean;
-  updatedAt: Date | null;
-  deletedAt: Date | null;
-}
-
-export interface DistrictChangeRow {
-  id: number;
-  guuid: string;
-  districtName: string;
-  districtCode: string | null;
-  lgdCode: string | null;
-  stateGuuid: string | null;
-  isActive: boolean;
-  updatedAt: Date | null;
-  deletedAt: Date | null;
-}
-
+/**
+ * Sync-specific meta operations: store membership + idempotency log.
+ *
+ * Domain-specific change-feed reads (state, district, etc.) live in the
+ * domain repositories — each sync handler owns its read via `getChanges()`.
+ */
 @Injectable()
 export class SyncRepository extends BaseRepository {
-  private readonly logger = new Logger(SyncRepository.name);
-
   constructor(
     @InjectDb() db: Db,
     private readonly txService: TransactionService,
@@ -100,127 +60,6 @@ export class SyncRepository extends BaseRepository {
   }
 
   /**
-   * Fetch routes changed since a given compound cursor (timestamp + id).
-   * Uses (updated_at, id) > (cursorTs, cursorId) to break ties when two rows
-   * share the same updated_at, preventing silent data loss at page boundaries.
-   * Fetches limit+1 rows to determine hasMore flag.
-   */
-  async getRouteChanges(
-    cursorMs: number,
-    cursorId: number,
-    limit: number,
-  ): Promise<RouteChangeRow[]> {
-    const cursorDate = new Date(cursorMs);
-
-    const rows = await this.db
-      .select({
-        id: schema.routes.id,
-        guuid: schema.routes.guuid,
-        parentRouteGuuid: parentRoutes.guuid,
-        routeName: schema.routes.routeName,
-        routePath: schema.routes.routePath,
-        fullPath: schema.routes.fullPath,
-        description: schema.routes.description,
-        iconName: schema.routes.iconName,
-        routeType: sql<string>`${schema.routes.routeType}::text`,
-        routeScope: sql<string>`${schema.routes.routeScope}::text`,
-        isPublic: schema.routes.isPublic,
-        isActive: schema.routes.isActive,
-        createdAt: schema.routes.createdAt,
-        updatedAt: schema.routes.updatedAt,
-        deletedAt: schema.routes.deletedAt,
-      })
-      .from(schema.routes)
-      .leftJoin(parentRoutes, eq(schema.routes.parentRouteFk, parentRoutes.id))
-      .where(
-        sql`(${schema.routes.updatedAt}, ${schema.routes.id}) > (${cursorDate}, ${cursorId})`,
-      )
-      .orderBy(schema.routes.updatedAt, schema.routes.id)
-      .limit(limit + 1);
-
-    return rows;
-  }
-
-  /**
-   * Fetch states changed since a given compound cursor (timestamp + id).
-   * Uses explicit OR condition: updatedAt > cursor OR (updatedAt == cursor AND id > cursorId)
-   */
-  async getStateChanges(cursorMs: number, cursorId: number, limit: number): Promise<StateChangeRow[]> {
-    const cursorDate = new Date(cursorMs);
-    this.logger.debug(`[SYNC] getStateChanges: cursorMs=${cursorMs}, cursorId=${cursorId}, cursorDate=${cursorDate.toISOString()}`);
-    const rows = await this.db
-      .select({
-        id: schema.state.id,
-        guuid: schema.state.guuid,
-        stateName: schema.state.stateName,
-        stateCode: schema.state.stateCode,
-        gstStateCode: schema.state.gstStateCode,
-        isUnionTerritory: schema.state.isUnionTerritory,
-        isActive: schema.state.isActive,
-        updatedAt: schema.state.updatedAt,
-        deletedAt: schema.state.deletedAt,
-      })
-      .from(schema.state)
-      .where(
-        or(
-          sql`${schema.state.updatedAt} > ${cursorDate}`,
-          and(
-            sql`${schema.state.updatedAt} = ${cursorDate}`,
-            sql`${schema.state.id} > ${cursorId}`,
-          ),
-        ),
-      )
-      .orderBy(schema.state.updatedAt, schema.state.id)
-      .limit(limit + 1);
-    this.logger.debug(`[SYNC] getStateChanges returned ${rows.length} rows`);
-    if (rows.length > 0) {
-      this.logger.debug(`[SYNC] First row: id=${rows[0].id}, updatedAt=${rows[0].updatedAt}`);
-      this.logger.debug(`[SYNC] Last row: id=${rows[rows.length - 1].id}, updatedAt=${rows[rows.length - 1].updatedAt}`);
-    }
-    return rows;
-  }
-
-  /**
-   * Fetch districts changed since a given compound cursor (timestamp + id).
-   * Uses explicit OR condition: updatedAt > cursor OR (updatedAt == cursor AND id > cursorId)
-   */
-  async getDistrictChanges(cursorMs: number, cursorId: number, limit: number): Promise<DistrictChangeRow[]> {
-    const cursorDate = new Date(cursorMs);
-    this.logger.debug(`[SYNC] getDistrictChanges: cursorMs=${cursorMs}, cursorId=${cursorId}, cursorDate=${cursorDate.toISOString()}`);
-    const rows = await this.db
-      .select({
-        id: schema.district.id,
-        guuid: schema.district.guuid,
-        districtName: schema.district.districtName,
-        districtCode: schema.district.districtCode,
-        lgdCode: schema.district.lgdCode,
-        stateGuuid: schema.state.guuid,
-        isActive: schema.district.isActive,
-        updatedAt: schema.district.updatedAt,
-        deletedAt: schema.district.deletedAt,
-      })
-      .from(schema.district)
-      .leftJoin(schema.state, eq(schema.district.stateFk, schema.state.id))
-      .where(
-        or(
-          sql`${schema.district.updatedAt} > ${cursorDate}`,
-          and(
-            sql`${schema.district.updatedAt} = ${cursorDate}`,
-            sql`${schema.district.id} > ${cursorId}`,
-          ),
-        ),
-      )
-      .orderBy(schema.district.updatedAt, schema.district.id)
-      .limit(limit + 1);
-    this.logger.debug(`[SYNC] getDistrictChanges returned ${rows.length} rows`);
-    if (rows.length > 0) {
-      this.logger.debug(`[SYNC] First row: id=${rows[0].id}, updatedAt=${rows[0].updatedAt}`);
-      this.logger.debug(`[SYNC] Last row: id=${rows[rows.length - 1].id}, updatedAt=${rows[rows.length - 1].updatedAt}`);
-    }
-    return rows;
-  }
-
-  /**
    * Atomically claim an idempotency key.
    *
    * Uses INSERT ... ON CONFLICT DO NOTHING RETURNING to avoid the TOCTOU window
@@ -240,7 +79,7 @@ export class SyncRepository extends BaseRepository {
    * Must be called inside the same transaction as the mutation so that a failed
    * operation rolls back the claim — leaving the key available for a clean retry.
    */
-  async claimIdempotencyKey(key: string, requestHash: string, tx: Db): Promise<boolean> {
+  async claimIdempotencyKey(key: string, requestHash: string, tx: DbTransaction): Promise<boolean> {
     const rows = await tx
       .insert(schema.idempotencyLog)
       .values({ key, requestHash, processedAt: new Date() })
@@ -254,7 +93,7 @@ export class SyncRepository extends BaseRepository {
    * Used after claimIdempotencyKey() returns false to distinguish a legitimate
    * duplicate (same hash) from a payload-mismatch replay (different hash).
    */
-  async getStoredHash(key: string, tx: Db): Promise<string | null> {
+  async getStoredHash(key: string, tx: DbTransaction): Promise<string | null> {
     const rows = await tx
       .select({ requestHash: schema.idempotencyLog.requestHash })
       .from(schema.idempotencyLog)
@@ -266,7 +105,7 @@ export class SyncRepository extends BaseRepository {
   /**
    * Run a callback inside a database transaction via TransactionService.
    */
-  async withTransaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
+  async withTransaction<T>(fn: (tx: DbTransaction) => Promise<T>): Promise<T> {
     return this.txService.run(fn);
   }
 

@@ -17,7 +17,7 @@ import { lookup } from '../../lookups/lookup/lookup.table';
  * Relationships:
  * - One plan has many prices (different currencies/frequencies)
  * - One plan can have many subscriptions
- * - Plans reference code_value (PLAN_TYPE category) for plan types
+ * - Plans reference the `lookup` table (lookup_type code = PLAN_TYPE) for plan types
  */
 export const plans = pgTable('plans', {
   ...baseEntity(),

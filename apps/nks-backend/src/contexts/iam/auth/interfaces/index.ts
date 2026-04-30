@@ -1,2 +1,2 @@
-export * from './session-user.interface';
-export * from './device-info.interface';
+export type * from './session-user.interface';
+export type * from './device-info.interface';

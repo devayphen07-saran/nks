@@ -1,40 +1,13 @@
-import type { RouteChangeRow, StateChangeRow, DistrictChangeRow } from '../repositories/sync.repository';
+import type {
+  StateChangeRow,
+  DistrictChangeRow,
+} from '../../reference-data/location/repositories/location.repository';
 import type { SyncChange } from '../dto/responses';
 
 export class SyncDataMapper {
   /**
-   * Map a raw route DB row into a SyncChange payload for mobile clients.
-   * Soft-deleted rows become { operation: 'delete', data: null }.
-   */
-  static buildRouteChange(routeChangeRow: RouteChangeRow): SyncChange {
-    const updatedAt = routeChangeRow.updatedAt ?? new Date(0);
-    return {
-      table: 'routes',
-      operation: routeChangeRow.deletedAt ? 'delete' : 'upsert',
-      updatedAt: updatedAt.getTime(),
-      data: routeChangeRow.deletedAt
-        ? null
-        : {
-            guuid: routeChangeRow.guuid,
-            parentRouteGuuid: routeChangeRow.parentRouteGuuid,
-            routeName: routeChangeRow.routeName,
-            routePath: routeChangeRow.routePath,
-            fullPath: routeChangeRow.fullPath,
-            description: routeChangeRow.description,
-            iconName: routeChangeRow.iconName,
-            routeType: routeChangeRow.routeType,
-            routeScope: routeChangeRow.routeScope,
-            isPublic: routeChangeRow.isPublic,
-            isActive: routeChangeRow.isActive,
-            createdAt: routeChangeRow.createdAt.toISOString(),
-            updatedAt: updatedAt.toISOString(),
-            deletedAt: null,
-          },
-    };
-  }
-
-  /**
    * Map a raw state DB row into a SyncChange payload for mobile clients.
+   * Soft-deleted rows become { operation: 'delete', data: null }.
    */
   static buildStateChange(stateChangeRow: StateChangeRow): SyncChange {
     const updatedAt = stateChangeRow.updatedAt ?? new Date(0);
@@ -79,48 +52,5 @@ export class SyncDataMapper {
             deletedAt: null,
           },
     };
-  }
-
-  /**
-   * Field-level merge using per-field timestamps.
-   *
-   * For each field: the value whose {field}_updated_at timestamp
-   * is newer wins. Prevents data loss when two users edited different
-   * fields of the same record while both were offline.
-   */
-  static fieldLevelMerge(
-    server: Record<string, unknown>,
-    client: Record<string, unknown>,
-  ): Record<string, unknown> {
-    const IMMUTABLE = new Set([
-      'id',
-      'createdAt', 'created_at',
-      'version', 'deletedAt', 'deleted_at',
-    ]);
-
-    const merged: Record<string, unknown> = { ...server };
-
-    for (const [key, clientValue] of Object.entries(client)) {
-      if (IMMUTABLE.has(key) || key.endsWith('_updatedAt') || key.endsWith('_updated_at')) {
-        continue;
-      }
-
-      const clientTs = (client[`${key}_updatedAt`] ?? client[`${key}_updated_at`]) as string | undefined;
-      const serverTs = (server[`${key}_updatedAt`] ?? server[`${key}_updated_at`]) as string | undefined;
-
-      if (serverTs && clientTs) {
-        if (new Date(clientTs) > new Date(serverTs)) {
-          merged[key] = clientValue;
-          const tsKey = `${key}_updatedAt` in server ? `${key}_updatedAt` : `${key}_updated_at`;
-          merged[tsKey] = clientTs;
-        }
-      } else if (!serverTs && clientTs) {
-        merged[key] = clientValue;
-        const tsKey = `${key}_updatedAt` in client ? `${key}_updatedAt` : `${key}_updated_at`;
-        merged[tsKey] = clientTs;
-      }
-    }
-
-    return merged;
   }
 }

@@ -1,5 +1,36 @@
 import { APIData, APIMethod } from "../api-handler";
 
+// ─── Generic Public Lookup ────────────────────────────────────────────────
+//
+// Single endpoint that returns values for any registered lookup_type.
+// Backend resolves the path param against `lookup_type.code` and routes to
+// either the generic `lookup` table (has_table=false) or a dedicated table
+// mapper (has_table=true). Use this for any new lookup type without adding
+// a new per-type constant below.
+//
+// The placeholder is named `:code` here to match PathRecord's typed union
+// in api-handler.ts; the backend route uses `:typeCode` and substitutes the
+// value the same way regardless of the placeholder name.
+//
+// Examples:
+//   pathParam: { code: "INVOICE_TYPE" }    → GET /lookups/INVOICE_TYPE
+//   pathParam: { code: "address-types" }   → GET /lookups/address-types
+//
+// The per-type constants below remain as typed shortcuts for the lookups that
+// have richer response shapes (Country, Currency, Volume, etc.).
+
+export const GET_PUBLIC_LOOKUP: APIData = new APIData(
+  "lookups/:code",
+  APIMethod.GET,
+  { public: true },
+);
+
+export const BATCH_LOOKUP: APIData = new APIData(
+  "lookups/batch",
+  APIMethod.POST,
+  { public: true },
+);
+
 // ─── Lookup Reference Data ─────────────────────────────────────────────────
 
 export const GET_SALUTATIONS: APIData = new APIData(

@@ -205,6 +205,7 @@ export class TokenLifecycleService {
     const offlineToken = this.jwtConfigService.signOfflineToken(
       {
         sub: user.guuid,
+        sid: session.guuid,
         ...(user.email ? { email: user.email } : {}),
         roles: userRoles.map((r) => r.roleCode),
         stores: userRoles
