@@ -23,5 +23,26 @@
       "tag": "0002_store_status_fk",
       "breakpoints": true
     }
+    ,{
+      "idx": 3,
+      "version": "7",
+      "when": 1745990400000,
+      "tag": "0003_lookup_consolidation",
+      "breakpoints": true
+    }
+    ,{
+      "idx": 4,
+      "version": "7",
+      "when": 1746076800000,
+      "tag": "0004_is_system_constraints",
+      "breakpoints": true
+    }
+    ,{
+      "idx": 5,
+      "version": "7",
+      "when": 1746163200000,
+      "tag": "0005_country_lookup_type",
+      "breakpoints": true
+    }
   ]
 }
