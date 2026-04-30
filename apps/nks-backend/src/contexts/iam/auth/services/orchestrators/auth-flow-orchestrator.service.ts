@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { SessionCommandService } from '../session/session-command.service';
+import { SessionBootstrapService } from '../session/session-bootstrap.service';
 import { TokenService } from '../token/token.service';
 import type { AuthResponseEnvelope } from '../../dto';
 import type { DeviceInfo } from '../../interfaces/device-info.interface';
@@ -31,7 +31,7 @@ export interface AuthUserContext {
 export class AuthFlowOrchestratorService {
 
   constructor(
-    private readonly sessions: SessionCommandService,
+    private readonly bootstrap: SessionBootstrapService,
     private readonly tokens: TokenService,
   ) {}
 
@@ -39,7 +39,7 @@ export class AuthFlowOrchestratorService {
     user: AuthUserContext,
     deviceInfo: DeviceInfo | undefined,
   ): Promise<AuthResponseEnvelope> {
-    const session = await this.sessions.createSessionForUser(user.id, deviceInfo);
+    const session = await this.bootstrap.createForUser(user.id, deviceInfo);
 
     const tokenPair = await this.tokens.createTokenPair(
       user.guuid,
@@ -63,15 +63,4 @@ export class AuthFlowOrchestratorService {
       deviceInfo?.deviceId,
     );
   }
-}
-
-// Backward compatibility: standalone function wrapper
-export async function executeAuthFlow(
-  user: AuthUserContext,
-  deviceInfo: DeviceInfo | undefined,
-  sessions: SessionCommandService,
-  tokens: TokenService,
-): Promise<AuthResponseEnvelope> {
-  const service = new AuthFlowOrchestratorService(sessions, tokens);
-  return service.execute(user, deviceInfo);
 }

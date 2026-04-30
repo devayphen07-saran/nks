@@ -3,6 +3,7 @@ import { SessionAuthValidator } from '../../validators';
 import { SessionRepository } from '../../repositories/session.repository';
 import { SessionContextRepository } from '../../repositories/session-context.repository';
 import { SessionCommandService } from './session-command.service';
+import { SessionBootstrapService } from './session-bootstrap.service';
 import { AuditCommandService } from '../../../../compliance/audit/audit-command.service';
 import type { DeviceInfo } from '../../interfaces/device-info.interface';
 
@@ -14,6 +15,7 @@ export class AuthCommandService {
     private readonly sessionRepository: SessionRepository,
     private readonly sessionContextRepository: SessionContextRepository,
     private readonly sessionCommand: SessionCommandService,
+    private readonly sessionBootstrap: SessionBootstrapService,
     private readonly auditCommand: AuditCommandService,
   ) {}
 
@@ -35,7 +37,7 @@ export class AuthCommandService {
     const session = await this.sessionRepository.findByToken(oldToken);
     SessionAuthValidator.assertSessionOwnership(session, userId);
 
-    const newSession = await this.sessionCommand.createSessionForUser(userId, deviceInfo);
+    const newSession = await this.sessionBootstrap.createForUser(userId, deviceInfo);
     await this.sessionRepository.delete(session.id);
     return newSession;
   }

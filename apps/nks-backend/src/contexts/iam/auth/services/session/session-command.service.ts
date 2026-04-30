@@ -6,7 +6,6 @@ import { SessionContextRepository } from '../../repositories/session-context.rep
 import { RevokedDevicesRepository } from '../../repositories/revoked-devices.repository';
 import { SessionAuthValidator } from '../../validators';
 import { SessionValidator } from '../../../../../common/validators/session.validator';
-import { SessionBootstrapService } from './session-bootstrap.service';
 import { AUTH_CONSTANTS } from '../../../../../common/constants/app-constants';
 import type { UserSession, NewUserSession } from '../../../../../core/database/schema/auth/user-session';
 import type { DeviceInfo } from '../../interfaces/device-info.interface';
@@ -52,7 +51,6 @@ export class SessionCommandService {
     private readonly sessionContextRepository: SessionContextRepository,
     private readonly sessionRevocationRepository: SessionRevocationRepository,
     private readonly revokedDevicesRepository: RevokedDevicesRepository,
-    private readonly sessionBootstrap: SessionBootstrapService,
   ) {}
 
   async createSession(input: SessionCreateInput): Promise<UserSession> {
@@ -125,7 +123,4 @@ export class SessionCommandService {
     await this.sessionRevocationRepository.revokeRefreshToken(sessionId);
   }
 
-  createSessionForUser(userId: number, deviceInfo?: DeviceInfo) {
-    return this.sessionBootstrap.createForUser(userId, deviceInfo);
-  }
 }

@@ -4,9 +4,6 @@ import { Module } from '@nestjs/common';
 import { JtiBlocklistRepository } from '../repositories/jti-blocklist.repository';
 
 // Services
-import { TokenService } from '../services/token/token.service';
-import { TokenPairGeneratorService } from '../services/token/token-pair-generator.service';
-import { TokenLifecycleService } from '../services/token/token-lifecycle.service';
 import { TokenTheftDetectionService } from '../services/token/token-theft-detection.service';
 import { JtiBlocklistService } from '../services/token/jti-blocklist.service';
 
@@ -14,31 +11,23 @@ import { JtiBlocklistService } from '../services/token/jti-blocklist.service';
 import { RefreshTokenService } from '../services/session/refresh-token.service';
 
 /**
- * TokenModule — encapsulates token lifecycle, rotation, and JTI blocklist management.
+ * TokenModule — pure token infrastructure: JTI blocklist, theft detection, refresh tokens.
  *
- * Responsibilities:
- *   - Token pair generation (access + refresh)
- *   - Token rotation and lifecycle
- *   - Theft detection and validation
- *   - JTI (JWT ID) blocklist management
+ * Services that need cross-cutting auth providers (JWTConfigService, AuthUtilsService,
+ * PermissionsService, AuthUsersRepository) live in AuthModule to avoid a circular
+ * dependency (AuthModule → TokenModule, TokenModule ↛ AuthModule).
+ *
+ * Moved to AuthModule: TokenService, TokenLifecycleService, TokenPairGeneratorService.
  */
 @Module({
   providers: [
-    // Repositories
     JtiBlocklistRepository,
-
-    // Core token services
-    TokenService,
-    TokenPairGeneratorService,
-    TokenLifecycleService,
     TokenTheftDetectionService,
     JtiBlocklistService,
     RefreshTokenService,
   ],
   exports: [
-    TokenService,
-    TokenPairGeneratorService,
-    TokenLifecycleService,
+    JtiBlocklistRepository,
     TokenTheftDetectionService,
     JtiBlocklistService,
     RefreshTokenService,

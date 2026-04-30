@@ -14,7 +14,6 @@ import { TokenModule } from './modules/token.module';
 import { AuthUsersRepository } from './repositories/auth-users.repository';
 import { AuthProviderRepository } from './repositories/auth-provider.repository';
 import { PermissionsChangelogRepository } from './repositories/permissions-changelog.repository';
-import { RevokedDevicesRepository } from './repositories/revoked-devices.repository';
 
 // Shared / infrastructure
 import { AuthUtilsService } from './services/shared/auth-utils.service';
@@ -35,6 +34,21 @@ import { PermissionsService } from './services/permissions/permissions.service';
 // Guard services
 import { UserContextLoaderService } from './services/guard/user-context-loader.service';
 import { AuthPolicyService } from './services/guard/auth-policy.service';
+
+// Session-layer services (live here because they need AuthUsersRepository)
+import { SessionBootstrapService } from './services/session/session-bootstrap.service';
+import { AuthCommandService } from './services/session/auth-command.service';
+import { AuthQueryService } from './services/session/auth-query.service';
+import { AuthContextService } from './services/session/auth-context.service';
+
+// Token services (live here because they need JWTConfigService / AuthUtilsService)
+import { TokenService } from './services/token/token.service';
+import { TokenPairGeneratorService } from './services/token/token-pair-generator.service';
+import { TokenLifecycleService } from './services/token/token-lifecycle.service';
+
+// OTP services (live here because they need AuthUsersRepository / AuthProviderRepository)
+import { OtpService } from './services/otp/otp.service';
+import { OtpAuthOrchestrator } from './services/orchestrators/otp-auth-orchestrator.service';
 
 // Flows / orchestrators
 import { AuthFlowOrchestratorService } from './services/orchestrators/auth-flow-orchestrator.service';
@@ -80,7 +94,6 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
     AuthUsersRepository,
     AuthProviderRepository,
     PermissionsChangelogRepository,
-    RevokedDevicesRepository,
     AuthUtilsService,
     JWTConfigService,
     {
@@ -107,6 +120,21 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
     UserContextLoaderService,
     AuthPolicyService,
 
+    // Session-layer services (need AuthUsersRepository — must live in AuthModule)
+    SessionBootstrapService,
+    AuthCommandService,
+    AuthQueryService,
+    AuthContextService,
+
+    // Token services (need JWTConfigService / AuthUtilsService — must live in AuthModule)
+    TokenService,
+    TokenPairGeneratorService,
+    TokenLifecycleService,
+
+    // OTP services (need AuthUsersRepository / AuthProviderRepository — must live in AuthModule)
+    OtpService,
+    OtpAuthOrchestrator,
+
     // Flows / Orchestrators
     AuthFlowOrchestratorService,
     PasswordAuthService,
@@ -129,6 +157,10 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
     // GuardsModule (common/guards) injects AuthGuard's dependencies.
     UserContextLoaderService,
     AuthPolicyService,
+    // Used by guards/interceptors (session-validator, session-rotation).
+    AuthContextService,
+    AuthCommandService,
+    AuthQueryService,
     // UsersModule injects this for admin user management queries.
     AuthUsersRepository,
   ],
