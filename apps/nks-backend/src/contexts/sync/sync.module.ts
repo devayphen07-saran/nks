@@ -14,6 +14,8 @@ import { DeviceAuthGuard } from './guards/device-auth.guard';
 import { StateSyncHandler } from './handlers/state-sync.handler';
 import { DistrictSyncHandler } from './handlers/district-sync.handler';
 import { LookupSyncHandler } from './handlers/lookup-sync.handler';
+import { LocationModule } from '../reference-data/location/location.module';
+import { LookupsModule } from '../reference-data/lookups/lookups.module';
 
 /**
  * Registers all built-in reference-data sync handlers with the DispatcherService.
@@ -63,6 +65,11 @@ export class SyncModule {
     return {
       global: true,
       module: SyncModule,
+      // LocationModule + LookupsModule are imported so reference-data sync
+      // handlers can delegate to LocationRepository.findStateChangesAfter /
+      // findDistrictChangesAfter and LookupsRepository.findLookupChangesAfter
+      // instead of reaching into reference-data tables directly.
+      imports: [LocationModule, LookupsModule],
       controllers: [SyncController],
       providers: [
         targetsProvider,

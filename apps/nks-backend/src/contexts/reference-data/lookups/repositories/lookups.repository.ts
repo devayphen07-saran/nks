@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, and, isNull, count, asc, desc, sql } from 'drizzle-orm';
+import { eq, and, isNull, count, asc, desc, or, gt, sql } from 'drizzle-orm';
 import type { AnyColumn } from 'drizzle-orm/column';
 import { ilikeAny } from '../../../../core/database/query-helpers';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { SyncBaseRepository } from '../../../../core/database/sync-base.repository';
+import type { DbTransaction } from '../../../../core/database/transaction.service';
 import * as schema from '../../../../core/database/schema';
 import { lookup } from '../../../../core/database/schema/lookups/lookup/lookup.table';
 import { lookupType } from '../../../../core/database/schema/lookups/lookup-type/lookup-type.table';
@@ -654,5 +655,77 @@ export class LookupsRepository extends SyncBaseRepository {
       page,
       pageSize,
     );
+  }
+
+  /**
+   * Pull-sync read for `lookup`. Compound cursor (updatedAt, guuid) breaks
+   * ties on rows committed in the same millisecond. Joins `lookup_type` so
+   * mobile can resolve lookupTypeCode without a follow-up query.
+   *
+   * Multi-tenancy: returns global lookups (storeFk IS NULL) plus those
+   * scoped to the caller's storeId. Caller MUST pass storeId — never trust
+   * a client-supplied store value.
+   *
+   * Public surface for sync handlers — they MUST call this rather than
+   * reaching into `schema.lookup` / `schema.lookupType` directly.
+   */
+  async findLookupChangesAfter(
+    cursorTs: Date,
+    cursorGuuid: string,
+    storeId: number,
+    limit: number,
+    tx?: DbTransaction,
+  ): Promise<Array<{
+    id: number;
+    guuid: string;
+    lookupTypeFk: number;
+    lookupTypeCode: string | null;
+    code: string;
+    label: string;
+    description: string | null;
+    storeFk: number | null;
+    isActive: boolean;
+    isSystem: boolean;
+    isHidden: boolean;
+    sortOrder: number | null;
+    version: number;
+    updatedAt: Date | null;
+    deletedAt: Date | null;
+  }>> {
+    const conn = tx ?? this.db;
+    return conn
+      .select({
+        id:             schema.lookup.id,
+        guuid:          schema.lookup.guuid,
+        lookupTypeFk:   schema.lookup.lookupTypeFk,
+        lookupTypeCode: schema.lookupType.code,
+        code:           schema.lookup.code,
+        label:          schema.lookup.label,
+        description:    schema.lookup.description,
+        storeFk:        schema.lookup.storeFk,
+        isActive:       schema.lookup.isActive,
+        isSystem:       schema.lookup.isSystem,
+        isHidden:       schema.lookup.isHidden,
+        sortOrder:      schema.lookup.sortOrder,
+        version:        schema.lookup.version,
+        updatedAt:      schema.lookup.updatedAt,
+        deletedAt:      schema.lookup.deletedAt,
+      })
+      .from(schema.lookup)
+      .leftJoin(schema.lookupType, eq(schema.lookup.lookupTypeFk, schema.lookupType.id))
+      .where(
+        and(
+          or(isNull(schema.lookup.storeFk), eq(schema.lookup.storeFk, storeId)),
+          or(
+            gt(schema.lookup.updatedAt, cursorTs),
+            and(
+              eq(schema.lookup.updatedAt, cursorTs),
+              gt(schema.lookup.guuid, cursorGuuid),
+            ),
+          ),
+        ),
+      )
+      .orderBy(schema.lookup.updatedAt, schema.lookup.guuid)
+      .limit(limit);
   }
 }

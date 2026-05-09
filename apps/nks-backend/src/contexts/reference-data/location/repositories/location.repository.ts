@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { eq, and, isNull, count, asc, desc, or, sql } from 'drizzle-orm';
+import { eq, and, isNull, count, asc, desc, or, gt, sql } from 'drizzle-orm';
 import type { AnyColumn } from 'drizzle-orm/column';
 import { ilikeAny } from '../../../../core/database/query-helpers';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
+import type { DbTransaction } from '../../../../core/database/transaction.service';
 import * as schema from '../../../../core/database/schema';
 
 type State = typeof schema.state.$inferSelect;
@@ -230,18 +231,22 @@ export class LocationRepository extends BaseRepository {
   }
 
   /**
-   * Pull-sync read for `state`. Compound cursor (updatedAt, id) breaks ties when
-   * rows share an updated_at — without it pagination silently skips or duplicates
-   * rows committed in the same millisecond. Fetches `limit + 1` so callers
-   * detect `hasMore` without a separate COUNT.
+   * Pull-sync read for `state`. Compound cursor (updatedAt, guuid) breaks ties
+   * when rows share an updated_at — without it pagination silently skips or
+   * duplicates rows committed in the same millisecond. Caller fetches `limit + 1`
+   * to detect `hasMore` without a separate COUNT.
+   *
+   * Public surface for sync handlers — they MUST go through this method
+   * rather than reaching into `schema.state` directly.
    */
   async findStateChangesAfter(
-    cursorMs: number,
-    cursorId: number,
+    cursorTs: Date,
+    cursorGuuid: string,
     limit: number,
+    tx?: DbTransaction,
   ): Promise<StateChangeRow[]> {
-    const cursorDate = new Date(cursorMs);
-    return this.db
+    const conn = tx ?? this.db;
+    return conn
       .select({
         id: schema.state.id,
         guuid: schema.state.guuid,
@@ -256,29 +261,32 @@ export class LocationRepository extends BaseRepository {
       .from(schema.state)
       .where(
         or(
-          sql`${schema.state.updatedAt} > ${cursorDate}`,
+          gt(schema.state.updatedAt, cursorTs),
           and(
-            sql`${schema.state.updatedAt} = ${cursorDate}`,
-            sql`${schema.state.id} > ${cursorId}`,
+            eq(schema.state.updatedAt, cursorTs),
+            gt(schema.state.guuid, cursorGuuid),
           ),
         ),
       )
-      .orderBy(schema.state.updatedAt, schema.state.id)
+      .orderBy(schema.state.updatedAt, schema.state.guuid)
       .limit(limit);
   }
 
   /**
    * Pull-sync read for `district`. Same compound-cursor semantics as
-   * `findStateChangesAfter`. Joins state for `stateGuuid` so mobile resolves
+   * `findStateChangesAfter`. Joins `state` for `stateGuuid` so mobile resolves
    * the FK without a follow-up query.
+   *
+   * Public surface for sync handlers — see `findStateChangesAfter` rationale.
    */
   async findDistrictChangesAfter(
-    cursorMs: number,
-    cursorId: number,
+    cursorTs: Date,
+    cursorGuuid: string,
     limit: number,
+    tx?: DbTransaction,
   ): Promise<DistrictChangeRow[]> {
-    const cursorDate = new Date(cursorMs);
-    return this.db
+    const conn = tx ?? this.db;
+    return conn
       .select({
         id: schema.district.id,
         guuid: schema.district.guuid,
@@ -294,14 +302,14 @@ export class LocationRepository extends BaseRepository {
       .leftJoin(schema.state, eq(schema.district.stateFk, schema.state.id))
       .where(
         or(
-          sql`${schema.district.updatedAt} > ${cursorDate}`,
+          gt(schema.district.updatedAt, cursorTs),
           and(
-            sql`${schema.district.updatedAt} = ${cursorDate}`,
-            sql`${schema.district.id} > ${cursorId}`,
+            eq(schema.district.updatedAt, cursorTs),
+            gt(schema.district.guuid, cursorGuuid),
           ),
         ),
       )
-      .orderBy(schema.district.updatedAt, schema.district.id)
+      .orderBy(schema.district.updatedAt, schema.district.guuid)
       .limit(limit);
   }
 

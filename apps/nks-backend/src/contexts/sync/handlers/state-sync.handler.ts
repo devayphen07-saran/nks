@@ -1,15 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { and, gt, or, eq } from 'drizzle-orm';
 import type { SyncHandler } from './sync-handler.interface';
 import type { SyncOperation } from '../types/sync-operation';
 import type { SyncResult } from '../types/sync-result';
-import * as schema from '../../../core/database/schema';
-
-type StateRow = typeof schema.state.$inferSelect;
+import type { DbTransaction } from '../../../core/database/transaction.service';
+import { LocationRepository } from '../../reference-data/location/repositories/location.repository';
 
 @Injectable()
 export class StateSyncHandler implements SyncHandler {
   readonly entity = 'state';
+
+  constructor(private readonly locationRepository: LocationRepository) {}
 
   apply(_op: SyncOperation): Promise<SyncResult> {
     return Promise.resolve({
@@ -24,26 +24,18 @@ export class StateSyncHandler implements SyncHandler {
     cursorId: string,
     _storeId: number,
     limit: number,
-    tx: any,
+    tx: DbTransaction,
   ): Promise<{
     changes: Array<{ id: string; operation: 'upsert' | 'delete'; data: Record<string, unknown> | null }>;
     hasMore: boolean;
     nextCursor: string;
   }> {
-    const rows: StateRow[] = await tx
-      .select()
-      .from(schema.state)
-      .where(
-        or(
-          gt(schema.state.updatedAt, cursorTs),
-          and(
-            eq(schema.state.updatedAt, cursorTs),
-            gt(schema.state.guuid, cursorId),
-          ),
-        ),
-      )
-      .orderBy(schema.state.updatedAt, schema.state.guuid)
-      .limit(limit + 1);
+    const rows = await this.locationRepository.findStateChangesAfter(
+      cursorTs,
+      cursorId,
+      limit + 1,
+      tx,
+    );
 
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
@@ -55,7 +47,7 @@ export class StateSyncHandler implements SyncHandler {
     const last = page[page.length - 1];
     const nextCursor = `${(last.updatedAt ?? new Date()).getTime()}:${last.guuid}`;
 
-    const changes = page.map((row: StateRow) => ({
+    const changes = page.map((row) => ({
       id: String(row.id),
       operation: row.deletedAt ? ('delete' as const) : ('upsert' as const),
       data: row.deletedAt ? null : {
