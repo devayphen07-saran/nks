@@ -6,6 +6,9 @@ export async function seedLookupTypes(db: Db) {
     // Generic types — values live in the lookup table
     { code: 'SALUTATION',            title: 'Salutation',            description: 'Person title (Mr., Mrs., Dr., etc.)',       isSystem: true },
     { code: 'CONTACT_PERSON_TYPE',   title: 'Contact Person Type',   description: 'Role of a contact person',                  isSystem: true },
+    { code: 'CUSTOMER_TYPE',         title: 'Customer Type',         description: 'Customer segmentation (retail, wholesale, etc.)', isSystem: true },
+    { code: 'SUPPLIER_TYPE',         title: 'Supplier Type',         description: 'Supplier classification (local, manufacturer, etc.)', isSystem: true },
+    { code: 'FILE_TYPE',             title: 'File Type',             description: 'Category of uploaded files',                isSystem: true },
     { code: 'NOTES_TYPE',            title: 'Notes Type',            description: 'Category of notes',                         isSystem: true },
     { code: 'PLAN_TYPE',             title: 'Plan Type',             description: 'Subscription plan category',                isSystem: true },
     { code: 'STORE_CATEGORY',        title: 'Store Category',        description: 'Type of store / business',                  isSystem: true },

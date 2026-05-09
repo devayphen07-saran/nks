@@ -1,6 +1,7 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import { signOut } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
+import { clearActiveStore } from "@nks/state-manager";
 import { logout as logoutAction } from "./auth-slice";
 import { tokenMutex } from '../lib/auth/token-mutex';
 import { offlineSession } from '../lib/auth/offline-session';
@@ -46,23 +47,33 @@ export const logoutThunk = createAsyncThunk<
       // Clear all synced data from local database
       await clearAllTables();
 
-      // Always delete the DB encryption key so the next session (same or different user)
-      // cannot access any residual schema or cached data from this session.
-      try {
-        await deleteDbKey();
-      } catch (err) {
-        log.error("Failed to delete DB key on logout:", err);
-      }
-
       // Clear OTP rate limiters (removes persisted state from AsyncStorage)
       await clearRateLimiters();
       resetServerTime();
+
+      // Clear Redux: auth slice (auth-slice.logout) and the company slice's
+      // active-store fields. Without clearing the company slice, the next
+      // user's session inherits the previous user's activeStoreGuuid and
+      // the auth-provider effect kicks off a sync against a store the new
+      // user has no access to → 403.
       dispatch(logoutAction());
+      dispatch(clearActiveStore());
+
+      // Delete the DB encryption key LAST. This is the security boundary:
+      // without the key, the SQLite file becomes unreadable on next startup
+      // even if clearAllTables left rows behind. Done last so all the
+      // best-effort cleanups above run regardless, but its failure is fatal
+      // — it propagates out of the thunk so the UI can surface it instead
+      // of pretending logout succeeded while a different user could still
+      // open the previous user's encrypted DB.
+      await deleteDbKey();
+
       log.info("Session and offline data cleared successfully");
     } catch (error) {
       log.error("Failed to clear session:", sanitizeError(error));
       // Dispatch logout anyway to update Redux state
       dispatch(logoutAction());
+      dispatch(clearActiveStore());
       throw error;
     }
   });

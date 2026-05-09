@@ -66,6 +66,14 @@ export const auditLogs = pgTable(
     index('audit_logs_store_action_idx').on(table.storeFk, table.action),
     // User activity timeline: WHERE user_fk = ? ORDER BY created_at DESC
     index('audit_logs_user_created_at_idx').on(table.userFk, table.createdAt),
+    // Action timeline: WHERE action = ? AND created_at > ? — security dashboards
+    // and "all OTP_FAILED in last 24h" style queries.
+    index('audit_logs_action_created_at_idx').on(table.action, table.createdAt),
+    // Store timeline: WHERE store_fk = ? ORDER BY created_at DESC — store-level
+    // audit views (admin "what happened in my store today").
+    index('audit_logs_store_created_at_idx').on(table.storeFk, table.createdAt),
+    // Resource timeline: per-entity audit trail for "show all events for role 42".
+    index('audit_logs_entity_idx').on(table.entityType, table.entityId, table.createdAt),
   ],
 );
 

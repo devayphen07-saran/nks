@@ -221,10 +221,11 @@ export const darkColorTokens = {
   colorLinkHover: "#15417e",
   colorLinkActive: "#1554ad",
 
-  colorText: "#E0E7FF",
-  colorTextSecondary: "rgba(224, 231, 255, 0.65)",
-  colorTextTertiary: "rgba(224, 231, 255, 0.45)",
-  colorTextQuaternary: "rgba(224, 231, 255, 0.25)",
+  // Neutral slate scale, mirrored for dark mode.
+  colorText: "#F1F5F9",
+  colorTextSecondary: "#94A3B8",
+  colorTextTertiary: "#64748B",
+  colorTextQuaternary: "#475569",
 
   colorBorder: "#3730A3",
   colorBorderSecondary: "#312E81",

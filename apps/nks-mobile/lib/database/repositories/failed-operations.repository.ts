@@ -14,6 +14,7 @@ export interface FailedOperationItem {
   payload:         Record<string, unknown>;
   error_code:      number | null;
   error_msg:       string | null;
+  server_state:    Record<string, unknown> | null;
   device_id:       string;
   created_at:      number;
   failed_at:       number;
@@ -34,6 +35,7 @@ export class FailedOperationsRepository {
     payload:         Record<string, unknown>;
     error_code?:     number;
     error_msg?:      string;
+    server_state?:   Record<string, unknown> | null;
     device_id?:      string;
     created_at:      number;
   }): Promise<void> {
@@ -45,6 +47,7 @@ export class FailedOperationsRepository {
         payload:         JSON.stringify(params.payload),
         error_code:      params.error_code ?? null,
         error_msg:       params.error_msg ?? null,
+        server_state:    params.server_state ? JSON.stringify(params.server_state) : null,
         device_id:       params.device_id ?? '',
         created_at:      params.created_at,
         failed_at:       Date.now(),
@@ -110,6 +113,11 @@ export class FailedOperationsRepository {
     }
   }
 
+  /** Wipe every dead-letter row. Used by logout / remote wipe / full rebootstrap. */
+  async clear(): Promise<void> {
+    await this.db.delete(failedOperations);
+  }
+
   // ── Internal ───────────────────────────────────────────────────────────────
 
   private _toItem(row: FailedOperationRow): FailedOperationItem {
@@ -119,6 +127,16 @@ export class FailedOperationsRepository {
     } catch {
       payload = {};
     }
+
+    let serverState: Record<string, unknown> | null = null;
+    if (row.server_state) {
+      try {
+        serverState = JSON.parse(row.server_state) as Record<string, unknown>;
+      } catch {
+        serverState = null;
+      }
+    }
+
     return {
       id:              row.id,
       idempotency_key: row.idempotency_key,
@@ -127,6 +145,7 @@ export class FailedOperationsRepository {
       payload,
       error_code:      row.error_code ?? null,
       error_msg:       row.error_msg ?? null,
+      server_state:    serverState,
       device_id:       row.device_id,
       created_at:      row.created_at,
       failed_at:       row.failed_at,

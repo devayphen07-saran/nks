@@ -221,10 +221,12 @@ export const lightColorTokens = {
   colorLinkHover: blue.borderActive,
   colorLinkActive: blue.textActive,
 
-  colorText: "#1E1B4B",
-  colorTextSecondary: "#3730A3",
-  colorTextTertiary: "#818CF8",
-  colorTextQuaternary: "#C7D2FE",
+  // Neutral slate scale — content text stays neutral so the brand purple
+  // can be reserved for primary actions, links, and focus states.
+  colorText: "#0F172A",
+  colorTextSecondary: "#475569",
+  colorTextTertiary: "#94A3B8",
+  colorTextQuaternary: "#CBD5E1",
 
   colorBorder: "#e2e8f0",
   colorBorderSecondary: "#f1f5f9",

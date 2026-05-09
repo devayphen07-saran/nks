@@ -52,7 +52,7 @@ export function AuthProvider({
 
   // Sync iamUserId from user state
   useEffect(() => {
-    if (user?.user?.id) setIamUserId(String(user.user.id));
+    if (user?.user?.iamUserId) setIamUserId(String(user.user.iamUserId));
   }, [user]);
 
   // ============================================
@@ -85,9 +85,11 @@ export function AuthProvider({
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // 1. Restore from localStorage immediately for fast UI render
+        // 1. Restore from localStorage immediately for fast UI render.
+        // Web never receives sessionToken in the body (it's in the httpOnly cookie),
+        // so we check user.guuid as the presence signal instead.
         const storedSession = getUser<AuthData>();
-        if (storedSession?.session?.sessionToken) {
+        if (storedSession?.user?.guuid) {
           dispatch(authSlice.actions.setAuthenticated(storedSession));
         } else {
           dispatch(authSlice.actions.setUnauthenticated());

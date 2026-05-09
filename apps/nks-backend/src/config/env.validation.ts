@@ -40,9 +40,6 @@ const envSchema = z.object({
   IP_HMAC_SECRET: z
     .string()
     .min(32, 'IP_HMAC_SECRET must be at least 32 characters'),
-  CSRF_HMAC_SECRET: z
-    .string()
-    .min(32, 'CSRF_HMAC_SECRET must be at least 32 characters'),
   OTP_IDENTIFIER_PEPPER: z
     .string()
     .min(16, 'OTP_IDENTIFIER_PEPPER must be at least 16 characters'),

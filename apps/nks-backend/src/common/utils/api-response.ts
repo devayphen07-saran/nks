@@ -30,7 +30,7 @@ export interface ApiResponseInit<T> {
  * status/statusCode are not emitted (redundant with the transport layer).
  *
  * Rules:
- *   - TransformInterceptor is the sole builder of success envelopes.
+ *   - ResponseInterceptor is the sole builder of success envelopes.
  *   - GlobalExceptionFilter is the sole builder of error envelopes.
  *   - Controllers return plain domain types + @ResponseMessage decorator;
  *     the interceptor wraps them here.

@@ -105,7 +105,7 @@ export function useOtpVerify() {
         .then(async (apiResponse) => {
           const authResponse = apiResponse?.data;
 
-          if (authResponse?.auth?.sessionToken) {
+          if (authResponse?.auth?.bearerToken) {
             // Reset rate limiter on successful verification
             OTP_RATE_LIMITS.verify.reset();
             clearPendingOtpSession();

@@ -11,18 +11,28 @@ import {
 } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
 import { useLogoutConfirmation } from "../../hooks/useLogoutConfirmation";
+import { useAuthState } from "../../store";
+import { ROUTES } from "../../lib/navigation/routes";
 
 export function AccountTypeScreen() {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const { confirmLogout } = useLogoutConfirmation();
+  const authState = useAuthState();
   const handleLogout = useCallback(() => {
     confirmLogout(() => router.replace("/(auth)/phone"));
   }, [confirmLogout]);
 
   const handleStore = useCallback(() => {
-    router.push("/(protected)/(store)/list");
-  }, []);
+    const defaultStoreGuuid = authState.authResponse?.context?.defaultStoreGuuid;
+    if (defaultStoreGuuid) {
+      router.replace(ROUTES.STORE_HOME);
+      return;
+    }
+    // push (not replace) so the user can go back to the account-type
+    // picker if they want to choose Personal instead.
+    router.push(ROUTES.NO_STORE);
+  }, [authState.authResponse?.context?.defaultStoreGuuid]);
 
   const handlePersonal = useCallback(() => {
     // TODO: Dispatch setupPersonal API call

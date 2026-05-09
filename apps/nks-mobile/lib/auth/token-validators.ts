@@ -39,29 +39,17 @@ export function validateAuthResponse(
   // ─── User ────────────────────────────────────────────────────────────────
   if (!authResponse.user?.guuid) errors.push("user.guuid missing");
 
-  // ─── Session token ────────────────────────────────────────────────────────
-  if (!authResponse.auth?.sessionToken) {
-    errors.push("auth.sessionToken missing");
-  } else if (!sessionTokenReg.test(authResponse.auth.sessionToken)) {
+  // ─── Bearer token ────────────────────────────────────────────────────────
+  if (!authResponse.auth?.bearerToken) {
+    errors.push("auth.bearerToken missing");
+  } else if (!sessionTokenReg.test(authResponse.auth.bearerToken)) {
     errors.push(
-      `auth.sessionToken format invalid (length: ${authResponse.auth.sessionToken.length})`,
+      `auth.bearerToken format invalid (length: ${authResponse.auth.bearerToken.length})`,
     );
   }
 
   if (!authResponse.auth?.sessionId)
     errors.push("auth.sessionId missing");
-
-  // ─── Access token (optional) ──────────────────────────────────────────────
-  if (authResponse.auth?.accessToken) {
-    const parts = authResponse.auth.accessToken.split(".");
-    if (parts.length !== 3) {
-      errors.push(
-        `auth.accessToken format invalid: expected 3 parts, got ${parts.length}`,
-      );
-    } else if (!parts.every((p) => base64UrlReg.test(p))) {
-      errors.push("auth.accessToken contains invalid characters");
-    }
-  }
 
   // ─── Offline token (optional) ─────────────────────────────────────────────
   if (authResponse.offline?.token) {
@@ -76,10 +64,10 @@ export function validateAuthResponse(
   }
 
   // ─── Expiry timestamps ────────────────────────────────────────────────────
-  if (!authResponse.auth?.expiresAt)
-    errors.push("auth.expiresAt missing");
-  if (!authResponse.auth?.refreshExpiresAt)
-    errors.push("auth.refreshExpiresAt missing");
+  if (!authResponse.auth?.sessionExpiresAt)
+    errors.push("auth.sessionExpiresAt missing");
+  if (!authResponse.auth?.refreshTokenExpiresAt)
+    errors.push("auth.refreshTokenExpiresAt missing");
 
   // ─── Truncation detection (post-persistence only) ─────────────────────────
   if (

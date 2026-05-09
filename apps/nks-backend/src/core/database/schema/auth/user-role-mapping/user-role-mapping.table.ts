@@ -7,7 +7,7 @@ import {
   index,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { coreEntity, auditFields } from '../../base.entity';
+import { coreEntity } from '../../base.entity';
 import { users } from '../../auth/users';
 import { roles } from '../../rbac/roles';
 import { store } from '../../store/store';
@@ -64,8 +64,6 @@ export const userRoleMapping = pgTable(
     // AuthGuard filters out rows where expires_at < NOW().
     expiresAt: timestamp('expires_at', { withTimezone: true }),
 
-    // Audit fields — track who created, modified, or deleted this assignment
-    ...auditFields(() => users.id),
   },
   (table) => [
     // ── Uniqueness ─────────────────────────────────────────────────────────

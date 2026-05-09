@@ -4,6 +4,7 @@ import { bearer, jwt, admin } from 'better-auth/plugins';
 import { expo } from '@better-auth/expo';
 import * as schema from '../../../../core/database/schema';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { AUTH_CONSTANTS } from '../../../../common/constants/app-constants';
 
 export type BetterAuthConfig = {
   baseUrl: string;
@@ -93,7 +94,13 @@ export const getAuth = (
     },
 
     session: {
-      hashSessionToken: true,
+      // Session tokens are stored plaintext in user_session.token. Refresh
+      // tokens are hashed (refreshTokenHash). The asymmetry is deliberate —
+      // session-token lookup is on the hot path of every authenticated
+      // request and benefits from a direct index hit; refresh tokens are
+      // only checked on rotation. If you want session tokens hashed at
+      // rest (DB-dump protection), that requires a custom adapter that
+      // hashes on write AND lookup — not a flag.
       additionalFields: {
         // Device tracking fields
         deviceId: { type: 'string', required: false },
@@ -106,16 +113,16 @@ export const getAuth = (
         primaryRole: { type: 'string', required: false }, // Primary role code
 
         // csrfSecret must be declared so BetterAuth inserts '' (NOT NULL constraint).
-        // SessionBootstrapService.updateByToken overwrites it with the real HMAC secret
-        // immediately after session creation. The empty-string placeholder is live
-        // during the window between createSession() and updateByToken() — if a request
-        // arrives in that window, CSRF validation will fail rather than silently pass.
+        // SessionBootstrapService.updateByToken overwrites it with the real random
+        // secret immediately after session creation. The empty-string placeholder
+        // is live during the window between createSession() and updateByToken() —
+        // any request arriving in that window fails CSRF rather than silently
+        // passing.
         csrfSecret: { type: 'string', required: false, defaultValue: '' },
 
-        // Note: roleHash is handled separately — UPDATEd after session creation.
       },
-      expiresIn: 60 * 60 * 24 * 7, // 7 days (aligned with refresh token expiry)
-      updateAge: 60 * 60 * 24, // refresh if older than 1 day
+      expiresIn: AUTH_CONSTANTS.SESSION.EXPIRY_SECONDS, // 30 days — must match AUTH_CONSTANTS.SESSION.EXPIRY_SECONDS
+      updateAge: AUTH_CONSTANTS.SESSION.UPDATE_AGE_SECONDS, // refresh if older than 1 day
     },
 
     rateLimit: {

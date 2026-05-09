@@ -268,28 +268,24 @@ describe('Architecture', () => {
    *   Reason: Requires careful extraction due to email/phone conflicts + auth provider logic.
    */
   describe('Transaction Management', () => {
-    test('services do not call db.transaction() directly (except known cases)', () => {
+    test('services do not call db.transaction() directly', () => {
+      // Match every *.service.ts file under src/, regardless of folder depth.
+      // The previous regex /services\/[\w-]+\.service\.ts$/ only matched files
+      // inside a literal `services/` directory, missing files like
+      // `contexts/sync/sync.service.ts` (sits next to `services/`, not in it).
       const serviceFiles = findFiles(
         srcDir,
-        /services\/[\w-]+\.service\.ts$/,
-        ['node_modules', '.spec.ts'],
+        /\.service\.ts$/,
+        ['node_modules', '.spec.ts', 'transaction.service.ts'],
       );
 
-      const acceptableFiles = ['auth.service.ts']; // Known cases with TODOs
       const violations: string[] = [];
 
       for (const file of serviceFiles) {
-        const fileName = path.basename(file);
-        if (acceptableFiles.includes(fileName)) {
-          continue; // Skip known acceptable cases
-        }
-
         const content = fs.readFileSync(file, 'utf-8');
-
-        // Check for direct transaction calls in service
         if (content.match(/this\.db\s*\.\s*transaction\s*\(/)) {
           violations.push(
-            `${path.relative(srcDir, file)}: Service calls db.transaction() directly (should delegate to repository)`,
+            `${path.relative(srcDir, file)}: Service calls db.transaction() directly (should use TransactionService.run)`,
           );
         }
       }
@@ -300,14 +296,50 @@ describe('Architecture', () => {
         );
       }
     });
+  });
 
-    test('TODO: profileComplete() should extract transaction to repository', () => {
-      // KNOWN TECHNICAL DEBT
-      // The authService.profileComplete() method wraps multiple user updates
-      // in a transaction. This should eventually be extracted to a repository method,
-      // but requires careful handling of email/phone conflicts and auth provider creation.
-      // Flagged for future refactoring.
-      expect(true).toBe(true);
+  /**
+   * PRINCIPLE 5: Logger discipline
+   * Every NestJS service should declare its own Nest Logger so log output is
+   * attributed to the right context. Missing loggers regressed silently after
+   * a 2026-04-28 audit; this test guards against repeat regression.
+   */
+  describe('Logger discipline', () => {
+    test('every *.service.ts declares a Logger', () => {
+      const serviceFiles = findFiles(
+        srcDir,
+        /\.service\.ts$/,
+        ['node_modules', '.spec.ts'],
+      );
+
+      // Some services (e.g. lookup-cache services that extend a base class
+      // which already owns the logger) can be exempted here. Keep this list
+      // empty unless there's a real reason — the goal is universal coverage.
+      const exempt: string[] = [];
+
+      const violations: string[] = [];
+      for (const file of serviceFiles) {
+        const fileName = path.basename(file);
+        if (exempt.includes(fileName)) continue;
+
+        const content = fs.readFileSync(file, 'utf-8');
+        // Skip non-class service files (e.g. interface-only / type-only modules).
+        if (!/export\s+(?:abstract\s+)?class\s+\w+/.test(content)) continue;
+
+        const hasLoggerImport = /from\s+['"]@nestjs\/common['"]/.test(content)
+          && /\bLogger\b/.test(content);
+        const hasLoggerInstance = /new\s+Logger\s*\(/.test(content);
+
+        if (!hasLoggerImport || !hasLoggerInstance) {
+          violations.push(path.relative(srcDir, file));
+        }
+      }
+
+      if (violations.length > 0) {
+        throw new Error(
+          `Services missing a Logger declaration:\n${violations.join('\n')}`,
+        );
+      }
     });
   });
 });

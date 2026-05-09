@@ -1,99 +1,91 @@
-import type { DbTransaction } from '../../../core/database/transaction.service';
-import type { SyncOperation, SyncChange } from '../dto';
+import type { DeviceContext } from '../types/device-context';
+import type { SyncResult } from '../types/sync-result';
+import type { SyncOperation } from '../types/sync-operation';
 
 /**
- * Standard rejection reasons surfaced to mobile clients.
+ * SyncHandler defines the contract for handling sync operations on a specific entity.
  *
- * Keep this set narrow and semantic — clients branch on it. New entries are
- * an API contract change; coordinate with mobile before adding.
+ * Domain teams extend BaseSyncHandler (which implements this interface) and
+ * override the abstract methods to define entity-specific logic.
+ *
+ * Example:
+ *
+ *   @Injectable()
+ *   export class ProductsSyncService extends BaseSyncHandler {
+ *     readonly entity = 'product';
+ *
+ *     async applyCreate(op, device, tx) {
+ *       // Create product logic
+ *     }
+ *
+ *     toWireFormat(row) {
+ *       return { id: row.id, name: row.name, ... };
+ *     }
+ *   }
  */
-export type SyncRejectReason =
-  | 'INVALID_SHAPE'           // opData failed handler's Zod schema
-  | 'VERSION_REQUIRED'        // update/delete arrived without `version`
-  | 'NOT_FOUND'               // target row does not exist (or was hard-deleted)
-  | 'FORBIDDEN'               // caller lacks permission for this row
-  | 'BUSINESS_RULE_VIOLATION' // domain rule rejected the write
-  | 'INVALID_OP'              // op.op was not in {create,update,delete}
-  | 'IDEMPOTENCY_REPLAY';     // same idempotency key resubmitted with a different payload hash
-
-/**
- * Outcome of a single sync push operation. The factory forwards this to
- * SyncService, which maps it onto the public `PushOpResult`.
- *
- *  - `ok`        — write applied. `serverState` is the row as it now exists
- *                  on the server (post-write); the client overwrites its
- *                  local copy with this. REQUIRED, not optional.
- *  - `conflict`  — version mismatch. `serverState` is the current committed
- *                  row (read with FOR UPDATE so it's the truth at that
- *                  instant). Handler MUST NOT have written anything; the
- *                  base class enforces this by performing the check before
- *                  any apply call.
- *  - `rejected`  — operation invalid (shape, permission, business rule).
- *                  `reason` is one of the well-known codes.
- *
- * Generic `TRow` lets each handler return its concrete row type so the
- * client side keeps strong types end-to-end.
- */
-export type SyncHandlerResult<TRow extends object = Record<string, unknown>> =
-  | { status: 'ok'; serverState: TRow }
-  | { status: 'conflict'; serverState: TRow }
-  | { status: 'rejected'; reason: SyncRejectReason };
-
-/**
- * Interface every domain sync handler implements. **Prefer extending
- * `BaseSyncHandler` over implementing this directly** — the base class
- * enforces version-based optimistic concurrency, schema validation, and
- * version increment, none of which this raw interface guarantees.
- *
- * Contract (binding for any direct implementer):
- *  - All DB writes MUST go through the provided `tx`. The caller treats the
- *    handler call as the transaction boundary; on exception or `conflict`/
- *    `rejected` result it rolls back.
- *  - Handlers MUST NOT trigger external side effects (HTTP, message bus,
- *    webhooks) inside `handle()`. Rollback cannot undo those. If integration
- *    is needed, write to an outbox table instead — a separate worker fans
- *    out post-commit.
- *  - On `conflict`, the handler MUST NOT have performed any write before
- *    returning. The version check must come before any `INSERT`/`UPDATE`.
- */
-export interface SyncHandler<TRow extends object = Record<string, unknown>> {
-  /** The sync table name this handler owns (matches `op.table` from clients). */
-  readonly table: string;
-
-  /** Apply a single push operation. See class docs for transaction contract. */
-  handle(
-    op: SyncOperation,
-    userId: number,
-    activeStoreId: number | null,
-    tx: DbTransaction,
-  ): Promise<SyncHandlerResult<TRow>>;
+export interface SyncHandler {
+  /**
+   * Entity type identifier (lowercase, singular).
+   * Must match what mobile sends in SyncOperation.entity.
+   * Examples: 'product', 'customer', 'sale'.
+   */
+  readonly entity: string;
 
   /**
-   * Fetch rows changed after the given compound cursor for pull sync.
-   * Returns the mapped batch — handlers own row→SyncChange mapping AND the
-   * per-table next cursor so the SyncService doesn't need to know row shapes.
-   * Implementations should fetch `limit + 1` rows internally so they can
-   * report `hasMore` accurately.
+   * Apply a single operation (create/update/delete) atomically.
+   *
+   * Called inside a database transaction. Handler must:
+   * - Validate input
+   * - Check business rules
+   * - Lock for update on update/delete
+   * - Check version on update/delete
+   * - Return the appropriate SyncResult
+   *
+   * @param op - The operation to apply
+   * @param device - The device making the request (for multi-tenancy, audit)
+   * @param tx - Database transaction context (use this for all DB operations)
+   * @returns SyncResult indicating success or failure
    */
-  getChanges(
-    cursorMs: number,
-    cursorId: number,
-    limit: number,
-  ): Promise<SyncPullBatch>;
-}
+  apply(
+    op: SyncOperation,
+    device: DeviceContext,
+    tx: any, // EntityManager or transaction object
+  ): Promise<SyncResult>;
 
-/**
- * Result of a pull-sync read for one table.
- *
- *   - `changes`     — wire-format payloads for mobile to apply locally.
- *   - `nextCursor`  — `"ts:id"` for this table; mobile stores it and sends
- *                     it back on the next pull. Empty result returns the
- *                     incoming cursor unchanged so mobile doesn't regress.
- *   - `hasMore`     — `true` if more rows exist past `limit`. Drives the
- *                     mobile "keep paging" loop on the same table.
- */
-export interface SyncPullBatch {
-  changes: SyncChange[];
-  nextCursor: string;
-  hasMore: boolean;
+  /**
+   * Fetch changes since a cursor for pull operations.
+   *
+   * Called inside a REPEATABLE READ transaction. Returns paginated results
+   * with a cursor for the next page.
+   *
+   * Must query:
+   *   WHERE store_fk = storeId
+   *     AND (updated_at > cursorTs OR (updated_at = cursorTs AND id > cursorId))
+   *   ORDER BY updated_at ASC, id ASC
+   *   LIMIT limit + 1
+   *
+   * Fetch limit+1 to detect if there are more pages.
+   *
+   * @param cursorTs - Timestamp of last row from previous page
+   * @param cursorId - UUID of last row from previous page
+   * @param storeId - Store ID (for multi-tenancy)
+   * @param limit - Max rows to return (before +1)
+   * @param tx - Database transaction context
+   * @returns { changes, hasMore, nextCursor }
+   */
+  getChangesSince(
+    cursorTs: Date,
+    cursorId: string,
+    storeId: number,
+    limit: number,
+    tx: any,
+  ): Promise<{
+    changes: Array<{
+      id: string;
+      operation: 'upsert' | 'delete';
+      data: Record<string, unknown> | null; // null for deletes
+    }>;
+    hasMore: boolean;
+    nextCursor: string;
+  }>;
 }

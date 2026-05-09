@@ -55,13 +55,18 @@ export function StoreDrawerContent({ navigation }: StoreDrawerContentProps) {
 
   const handleSwitchStores = useCallback(() => {
     navigation.closeDrawer();
-    router.replace("/(protected)/(store)/list");
+    router.replace("/(protected)/(store)/setup");
   }, [navigation, router]);
 
   const handleLogout = useCallback(() => {
     navigation.closeDrawer();
     logout(() => router.replace("/(auth)/phone"));
   }, [navigation, router, logout]);
+
+  const handleOpenSettings = useCallback(() => {
+    navigation.closeDrawer();
+    router.push("/(protected)/(store)/settings");
+  }, [navigation, router]);
 
   const renderMenuItem = (item: MenuItem) => {
     const isActive = activeRoute === item.route;
@@ -177,16 +182,25 @@ export function StoreDrawerContent({ navigation }: StoreDrawerContentProps) {
           <MenuSection>{mainMenuItems.map(renderMenuItem)}</MenuSection>
         </ScrollContent>
 
-        {/* Logout Section */}
+        {/* Bottom Section */}
         <BottomSection>
-          <LogoutButton onPress={handleLogout} activeOpacity={0.7}>
+          <BottomRowButton onPress={handleOpenSettings} activeOpacity={0.7}>
+            <Row align="center" gap="medium">
+              <LucideIcon name="Settings" size={20} color={theme.colorTextSecondary} />
+              <Typography.Body weight="semiBold" color={theme.colorText}>
+                Settings
+              </Typography.Body>
+            </Row>
+          </BottomRowButton>
+
+          <BottomRowButton onPress={handleLogout} activeOpacity={0.7}>
             <Row align="center" gap="medium">
               <LucideIcon name="LogOut" size={20} color={theme.colorError} />
               <Typography.Body weight="semiBold" color={theme.colorError}>
                 Log out
               </Typography.Body>
             </Row>
-          </LogoutButton>
+          </BottomRowButton>
         </BottomSection>
       </SafeAreaView>
     </DrawerContainer>
@@ -242,9 +256,11 @@ const BottomSection = styled.View`
   padding: ${({ theme }) => theme.sizing.large}px;
 `;
 
-const LogoutButton = styled.TouchableOpacity`
+const BottomRowButton = styled.TouchableOpacity`
   flex-direction: row;
   align-items: center;
+  padding-top: ${({ theme }) => theme.sizing.small}px;
+  padding-bottom: ${({ theme }) => theme.sizing.small}px;
 `;
 
 const StoreContextSection = styled.View`

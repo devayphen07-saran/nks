@@ -6,13 +6,10 @@ import { SessionRepository } from '../repositories/session.repository';
 import { SessionTokenRepository } from '../repositories/session-token.repository';
 import { SessionRevocationRepository } from '../repositories/session-revocation.repository';
 import { SessionContextRepository } from '../repositories/session-context.repository';
-import { RevokedDevicesRepository } from '../repositories/revoked-devices.repository';
-
 // Services
 import { SessionCommandService } from '../services/session/session-command.service';
 import { SessionQueryService } from '../services/session/session-query.service';
 import { SessionCleanupService } from '../services/session/session-cleanup.service';
-import { DeviceRevocationQueryService } from '../services/session/device-revocation-query.service';
 import { SessionRotationPolicy } from '../services/session/session-rotation-policy.service';
 
 // Listeners
@@ -33,7 +30,6 @@ import { SessionRevocationListener } from '../listeners/session-revocation.liste
     SessionTokenRepository,
     SessionRevocationRepository,
     SessionContextRepository,
-    RevokedDevicesRepository,
 
     // Infrastructure
     CsrfService,
@@ -43,23 +39,23 @@ import { SessionRevocationListener } from '../listeners/session-revocation.liste
     SessionCommandService,
     SessionQueryService,
     SessionCleanupService,
-    DeviceRevocationQueryService,
 
     // Listeners
     SessionRevocationListener,
   ],
   exports: [
+    // Infrastructure
+    CsrfService,
+
     // Repositories exported for AuthModule and its providers
     SessionRepository,
     SessionTokenRepository,
     SessionRevocationRepository,
     SessionContextRepository,
-    RevokedDevicesRepository,
 
     // Services exported for AuthModule and external consumers
     SessionCommandService,
     SessionQueryService,
-    DeviceRevocationQueryService,
   ],
 })
 export class SessionModule {}

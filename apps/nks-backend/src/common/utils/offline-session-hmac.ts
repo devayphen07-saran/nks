@@ -3,38 +3,37 @@ import * as crypto from 'crypto';
 /**
  * Offline-session HMAC utilities.
  *
- * Both signing (TokenService on login) and verification (SyncService on push)
- * must serialize the payload in exactly the same way. Any divergence silently
- * breaks all offline push operations. Centralising here ensures both sides
- * always produce the same byte string.
+ * Both signing (TokenService at login/refresh) and verification (SyncService
+ * on push) must serialize the payload identically. Centralising here ensures
+ * both sides always produce the same byte string — any divergence silently
+ * breaks all offline sync push operations.
  */
 
 export interface OfflineSessionPayload {
-  userGuuid: string;
-  storeGuuid: string | null;
+  userId: number;
+  storeId: number | null;
   roles: string[];
-  offlineValidUntil: number;
+  offlineValidUntil: number; // Unix epoch ms — derived from offline JWT exp
 }
 
-/**
- * Canonical JSON representation of the offline session payload.
- * Roles are sorted to ensure key-order-independent equality.
- */
 function serialize(payload: OfflineSessionPayload): string {
   return JSON.stringify({
-    userGuuid: payload.userGuuid,
-    storeGuuid: payload.storeGuuid,
+    userId: payload.userId,
+    storeId: payload.storeId,
     roles: [...payload.roles].sort(),
     offlineValidUntil: payload.offlineValidUntil,
   });
 }
 
-/** Sign an offline session payload with HMAC-SHA256. */
+/** Sign an offline session payload with HMAC-SHA256. Returns a 64-char hex string. */
 export function signOfflineSession(
   payload: OfflineSessionPayload,
   secret: string,
 ): string {
-  return crypto.createHmac('sha256', secret).update(serialize(payload)).digest('hex');
+  return crypto
+    .createHmac('sha256', secret)
+    .update(serialize(payload))
+    .digest('hex');
 }
 
 /** Verify an offline session HMAC using timing-safe comparison. */

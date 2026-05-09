@@ -3,7 +3,6 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import type { SessionUser } from '../../contexts/iam/auth/interfaces/session-user.interface';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
-import { ROTATE_CSRF_KEY } from '../decorators/rotate-csrf.decorator';
 import { TokenExtractorService, type AuthType } from './services/token-extractor.service';
 import { SessionValidatorService } from './services/session-validator.service';
 import { SessionLifecycleService } from './services/session-lifecycle.service';
@@ -67,7 +66,6 @@ export class AuthGuard implements CanActivate {
     );
 
     await this.policy.enforceAccountStatus(sessionUser, isActive, session);
-    this.policy.detectIpChange(session.ipHash, req.ip ?? '');
 
     const authed = req as AuthenticatedRequest;
     authed.user = sessionUser;
@@ -81,9 +79,8 @@ export class AuthGuard implements CanActivate {
     if (authType === 'cookie') {
       authed.sessionContext = this.sessionLifecycle.buildSessionContext(
         token,
-        session,
+        session.id,
         shouldRotate,
-        !shouldRotate && this.isRotateCsrf(context),
       );
     }
 
@@ -105,10 +102,4 @@ export class AuthGuard implements CanActivate {
     ]) ?? false;
   }
 
-  private isRotateCsrf(context: ExecutionContext): boolean {
-    return this.reflector.getAllAndOverride<boolean>(ROTATE_CSRF_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]) ?? false;
-  }
 }

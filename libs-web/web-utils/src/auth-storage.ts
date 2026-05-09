@@ -147,9 +147,9 @@ export const clearJwtCookie = (): void => {
 export const persistAuthSession = (authData: Record<string, any>): void => {
   if (typeof window === "undefined" || !authData) return;
   try {
-    if (authData.user?.id) setIamUserIdToken(String(authData.user.id));
-    if (authData.session?.refreshToken) setRefreshToken(authData.session.refreshToken);
-    if (authData.session?.jwtToken) setJwtCookie(authData.session.jwtToken);
+    if (authData.user?.iamUserId) setIamUserIdToken(String(authData.user.iamUserId));
+    if (authData.auth?.refreshToken) setRefreshToken(authData.auth.refreshToken);
+    if (authData.auth?.accessToken) setJwtCookie(authData.auth.accessToken);
     setUser(authData);
     document.cookie = "nks_auth=1; path=/; SameSite=Lax";
   } catch (e) {

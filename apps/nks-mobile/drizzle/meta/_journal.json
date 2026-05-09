@@ -29,6 +29,34 @@
       "when": 1777372483000,
       "tag": "0003_mutation_queue_priority",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1777372484000,
+      "tag": "0004_lookup_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1777372485000,
+      "tag": "0005_conflict_server_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1777372486000,
+      "tag": "0006_multi_store",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1778000000000,
+      "tag": "0007_phase1_complete",
+      "breakpoints": true
     }
   ]
 }

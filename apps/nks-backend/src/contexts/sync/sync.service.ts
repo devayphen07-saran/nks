@@ -1,255 +1,258 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { SyncRepository } from './repositories/sync.repository';
-import { SyncAccessValidator } from './validators/sync-access.validator';
-import { SyncHandlerFactory } from './handlers/sync-handler.factory';
-import { SyncSignatureService } from './services/sync-signature.service';
-import { SyncIdempotencyService } from './services/sync-idempotency.service';
-import { parseCursor } from './sync-cursor';
-import type {
-  SyncOperation,
-  SyncChange,
-  ChangesResponse,
-  OfflineSessionContext,
-  PushResponse,
-  PushOpResult,
-} from './dto';
-
-export type { ChangesResponse, PushResponse };
-
-export interface GetChangesOptions {
-  userId: number;
-  sessionActiveStoreId: number | null;
-  /** Per-table cursors: { state: "ts:id", district: "ts:id" }. Missing tables default to "0:0". */
-  cursors: Record<string, string>;
-  storeGuuid: string;
-  tablesCsv: string;
-  limit?: number;
-}
-
-const DEFAULT_SYNC_LIMIT = 200;
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { sql } from 'drizzle-orm';
+import { IdempotencyService } from './services/idempotency.service';
+import { DispatcherService } from './services/dispatcher.service';
+import { SyncCursorService } from './services/sync-cursor.service';
+import { DEFAULT_PULL_LIMIT } from './sync.constants';
+import {
+  TransactionService,
+  type DbTransaction,
+} from '../../core/database/transaction.service';
+import type { DeviceContext } from './types/device-context';
+import type { SyncResult } from './types/sync-result';
+import type { SyncOperation } from './types/sync-operation';
 
 /**
- * Keys whose values must never appear in logs — tokens, credentials, PII.
+ * SyncService orchestrates push and pull operations for offline-first sync.
+ *
+ * Push (applyOperation):
+ *   1. Check idempotency cache → return cached result if found
+ *   2. Verify handler exists → return error (not cached) if unknown entity
+ *   3. Execute operation inside transaction
+ *   4. Cache ONLY terminal results (ok, duplicate, conflict, rejected)
+ *   5. Errors are NOT cached → client can retry
+ *
+ * Pull (pullEntity):
+ *   1. Look up handler → throw BadRequestException if unknown entity
+ *   2. Parse cursor (timestamp:uuid format)
+ *   3. Execute in REPEATABLE READ transaction
+ *   4. Capture server_time at transaction start (for consistency)
+ *   5. Fetch paginated changes using compound cursor
+ *   6. Return changes with next_cursor for pagination
+ *
+ * Key Behaviors:
+ *   - Idempotency key: client_op_id (mobile-generated UUID)
+ *   - Terminal results: ok, duplicate, conflict, rejected
+ *   - Non-cached: error, unknown_entity
+ *   - Isolation: REPEATABLE READ ensures server_time and data are consistent
+ *   - Pagination: limit+1 to detect has_more, compound cursor handles same updated_at
+ *   - Multi-tenancy: all queries filtered by device.storeId
  */
-const SENSITIVE_KEYS = new Set([
-  'password',
-  'token',
-  'secret',
-  'key',
-  'apikey',
-  'accesstoken',
-  'refreshtoken',
-  'sessiontoken',
-  'otp',
-  'pin',
-  'cvv',
-  'cardnumber',
-]);
-
-function sanitizeOpData(
-  data: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(data)) {
-    result[k] = SENSITIVE_KEYS.has(k.toLowerCase()) ? '[REDACTED]' : v;
-  }
-  return result;
-}
-
 @Injectable()
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
 
   constructor(
-    private readonly syncRepository: SyncRepository,
-    private readonly syncHandlerFactory: SyncHandlerFactory,
-    private readonly syncSignature: SyncSignatureService,
-    private readonly syncIdempotency: SyncIdempotencyService,
+    private readonly tx: TransactionService,
+    private readonly idempotency: IdempotencyService,
+    private readonly dispatcher: DispatcherService,
+    private readonly cursorService: SyncCursorService,
   ) {}
 
   /**
-   * Process a batch of sync push operations from the mobile offline sync queue.
+   * Apply a single sync operation (create/update/delete) with idempotency.
    *
-   * Two-phase processing:
-   *   Phase 1 (pre-transaction): validates every op (type + signature).
-   *     Invalid ops are immediately assigned a 'rejected' result.
-   *   Phase 2: each valid op runs in its OWN transaction so one failure
-   *     never rolls back sibling ops (spec §10.4 — batch is not all-or-nothing).
+   * Guarantees idempotency: if the device sends the same operation twice,
+   * the second request returns the cached result from the first attempt.
    *
-   * Returns per-operation results so mobile can selectively quarantine failed
-   * ops without discarding the rest, plus server_time for cursor advancement.
+   * Result caching:
+   *   - Terminal results (ok, duplicate, conflict, rejected) are cached
+   *   - Errors are NOT cached (client can retry after fix)
+   *   - Unknown entities are NOT cached (client retries after server deploys handler)
+   *
+   * @param op - Sync operation (client_op_id, entity, operation, client_id, payload)
+   * @param device - Device context (deviceId, userId, storeId)
+   * @returns SyncResult discriminated union
+   *   - ok: operation succeeded, server_id and version set
+   *   - duplicate: UUID collision on create
+   *   - conflict: version mismatch on update/delete, server_state included
+   *   - rejected: validation failed, not retryable
+   *   - error: transient error (DB, network), client retries with backoff
    */
-  async processPushBatch(
-    operations: SyncOperation[],
-    userId: number,
-    activeStoreId: number | null,
-    offlineSession?: OfflineSessionContext,
-  ): Promise<PushResponse> {
-    const serverTime = new Date().toISOString();
-
-    if (offlineSession) {
-      await this.syncSignature.validateOfflineSession(offlineSession, userId);
-
-      // When offlineToken is absent the JWT write-guard's assertStoreMatch is
-      // skipped. Fill the gap: resolve offlineSession.storeGuuid to a numeric ID
-      // and verify it matches the session's activeStoreId so a client that holds
-      // a valid HMAC for Store A cannot push mutations that land in Store B.
-      if (!offlineSession.offlineToken && offlineSession.storeGuuid) {
-        const resolvedStoreId = await this.syncRepository.verifyStoreMembership(
-          userId,
-          offlineSession.storeGuuid,
-        );
-        SyncAccessValidator.assertStoreMembership(resolvedStoreId);
-        SyncAccessValidator.assertPullStoreMatchesSession(resolvedStoreId, activeStoreId);
-      }
+  async applyOperation(
+    op: SyncOperation,
+    device: DeviceContext,
+  ): Promise<SyncResult> {
+    // Step 1: Check idempotency cache
+    // If we've seen this client_op_id before, return the cached result immediately
+    const cached = await this.idempotency.find(op.client_op_id);
+    if (cached) {
+      this.logger.debug(
+        `[Sync] Idempotency HIT: ${op.entity} ${op.client_op_id} → ${cached.status}`,
+      );
+      return cached;
     }
 
-    const signingKey = offlineSession?.signature ?? null;
-    const results: PushOpResult[] = [];
-
-    for (const op of operations) {
-      // ── Phase 1: pre-transaction validation ────────────────────────────────
-      // Op type ('create'|'update'|'delete') validated by Zod enum on the DTO.
-      if (
-        signingKey &&
-        !this.syncSignature.verifyOperationSignature(op, signingKey)
-      ) {
-        this.logger.warn(`Operation ${op.id} rejected — signature mismatch`, {
-          table: op.table,
-          op: op.op,
-          data: sanitizeOpData(op.opData),
-        });
-        results.push({ opId: op.id, status: 'rejected', reason: 'SIGNATURE_MISMATCH' });
-        continue;
-      }
-
-      // ── Phase 2: each op in its own transaction ─────────────────────────────
-      let opResult: PushOpResult;
-      try {
-        opResult = await this.syncRepository.withTransaction(async (tx) => {
-          const idempotencyKey = `${op.clientId}-${op.id}`;
-          const requestHash = this.syncSignature.hashOperation(op);
-
-          const claim = await this.syncIdempotency.claim(
-            idempotencyKey,
-            requestHash,
-            tx,
-          );
-
-          if (claim === 'replay') {
-            return { opId: op.id, status: 'rejected' as const, reason: 'IDEMPOTENCY_REPLAY' };
-          }
-          if (claim === 'duplicate') {
-            return { opId: op.id, status: 'duplicate' as const };
-          }
-
-          const handlerResult = await this.syncHandlerFactory.handle(op, userId, activeStoreId, tx);
-          if (handlerResult === null) {
-            return { opId: op.id, status: 'rejected' as const, reason: 'UNKNOWN_TABLE' };
-          }
-          if (handlerResult.status === 'rejected') {
-            return { opId: op.id, status: 'rejected' as const, reason: handlerResult.reason };
-          }
-          if (handlerResult.status === 'conflict') {
-            // The base class read with FOR UPDATE before detecting the version
-            // mismatch and DID NOT write — the transaction commits the
-            // idempotency claim only, not any data change. Mobile receives
-            // serverState and is expected to merge or re-queue.
-            return {
-              opId: op.id,
-              status: 'conflict' as const,
-              serverState: handlerResult.serverState,
-            };
-          }
-          return {
-            opId: op.id,
-            status: 'ok' as const,
-            serverState: handlerResult.serverState,
-          };
-        });
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : 'INTERNAL_ERROR';
-        this.logger.error(`Op ${op.id} (${op.table}/${op.op}) failed: ${reason}`);
-        opResult = { opId: op.id, status: 'error', reason };
-      }
-
-      results.push(opResult);
+    // Step 2: Verify handler exists BEFORE opening transaction
+    // Unknown entity errors are intentionally NOT cached, so the device can retry
+    // after the server deploys the handler
+    const handler = this.dispatcher.getHandler(op.entity);
+    if (!handler) {
+      const result: SyncResult = {
+        status: 'error',
+        client_op_id: op.client_op_id,
+        reason: `Unknown entity: ${op.entity}`,
+      };
+      this.logger.warn(
+        `[Sync] Unknown entity '${op.entity}' in operation ${op.client_op_id} (device: ${device.deviceId}, user: ${device.userId})`,
+      );
+      // Intentionally NOT cached
+      return result;
     }
 
-    return { serverTime, results };
+    // Step 3: Execute operation inside transaction
+    // Handler is responsible for implementing operation dispatch (create/update/delete)
+    // and managing its own error handling. We catch any uncaught exceptions.
+    let result: SyncResult;
+    try {
+      result = await this.tx.run(
+        async (tx: DbTransaction) => handler.apply(op, device, tx),
+        { name: `Sync.applyOperation:${op.entity}:${op.operation}` },
+      );
+    } catch (err) {
+      // Transient error (DB timeout, constraint violation not caught by handler, etc.)
+      // Not cached. Device retries safely with exponential backoff.
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const result: SyncResult = {
+        status: 'error',
+        client_op_id: op.client_op_id,
+        reason: `Transient error during ${op.operation}: ${errorMessage}`,
+      };
+      this.logger.error(
+        `[Sync] Error applying ${op.entity} ${op.operation} ${op.client_op_id} (device: ${device.deviceId}, store: ${device.storeId}): ${errorMessage}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      // Intentionally NOT cached
+      return result;
+    }
+
+    // Step 4: Cache ONLY terminal results
+    // Terminal results are: ok, duplicate, conflict, rejected
+    // Errors are NOT cached because they're transient and device should retry
+    if (
+      result.status === 'ok' ||
+      result.status === 'duplicate' ||
+      result.status === 'conflict' ||
+      result.status === 'rejected'
+    ) {
+      await this.idempotency.save(
+        op.client_op_id,
+        device.deviceId,
+        op.entity,
+        result,
+      );
+      this.logger.debug(
+        `[Sync] Cached result for ${op.entity} ${op.client_op_id}: ${result.status}`,
+      );
+    } else {
+      this.logger.debug(
+        `[Sync] NOT caching error result for ${op.entity} ${op.client_op_id}: ${result.status}`,
+      );
+    }
+
+    this.logger.log(
+      `[Sync] Operation complete: ${op.entity} ${op.operation} ${op.client_op_id} → ${result.status}`,
+    );
+
+    return result;
   }
 
   /**
-   * Fetch changes since a given compound cursor for pull-based sync.
+   * Fetch changes for an entity since a cursor (pull operation).
    *
-   * Cursor format: "timestampMs:rowId" — breaks ties when rows share the same updated_at.
+   * Executes in REPEATABLE READ isolation level to ensure that server_time and
+   * the data snapshot are from the same point in time. This prevents race conditions
+   * where data changes after the timestamp is captured but before rows are fetched.
    *
-   * serverTime is captured before the queries run so mobile uses a consistent
-   * clock boundary as its next cursor — not the device clock.
+   * Pagination:
+   *   - Fetches limit+1 rows internally to detect if there are more changes
+   *   - Returns limit rows to the client
+   *   - next_cursor points to the last returned row for resuming pagination
+   *   - Compound cursor (timestamp:uuid) handles multiple rows with same updated_at
+   *
+   * Multi-tenancy:
+   *   - All queries filtered by device.storeId
+   *   - Returns only data the device's store can see
+   *
+   * @param entity - Entity type to pull (e.g., 'product', 'customer', 'sale')
+   * @param cursor - Pagination cursor from previous pull (null = start from beginning)
+   *                 Format: '<timestamp_ms>:<uuid>' or null/undefined for initial pull
+   * @param device - Device context (deviceId, userId, storeId)
+   * @param limit - Max rows to return (1-500, default DEFAULT_PULL_LIMIT=500)
+   * @returns Object with server_time, changes, pagination metadata
+   * @throws BadRequestException if entity type is unknown
    */
-  async getChanges(opts: GetChangesOptions): Promise<ChangesResponse> {
-    const {
-      userId,
-      sessionActiveStoreId,
-      cursors,
-      storeGuuid,
-      tablesCsv,
-      limit = DEFAULT_SYNC_LIMIT,
-    } = opts;
-
-    // Capture server time before any queries — mobile stores this as its
-    // next last_pulled_at cursor. Capturing after would create a window where
-    // rows committed between query-end and new Date() get missed on the next pull.
-    const serverTime = new Date().toISOString();
-
-    const storeId = await this.syncRepository.verifyStoreMembership(
-      userId,
-      storeGuuid,
-    );
-    SyncAccessValidator.assertStoreMembership(storeId);
-    SyncAccessValidator.assertPullStoreMatchesSession(storeId, sessionActiveStoreId);
-
-    // Filter requested tables to those with a registered handler. Pull and
-    // push share the same handler registry — adding a new sync table now
-    // means writing one handler and registering it; no edits here.
-    const known = this.syncHandlerFactory.knownTables();
-    const requestedTables = tablesCsv
-      .split(',')
-      .map((t) => t.trim())
-      .filter((t) => known.has(t));
-
-    this.logger.debug(
-      `SYNC: requested tables="${tablesCsv}", known="${[...known].join(',')}", filtered=[${requestedTables.join(',')}]`,
-    );
-
-    const batches = await Promise.all(
-      requestedTables.map(async (table) => {
-        const cursorStr = cursors[table] ?? '0:0';
-        const { ts, id } = parseCursor(cursorStr);
-        const handler = this.syncHandlerFactory.get(table);
-        // Filter above guarantees handler exists; defensive fallback:
-        if (!handler) {
-          return { table, batch: { changes: [] as SyncChange[], nextCursor: cursorStr, hasMore: false } };
-        }
-        const batch = await handler.getChanges(ts, id, limit);
-        return { table, batch };
-      }),
-    );
-
-    const allChanges: SyncChange[] = [];
-    const nextCursors: Record<string, string> = {};
-    let hasMore = false;
-
-    for (const { table, batch } of batches) {
-      allChanges.push(...batch.changes);
-      nextCursors[table] = batch.nextCursor;
-      if (batch.hasMore) hasMore = true;
+  async pullEntity(
+    entity: string,
+    cursor: string | null | undefined,
+    device: DeviceContext,
+    limit: number = DEFAULT_PULL_LIMIT,
+  ): Promise<{
+    server_time: string;
+    entity: string;
+    changes: Array<{
+      id: string;
+      operation: 'upsert' | 'delete';
+      data: Record<string, unknown> | null;
+    }>;
+    has_more: boolean;
+    next_cursor: string;
+  }> {
+    // Step 1: Look up handler for entity type
+    const handler = this.dispatcher.getHandler(entity);
+    if (!handler) {
+      throw new BadRequestException(
+        `Unknown entity: ${entity}. Did you forget to register the handler in the module?`,
+      );
     }
 
+    // Step 2: Parse cursor
+    // Cursor format: '<timestamp_ms>:<uuid>'
+    // INITIAL_CURSOR = '0:00000000-0000-0000-0000-000000000000'
+    const { ts, id } = this.cursorService.parse(cursor);
     this.logger.debug(
-      `Changes: ${allChanges.length} row(s) across [${requestedTables.join(',')}], hasMore=${hasMore}`,
+      `[Sync] Pulling ${entity} from cursor ${ts.getTime()}:${id} with limit ${limit}`,
     );
 
-    return { serverTime, nextCursors, hasMore, changes: allChanges };
+    // Step 3: Execute in REPEATABLE READ transaction
+    // REPEATABLE READ isolation ensures server_time and data are transactionally consistent
+    const result = await this.tx.run(
+      async (tx: DbTransaction) => {
+        // Capture server time at transaction start
+        // This ensures all data fetched in this transaction is from the same snapshot
+        const timeResult = await tx.execute<{ now: Date }>(
+          sql`SELECT NOW() AS now`,
+        );
+        const serverTime = new Date(timeResult.rows[0].now);
+
+        // Fetch changes using compound cursor pagination
+        // Handler implements the entity-specific query with proper store filtering
+        const changeset = await handler.getChangesSince(
+          ts,
+          id,
+          device.storeId,
+          limit,
+          tx,
+        );
+
+        return {
+          server_time: serverTime.toISOString(),
+          entity,
+          changes: changeset.changes,
+          has_more: changeset.hasMore,
+          next_cursor: changeset.nextCursor,
+        };
+      },
+      {
+        name: `Sync.pullEntity:${entity}`,
+        isolationLevel: 'repeatable read',
+      },
+    );
+
+    this.logger.log(
+      `[Sync] Pulled ${entity}: ${result.changes.length} changes, has_more=${result.has_more} (store: ${device.storeId})`,
+    );
+
+    return result;
   }
 }

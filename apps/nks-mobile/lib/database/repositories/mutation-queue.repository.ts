@@ -17,14 +17,11 @@ import { getDatabase } from '../connection';
 import { mutationQueue } from '../schema';
 import type { MutationQueueRow } from '../schema';
 import { failedOperationsRepository } from './failed-operations.repository';
+import { backoffWithJitter } from '../../sync/backoff';
 import { createLogger } from '../../utils/logger';
 import { uuidv7 } from 'uuidv7';
 
 const log = createLogger('MutationQueueRepository');
-
-// Exponential backoff: 30s → 2m → 8m → 32m → 120m (capped)
-const BACKOFF_MS = [30_000, 120_000, 480_000, 1_920_000, 7_200_000];
-const backoffMs = (retries: number) => BACKOFF_MS[Math.min(retries, BACKOFF_MS.length - 1)];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -69,6 +66,7 @@ export class MutationQueueRepository {
     try {
       await this.db.insert(mutationQueue).values({
         idempotency_key: uuidv7(),
+        client_op_id:    uuidv7(),
         operation,
         entity,
         payload:     JSON.stringify(payload),
@@ -92,83 +90,86 @@ export class MutationQueueRepository {
    * Fetch the next batch of mutations ready to send.
    * Only returns 'pending' rows where next_retry_at has elapsed (or is null).
    * FIFO order via id ASC.
+   *
+   * Throws on DB failure. Returning [] on error would silently hide real
+   * failures from the push loop — the caller would see "no work to do" and
+   * advance the sync cycle, leaving every mutation indefinitely stuck.
    */
   async findBatch(limit = 50): Promise<MutationQueueItem[]> {
-    try {
-      const now = Date.now();
-      const rows: MutationQueueRow[] = await this.db
-        .select()
-        .from(mutationQueue)
-        .where(
-          and(
-            eq(mutationQueue.status, 'pending'),
-            or(
-              isNull(mutationQueue.next_retry_at),
-              lte(mutationQueue.next_retry_at, now),
-            ),
+    const now = Date.now();
+    const rows: MutationQueueRow[] = await this.db
+      .select()
+      .from(mutationQueue)
+      .where(
+        and(
+          eq(mutationQueue.status, 'pending'),
+          or(
+            isNull(mutationQueue.next_retry_at),
+            lte(mutationQueue.next_retry_at, now),
           ),
-        )
-        .orderBy(mutationQueue.priority, mutationQueue.id)
-        .limit(limit);
+        ),
+      )
+      .orderBy(mutationQueue.priority, mutationQueue.id)
+      .limit(limit);
 
-      const items: MutationQueueItem[] = [];
-      for (const row of rows) {
-        let payload: Record<string, unknown>;
-        try {
-          payload = JSON.parse(row.payload) as Record<string, unknown>;
-        } catch {
-          log.warn(`Corrupted payload for id=${row.id} — quarantining`);
-          await this.markQuarantined(row.id, 0, 'Corrupted JSON payload');
-          continue;
-        }
-        items.push({
-          id:              row.id,
-          idempotency_key: row.idempotency_key,
-          operation:       row.operation,
-          entity:          row.entity,
-          payload,
-          status:          row.status,
-          priority:        row.priority,
-          retries:         row.retries,
-          max_retries:     row.max_retries,
-        });
+    const items: MutationQueueItem[] = [];
+    for (const row of rows) {
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(row.payload) as Record<string, unknown>;
+      } catch {
+        log.warn(`Corrupted payload for id=${row.id} — quarantining`);
+        await this.markQuarantined(row.id, 0, 'Corrupted JSON payload');
+        continue;
       }
-      return items;
-    } catch (err) {
-      log.error('Failed to fetch mutation batch:', err);
-      return [];
+      items.push({
+        id:              row.id,
+        idempotency_key: row.idempotency_key,
+        operation:       row.operation,
+        entity:          row.entity,
+        payload,
+        status:          row.status,
+        priority:        row.priority,
+        retries:         row.retries,
+        max_retries:     row.max_retries,
+      });
     }
+    return items;
   }
 
   // ── Status Transitions ─────────────────────────────────────────────────────
 
+  /**
+   * Throws on failure. If this update silently fails, the caller proceeds
+   * to send the mutations while their rows still read as 'pending', so the
+   * very next batch picks them up again and double-submits — at-most-once
+   * delivery becomes at-least-twice.
+   */
   async markInProgress(ids: number[]): Promise<void> {
     if (!ids.length) return;
-    try {
-      await this.db
-        .update(mutationQueue)
-        .set({ status: 'in_progress' })
-        .where(inArray(mutationQueue.id, ids));
-    } catch (err) {
-      log.error('Failed to mark in_progress:', err);
-    }
+    await this.db
+      .update(mutationQueue)
+      .set({ status: 'in_progress' })
+      .where(inArray(mutationQueue.id, ids));
   }
 
+  /**
+   * Throws on failure. If the delete silently fails, the server has already
+   * accepted the mutations but the local rows still look 'pending' (or
+   * 'in_progress' from the prior step), so the next push cycle resends
+   * them. Idempotency keys protect the server from duplicating writes, but
+   * we still pay the round-trip and the user sees a queue that never drains.
+   */
   async markSynced(ids: number[]): Promise<void> {
     if (!ids.length) return;
-    try {
-      await this.db
-        .update(mutationQueue)
-        .set({ status: 'synced', synced_at: Date.now() })
-        .where(inArray(mutationQueue.id, ids));
-      // Delete immediately — synced rows are not needed
-      await this.db
-        .delete(mutationQueue)
-        .where(inArray(mutationQueue.id, ids));
-      log.debug(`Synced and deleted ${ids.length} mutations`);
-    } catch (err) {
-      log.error('Failed to mark synced:', err);
-    }
+    await this.db
+      .update(mutationQueue)
+      .set({ status: 'synced', synced_at: Date.now() })
+      .where(inArray(mutationQueue.id, ids));
+    await this.db
+      .delete(mutationQueue)
+      .where(inArray(mutationQueue.id, ids));
+    log.debug(`Synced and deleted ${ids.length} mutations`);
   }
 
   /**
@@ -197,12 +198,12 @@ export class MutationQueueRepository {
         .set({
           status:         'pending',
           retries:        sql`${mutationQueue.retries} + 1`,  // atomic
-          next_retry_at:  Date.now() + backoffMs(newRetries),
+          next_retry_at:  Date.now() + backoffWithJitter(newRetries),
           last_error_msg: errorMsg ?? null,
         })
         .where(eq(mutationQueue.id, id));
 
-      log.debug(`Retry ${newRetries}/${current[0].max_retries} for id=${id}, next in ${backoffMs(newRetries)}ms`);
+      log.debug(`Retry ${newRetries}/${current[0].max_retries} for id=${id}, next in ~${backoffWithJitter(newRetries)}ms`);
     } catch (err) {
       log.error('Failed to increment retry:', err);
     }

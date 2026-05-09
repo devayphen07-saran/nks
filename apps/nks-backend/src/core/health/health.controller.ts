@@ -58,4 +58,5 @@ export class HealthController {
     }
     return { status: 'ok', db: 'ok' };
   }
+
 }

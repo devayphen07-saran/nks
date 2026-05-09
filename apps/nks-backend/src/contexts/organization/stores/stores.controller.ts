@@ -1,9 +1,10 @@
-import { Controller, Get, Put, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Put, Post, Body, HttpCode, HttpStatus, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { StoresService } from './stores.service';
 import { StoreQueryService } from './store-query.service';
 import type { StoreDto } from './mapper/stores.mapper';
 import { SetDefaultStoreDto } from './dto/set-default-store.dto';
+import { CreateStoreDto } from './dto/create-store.dto';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { ResponseMessage } from '../../../common/decorators/response-message.decorator';
 import { NoEntityPermissionRequired } from '../../../common/decorators/no-entity-permission-required.decorator';
@@ -17,6 +18,19 @@ export class StoresController {
     private readonly storesQuery: StoreQueryService,
     private readonly storesCommand: StoresService,
   ) {}
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @NoEntityPermissionRequired('self-service: user creates their own store, becomes owner')
+  @ResponseMessage('Store created successfully')
+  @ApiOperation({ summary: 'Create a new store for the authenticated user' })
+  async createStore(
+    @Body() dto: CreateStoreDto,
+    @CurrentUser() user: SessionUser,
+    @Headers('x-device-id') deviceId?: string,
+  ): Promise<{ storeGuuid: string }> {
+    return this.storesCommand.createStore(user.userId, dto, deviceId?.trim() || undefined);
+  }
 
   @Get('me')
   @NoEntityPermissionRequired('self-service: user reading only their own store memberships')

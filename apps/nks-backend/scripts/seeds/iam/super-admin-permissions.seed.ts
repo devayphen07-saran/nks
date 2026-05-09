@@ -57,7 +57,6 @@ export async function seedSuperAdminPermissions(
     .onConflictDoUpdate({
       target: [rolePermissions.roleFk, rolePermissions.entityTypeFk],
       set: {
-        allow: true,
         canView: true,
         canCreate: true,
         canEdit: true,

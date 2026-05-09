@@ -52,17 +52,16 @@ export const authReducer = authSlice.reducer;
  * Primary source: `auth.accessToken` JWT payload (roles are embedded at issuance
  * and kept fresh by the proactive refresh cycle).
  *
- * Fallback: if the access token is absent (edge case — old session format before
- * accessToken was added to the response schema) we return false safely rather
- * than throwing, which would prevent the app from rendering.
+ * Reads roles from the offline JWT (same claim set as the former accessToken).
+ * Falls back to false safely if the token is absent or malformed.
  */
 export const selectIsSuperAdmin = (state: { auth: AuthState }): boolean => {
-  const accessToken = state.auth.authResponse?.auth?.accessToken;
+  const offlineToken = state.auth.authResponse?.offline?.token;
 
-  if (accessToken) {
+  if (offlineToken) {
     try {
       // JWT uses URL-safe Base64 (- → +, _ → /) — atob() needs standard Base64
-      const raw = accessToken.split(".")[1];
+      const raw = offlineToken.split(".")[1];
       const payload = JSON.parse(
         atob(raw.replace(/-/g, "+").replace(/_/g, "/")),
       ) as { roles?: string[] };

@@ -21,17 +21,45 @@
 
 import { API } from '@nks/api-manager';
 import type { AxiosError } from 'axios';
-import * as ExpoCrypto from 'expo-crypto';
 
 import { syncStateRepository } from '../database/repositories/sync-state.repository';
 import { mutationQueueRepository } from '../database/repositories/mutation-queue.repository';
 import { initializeDatabase } from '../database/connection';
 import { SYNC_KEYS } from '../database/constants/sync-keys';
 import { offlineSession } from '../auth/offline-session';
+import { getDeviceIdentity } from '../device/device-binding';
+import { tokenManager } from '@nks/mobile-utils';
 import { TABLE_HANDLERS, SYNC_TABLES, type SyncChange } from './sync-table-handlers';
+import { resolveConflict } from './conflict-resolver';
+import { scanCascadingFailures, type PendingOp } from './cascading-failures';
+import { refreshTokenAttempt } from '../auth/refresh-token-attempt';
+import { tokenMutex } from '../auth/token-mutex';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('SyncEngine');
+
+/**
+ * Backend wraps every response in `{ message, data, meta, ... }` (see
+ * ApiResponse). Axios then surfaces that wrapper as `res.data`. To get to
+ * the actual payload we want, we have to read `res.data.data` — typing
+ * AxiosResponse with the inner type is a lie that compiles but reads off
+ * the wrong layer at runtime. This helper makes the unwrap typed and
+ * intentional so call sites can't drift apart.
+ */
+interface ApiEnvelope<T> {
+  message?: string;
+  data: T;
+}
+
+function unwrapEnvelope<T>(raw: unknown): T {
+  if (raw && typeof raw === 'object' && 'data' in raw) {
+    return (raw as ApiEnvelope<T>).data;
+  }
+  // Backend always wraps. If we ever see a bare payload it's a backend
+  // contract change, not a "fall through to the raw shape" case — fail
+  // loudly so we notice.
+  throw new Error('Unexpected response shape: missing ApiResponse envelope');
+}
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -58,34 +86,37 @@ let _debounceTimer:   ReturnType<typeof setTimeout> | null = null;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface ChangesResponse {
-  serverTime:  string;                   // ISO — stored as LAST_PULL_AT
-  nextCursors: Record<string, string>;   // per-table "timestampMs:rowId"
-  hasMore:     boolean;
+// GET /sync/pull response (single entity, one page)
+interface PullResponse {
+  server_time: string;    // ISO
+  entity:      string;
+  has_more:    boolean;
+  next_cursor: string;    // "<timestampMs>:<uuid>"
   changes:     SyncChange[];
 }
 
+// POST /sync/push — one operation per queued mutation
 interface PushOperation {
-  id:        string;       // idempotency_key — stable across retries
-  clientId:  string;       // same as id
-  table:     string;
-  op:        string;
-  opData:    Record<string, unknown>;
-  signature?: string;
+  client_op_id: string;  // stable idempotency key
+  sequence:     number;
+  entity:       string;
+  operation:    string;
+  client_id:    string;  // same as client_op_id
+  payload:      Record<string, unknown>;
 }
 
 type OpResultStatus = 'ok' | 'duplicate' | 'conflict' | 'rejected' | 'error';
 
 interface PushOpResult {
-  opId:        string;           // matches PushOperation.id
-  status:      OpResultStatus;
-  reason?:     string;
-  serverState?: unknown;
+  client_op_id:  string;
+  status:        OpResultStatus;
+  reason?:       string;
+  server_state?: unknown;
 }
 
 interface PushResponse {
-  serverTime: string;            // ISO — mobile stores this as last_pushed_at cursor
-  results:    PushOpResult[];
+  server_time: string;
+  results:     PushOpResult[];
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -97,6 +128,14 @@ interface PushResponse {
 export async function runSync(storeGuuid: string): Promise<void> {
   if (_syncing) {
     log.debug('Sync already in progress — skipping');
+    return;
+  }
+
+  // No access token yet (offline-session-only startup) — skip sync.
+  // The proactive refresh will produce a valid token; SyncManager will
+  // retry when it calls setup() after the auth state updates.
+  if (!tokenManager.get()) {
+    log.debug('Sync skipped — no access token yet');
     return;
   }
 
@@ -152,6 +191,11 @@ export function getLastSyncedAt(): number | null {
 
 /** Call on app startup to restore persisted lastSyncedAt and reset stuck mutations */
 export async function initializeSyncEngine(): Promise<void> {
+  // Ensure the DB is open before any repository calls.
+  // syncManager.setup() may be called concurrently with initializeDatabase() from
+  // auth-provider — this guarantees the DB handle exists before we query it.
+  await initializeDatabase();
+
   // Restore persisted last sync time
   const stored = await syncStateRepository.getValue(SYNC_KEYS.LAST_FULL_SYNC_AT);
   if (stored) _lastSyncedAt = parseInt(stored, 10);
@@ -229,154 +273,148 @@ export function resetSyncState(): void {
  * returns rows newer than that table's last-applied row — no over-fetch
  * when some tables are fully synced and others are behind.
  */
-async function pullChanges(storeGuuid: string): Promise<void> {
+async function pullChanges(_storeGuuid: string): Promise<void> {
   log.info('PULL: Starting...');
 
-  // Read per-table cursors from SQLite — each table tracks its own position.
-  // Tables never synced return 0 and only receive rows newer than epoch 0
-  // (i.e. all rows). Already-synced tables only receive new/changed rows.
-  const tableCursors: Record<string, string> = {};
-  await Promise.all(
-    SYNC_TABLES.map(async (table) => {
-      const ms = await syncStateRepository.getCursorForTable(table);
-      tableCursors[table] = `${ms}:0`;
-    }),
-  );
-
-  log.debug(`PULL: per-table cursors=${JSON.stringify(tableCursors)}`);
-
-  let pageNum      = 0;
   let totalChanges = 0;
-  // Captured once on the first page — held for the entire pull loop so
-  // LAST_PULL_AT is a consistent boundary even if writes happen mid-pull.
-  let firstPageServerTime: string | null = null;
-  // Per-table cursors advance as pages arrive; carried into the next request.
-  const currentCursors: Record<string, string> = { ...tableCursors };
+  let lastServerTime: string | null = null;
 
-  while (true) {
-    pageNum++;
-    log.debug(`PULL: Page ${pageNum}, cursors=${JSON.stringify(currentCursors)}`);
+  // One refresh budget per pull run, shared across every entity and every
+  // page. Previously this flag was scoped to the inner page-retry loop, so
+  // each entity × each page that 403'd issued its own POST /auth/refresh-token
+  // (3 entities × 2 pages = 6 refresh hits per single user-initiated sync,
+  // which tripped the rate limit on the very endpoint that's supposed to
+  // unblock the user). Hoisting it here caps it at one refresh per pull —
+  // and `tokenMutex.withRefreshLock` collapses any race with the axios
+  // interceptor or proactive timer onto the same in-flight HTTP call.
+  let didRetryAfter403 = false;
 
-    const response = await (async () => {
+  // Pull each entity sequentially. The backend exposes GET /sync/pull?entity=X
+  // per the spec — one entity per request, compound cursor pagination.
+  for (const entity of SYNC_TABLES) {
+    const handler = TABLE_HANDLERS[entity];
+    if (!handler) continue;
+
+    // Read this entity's cursor from SQLite (0 = never synced → fetch all rows)
+    const cursorMs = await syncStateRepository.getCursorForTable(entity);
+    let cursor = `${cursorMs}:00000000-0000-0000-0000-000000000000`;
+
+    log.debug(`PULL: entity=${entity} cursor=${cursor}`);
+
+    let pageNum = 0;
+
+    while (true) {
+      pageNum++;
+
+      let response: { server_time: string; has_more: boolean; next_cursor: string; changes: SyncChange[] };
       let retryCount = 0;
       const maxRetries = 3;
-      while (retryCount < maxRetries) {
+
+      while (true) {
         try {
-          log.debug(`PULL: Making API call to /sync/changes with params: storeGuuid=${storeGuuid}, tables=${SYNC_TABLES.join(',')}, limit=${PULL_PAGE_SIZE}`);
-          const res = await API.get<ChangesResponse>('/sync/changes', {
+          const res = await API.get('/sync/pull', {
             headers: { 'X-Sync-Schema-Version': SYNC_SCHEMA_VERSION },
-            params: {
-              cursor: currentCursors,
-              storeGuuid: storeGuuid,
-              tables:     SYNC_TABLES.join(','),
-              limit:      PULL_PAGE_SIZE,
-            },
+            params:  { entity, cursor, limit: PULL_PAGE_SIZE },
             timeout: PULL_TIMEOUT_MS,
           });
-          const apiResponse = res.data as any;
-          const result = apiResponse.data ?? apiResponse;
-          log.debug(`PULL: API response unwrapped: serverTime=${result.serverTime}, hasMore=${result.hasMore}, changes.length=${result.changes?.length || 0}`);
-          if (pageNum === 1 && result.serverTime) {
-            firstPageServerTime = result.serverTime;
+          response = unwrapEnvelope<typeof response>(res.data);
+          log.debug(`PULL: ${entity} page ${pageNum}: ${response.changes?.length ?? 0} changes, has_more=${response.has_more}`);
+          if (pageNum === 1 && response.server_time) {
+            lastServerTime = response.server_time;
           }
-          return result;
+          break;
         } catch (err) {
           const status = (err as AxiosError).response?.status;
           if (status === 429 && retryCount < maxRetries - 1) {
-            const backoffMs = Math.pow(2, retryCount) * 1000;
-            log.warn(`PULL: Rate limited (429) — retrying in ${backoffMs}ms (attempt ${retryCount + 1}/${maxRetries - 1})`);
-            await new Promise(resolve => setTimeout(resolve, backoffMs));
+            const backoffMs = Math.pow(2, retryCount) * 1_000;
+            log.warn(`PULL: 429 for ${entity} — retrying in ${backoffMs}ms`);
+            await new Promise(r => setTimeout(r, backoffMs));
             retryCount++;
             continue;
           }
-          log.error(`PULL: API call failed with status ${status}:`, err);
+          // 403 on a freshly-restored session usually means the backend's
+          // device_registration row is missing for the active store.
+          // POST /auth/refresh-token re-runs the self-heal upsert
+          // (TokenLifecycleService.refreshAccessToken). Await the refresh
+          // so the retried pull lands after the device row is in place.
+          // Retry only once — a genuinely unauthorized device must not loop.
+          if (status === 403 && !didRetryAfter403) {
+            log.warn(`PULL: 403 for ${entity} — refreshing session and retrying once`);
+            didRetryAfter403 = true;
+            // Route through tokenMutex so a parallel axios-interceptor 401
+            // refresh, the proactive 5-min refresh timer, or any future
+            // caller all share the same in-flight HTTP call. The mutex
+            // returns undefined to second-comers — that's the contract:
+            // "the lock holder's refresh has already updated tokenManager,
+            // just re-read the token". An undefined result here is success
+            // by that contract, so we fall through to retry the page.
+            const refresh = await tokenMutex.withRefreshLock(() => refreshTokenAttempt());
+            if (refresh && !refresh.success) {
+              log.warn(`PULL: refresh after 403 failed (${refresh.error}) — aborting`);
+              throw new Error('UNAUTHORIZED');
+            }
+            continue;
+          }
           if (status === 403) {
-            log.warn('PULL: 403 — user not authorized for this store, skipping');
+            log.warn(`PULL: 403 for ${entity} after retry — aborting`);
             throw new Error('UNAUTHORIZED');
           }
+          log.error(`PULL: failed for ${entity} (status ${status}):`, err);
           throw err;
         }
       }
-      throw new Error('Failed to fetch changes after retries');
-    })();
 
+      // Backend returns id as string; repositories expect number. Coerce here.
+      const rawChanges: Array<{ id: string | number; operation: 'upsert' | 'delete'; data: Record<string, unknown> | null }> = response.changes ?? [];
 
-    if (!response.changes?.length) {
-      log.debug(`PULL: No changes on page ${pageNum}`);
-      break;
-    }
+      if (rawChanges.length > 0) {
+        const upserts: Array<{ id: number; data: Record<string, unknown> }> = [];
+        const deletes: number[] = [];
 
-    log.debug(`PULL: Page ${pageNum} has ${response.changes.length} changes`);
-    if (response.changes.length > 0) {
-      log.debug(`PULL: First change: ${JSON.stringify(response.changes[0])}`);
-    }
-
-    // Bucket changes by table so we can call batch methods — one DB statement
-    // per table per page instead of one statement per row.
-    const upsertsByTable: Record<string, Array<{ id: number; data: Record<string, unknown> }>> = {};
-    const deletesByTable: Record<string, number[]> = {};
-
-    for (const change of response.changes) {
-      if (!TABLE_HANDLERS[change.table]) {
-        log.warn(`PULL: No handler for table "${change.table}" — skipping`);
-        continue;
-      }
-      if (change.operation === 'upsert' && change.data) {
-        (upsertsByTable[change.table] ??= []).push({ id: change.id, data: change.data });
-      } else if (change.operation === 'delete') {
-        (deletesByTable[change.table] ??= []).push(change.id);
-      }
-    }
-
-    log.debug(`PULL: Bucketed into: ${Object.keys(upsertsByTable).map(t => `${t}:${upsertsByTable[t]!.length} upserts`).join(', ')} | ${Object.keys(deletesByTable).map(t => `${t}:${deletesByTable[t]!.length} deletes`).join(', ')}`);
-
-    // Apply batches — all upserts for a table in one INSERT, all deletes in one UPDATE.
-    // NOTE: This should be wrapped in a transaction to prevent data corruption on app crash.
-    // This requires refactoring repositories to accept transaction contexts.
-    // For now, data corruption risk is mitigated by: idempotent operations (INSERT OR REPLACE),
-    // cursor-based pagination (failed cursors prevent re-apply), and user refresh on sync failure.
-    const applyPromises: Promise<void>[] = [];
-    for (const [table, items] of Object.entries(upsertsByTable)) {
-      applyPromises.push(
-        TABLE_HANDLERS[table]!.onBatchUpsert(items).catch((err) =>
-          log.error(`PULL: Batch upsert failed for ${table}:`, err),
-        ),
-      );
-    }
-    for (const [table, ids] of Object.entries(deletesByTable)) {
-      applyPromises.push(
-        TABLE_HANDLERS[table]!.onBatchDelete(ids).catch((err) =>
-          log.error(`PULL: Batch delete failed for ${table}:`, err),
-        ),
-      );
-    }
-    await Promise.all(applyPromises);
-
-    totalChanges += response.changes.length;
-
-    // Persist server-provided per-table next cursors (crash-safe — after each page)
-    const serverNextCursors = response.nextCursors ?? {};
-    await Promise.all(
-      Object.entries(serverNextCursors).map(([table, cursorStr]) => {
-        const cursor = cursorStr as string;
-        const ms = parseInt(cursor.split(':')[0] ?? '0', 10);
-        if (!isNaN(ms) && ms > 0) {
-          currentCursors[table] = cursor;
-          return syncStateRepository.saveCursorForTable(table, ms);
+        for (const change of rawChanges) {
+          const numId = Number(change.id);
+          if (change.operation === 'upsert' && change.data) {
+            upserts.push({ id: numId, data: change.data });
+          } else if (change.operation === 'delete') {
+            deletes.push(numId);
+          }
         }
-      }),
-    );
 
-    if (!response.hasMore) break;
+        // Apply the page atomically from the cursor's point of view: if either
+        // batch fails, leave the cursor where it was so the next sync re-fetches
+        // this page. Advancing past a failed write would silently drop those rows.
+        try {
+          if (upserts.length) await handler.onBatchUpsert(upserts);
+          if (deletes.length) await handler.onBatchDelete(deletes);
+        } catch (err) {
+          log.error(`PULL: failed to apply page for ${entity} — leaving cursor at ${cursor} for retry`, err);
+          break;
+        }
+
+        totalChanges += rawChanges.length;
+
+        // Advance cursor only after a successful page apply.
+        const nextCursor = response.next_cursor;
+        const nextMs = parseInt(nextCursor.split(':')[0] ?? '0', 10);
+        if (!isNaN(nextMs) && nextMs > 0) {
+          cursor = nextCursor;
+          await syncStateRepository.saveCursorForTable(entity, nextMs);
+        }
+      }
+
+      if (!response.has_more) break;
+    }
+
+    log.debug(`PULL: ${entity} done — ${pageNum} page(s)`);
   }
 
-  // Write last pull time using server clock (not device clock)
-  const pullTimestamp = firstPageServerTime
-    ? new Date(firstPageServerTime).getTime()
+  // Write last pull time using server clock
+  const pullTimestamp = lastServerTime
+    ? new Date(lastServerTime).getTime()
     : Date.now();
   await syncStateRepository.setValue(SYNC_KEYS.LAST_PULL_AT, String(pullTimestamp));
 
-  log.info(`PULL: Applied ${totalChanges} changes across ${pageNum} page(s)`);
+  log.info(`PULL: Applied ${totalChanges} changes across ${SYNC_TABLES.length} entity type(s)`);
 }
 
 // ─── Push ─────────────────────────────────────────────────────────────────────
@@ -404,8 +442,11 @@ async function pullChanges(storeGuuid: string): Promise<void> {
 async function pushMutations(): Promise<void> {
   log.info('PUSH: Starting...');
 
-  // Load offline session once — avoids N SecureStore reads per batch
-  const session = await offlineSession.load();
+  const [identity] = await Promise.all([
+    getDeviceIdentity(),
+    offlineSession.load(), // kept for future offline-session header use
+  ]);
+  const deviceId = identity.deviceId;
 
   let totalPushed = 0;
 
@@ -424,87 +465,98 @@ async function pushMutations(): Promise<void> {
     const batchIds = batch.map(item => item.id);
     await mutationQueueRepository.markInProgress(batchIds);
 
-    // Build signed operations
-    const operations: PushOperation[] = await Promise.all(
-      batch.map(async (item) => {
-        const op: PushOperation = {
-          id:       item.idempotency_key,   // ← stable key, used for server dedup
-          clientId: item.idempotency_key,   // ← same — never changes across retries
-          table:    item.entity,
-          op:       item.operation,
-          opData:   item.payload,
-        };
-        if (session?.signature) {
-          op.signature = await _signOperation(
-            item.operation,
-            item.entity,
-            item.payload,
-            session.signature,
-          );
-        }
-        return op;
-      }),
-    );
+    const operations: PushOperation[] = batch.map((item, idx) => ({
+      client_op_id: item.idempotency_key,
+      sequence:     idx + 1,
+      entity:       item.entity,
+      operation:    item.operation,
+      client_id:    item.idempotency_key,
+      payload:      item.payload,
+    }));
 
-    // Build request body — include offline session context for server-side re-validation
-    const body: Record<string, unknown> = { operations };
-    if (session) {
-      body.offlineSession = {
-        userGuuid:         session.userGuuid,
-        storeGuuid:        session.storeGuuid,
-        roles:             session.roles,
-        offlineValidUntil: session.offlineValidUntil,
-        signature:         session.signature,
-        ...(session.deviceId     ? { deviceId: session.deviceId }         : {}),
-        ...(session.offlineToken ? { offlineToken: session.offlineToken } : {}),
-      };
-    }
+    const body: Record<string, unknown> = {
+      device_id: deviceId,
+      operations,
+    };
 
     try {
-      const res = await API.post<PushResponse>('/sync/push', body, {
+      const res = await API.post('/sync/push', body, {
         headers: { 'X-Sync-Schema-Version': SYNC_SCHEMA_VERSION },
         timeout: PUSH_TIMEOUT_MS,
       });
 
-      const results   = res.data?.results ?? [];
-      const serverTime = res.data?.serverTime;
+      // Previously this used API.post<PushResponse> and read res.data.results
+      // directly. That was a contract bug: AxiosResponse types `res.data` as
+      // the generic, but the wire shape is `{ message, data: PushResponse }`,
+      // so `res.data.results` was always undefined and the result-processing
+      // loop below silently no-op'd — every push round-tripped without ever
+      // calling markSynced. The server-side idempotency dedup hid this from
+      // users; the local queue just looked perpetually pending.
+      const push = unwrapEnvelope<PushResponse>(res.data);
+      const results    = push.results ?? [];
+      const serverTime = push.server_time;
 
-      // Build a lookup: opId → queue row id (our SQLite PK)
-      const opIdToRowId = new Map(batch.map(item => [item.idempotency_key, item.id]));
-      // Track which queue rows were accounted for in results
+      // Build lookups for the result-processing loop
+      const opIdToItem   = new Map(batch.map(item => [item.idempotency_key, item]));
+      const opIdToRowId  = new Map(batch.map(item => [item.idempotency_key, item.id]));
       const handledRowIds = new Set<number>();
 
+      // Collect failed parent ops so we can cascade-fail their dependents after the loop
+      const failedParents: Array<{ clientId: string; entity: string }> = [];
+
       for (const result of results) {
-        const rowId = opIdToRowId.get(result.opId);
-        if (rowId == null) continue; // result for an op not in this batch — ignore
+        const rowId = opIdToRowId.get(result.client_op_id);
+        if (rowId == null) continue;
         handledRowIds.add(rowId);
 
-        switch (result.status) {
-          case 'ok':
-          case 'duplicate':
-            await mutationQueueRepository.markSynced([rowId]);
-            totalPushed++;
-            break;
+        if (result.status === 'ok' || result.status === 'duplicate') {
+          await mutationQueueRepository.markSynced([rowId]);
+          totalPushed++;
+          continue;
+        }
 
-          case 'conflict':
-          case 'rejected':
-            await mutationQueueRepository.markQuarantined(
-              rowId,
-              400,
-              result.reason ?? result.status,
-            );
-            log.warn(`PUSH: Op ${result.opId} ${result.status}: ${result.reason ?? ''}`);
-            break;
+        if (result.status === 'conflict') {
+          const serverState = (result.server_state as Record<string, unknown>) ?? null;
+          await resolveConflict(rowId, serverState, result.reason ?? 'conflict');
+          const batchItem = opIdToItem.get(result.client_op_id);
+          if (batchItem) failedParents.push({ clientId: result.client_op_id, entity: batchItem.entity });
+          log.warn(`PUSH: Conflict ${result.client_op_id}: ${result.reason ?? ''}`);
+          continue;
+        }
 
-          case 'error':
-            // Transient server error — retry with backoff
-            await mutationQueueRepository.incrementRetry(rowId, result.reason ?? 'SERVER_ERROR');
-            log.debug(`PUSH: Op ${result.opId} error: ${result.reason ?? ''}`);
-            break;
+        if (result.status === 'rejected') {
+          await mutationQueueRepository.markQuarantined(rowId, 400, result.reason ?? 'rejected');
+          const batchItem = opIdToItem.get(result.client_op_id);
+          if (batchItem) failedParents.push({ clientId: result.client_op_id, entity: batchItem.entity });
+          log.warn(`PUSH: Rejected ${result.client_op_id}: ${result.reason ?? ''}`);
+          continue;
+        }
+
+        if (result.status === 'error') {
+          await mutationQueueRepository.incrementRetry(rowId, result.reason ?? 'SERVER_ERROR');
+          log.debug(`PUSH: Error ${result.client_op_id}: ${result.reason ?? ''}`);
+          continue;
         }
       }
 
-      // Any ops in the batch that the server didn't mention — reset to pending
+      // Cascade-fail any pending ops that depended on a failed parent
+      if (failedParents.length > 0) {
+        const unhandledOps: PendingOp[] = batch
+          .filter(item => !handledRowIds.has(item.id))
+          .map(item => ({
+            id:              item.id,
+            idempotency_key: item.idempotency_key,
+            entity:          item.entity,
+            operation:       item.operation,
+            payload:         item.payload,
+          }));
+
+        for (const failed of failedParents) {
+          await scanCascadingFailures(failed.clientId, failed.entity, unhandledOps);
+        }
+      }
+
+      // Any ops the server didn't mention — reset to pending
       const unhandledIds = batch
         .filter(item => !handledRowIds.has(item.id))
         .map(item => item.id);
@@ -514,7 +566,6 @@ async function pushMutations(): Promise<void> {
         return;
       }
 
-      // Advance last_pushed_at using server clock, not device clock
       if (serverTime) {
         await syncStateRepository.setValue(SYNC_KEYS.LAST_PUSH_AT, String(new Date(serverTime).getTime()));
       }
@@ -575,41 +626,3 @@ async function _syncWork(storeGuuid: string): Promise<void> {
   ]);
 }
 
-/**
- * Deterministic JSON serialisation with sorted keys.
- *
- * Ensures the same logical object produces the identical string on any JS engine
- * (Hermes on mobile, V8 on server). Standard JSON.stringify does not guarantee
- * key order, causing signature mismatches on legitimate operations.
- */
-function canonicalJson(value: unknown): string {
-  if (value === null || value === undefined) return 'null';
-  if (typeof value === 'boolean' || typeof value === 'number') return JSON.stringify(value);
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    return '[' + value.map(canonicalJson).join(',') + ']';
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  const entries = keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`);
-  return '{' + entries.join(',') + '}';
-}
-
-/**
- * SHA-256 keyed hash for operation signing.
- * Format: SHA256(signingKey:op:table:canonicalJson(opData))
- * Mirrors SyncService.verifyOperationSignature() on the backend.
- *
- * Uses canonical JSON (sorted keys) to ensure cross-engine consistency
- * between Hermes (mobile) and V8 (server).
- */
-async function _signOperation(
-  op: string,
-  table: string,
-  opData: Record<string, unknown>,
-  signingKey: string,
-): Promise<string> {
-  const canonical = `${op}:${table}:${canonicalJson(opData)}`;
-  const input = `${signingKey}:${canonical}`;
-  return ExpoCrypto.digestStringAsync(ExpoCrypto.CryptoDigestAlgorithm.SHA256, input);
-}

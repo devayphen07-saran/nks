@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SessionContextRepository } from '../../repositories/session-context.repository';
 import { SessionTokenRepository } from '../../repositories/session-token.repository';
 import { SessionRevocationRepository } from '../../repositories/session-revocation.repository';
@@ -18,6 +18,8 @@ import { AuthUsersRepository } from '../../repositories/auth-users.repository';
  */
 @Injectable()
 export class AuthContextService {
+  private readonly logger = new Logger(AuthContextService.name);
+
   constructor(
     private readonly sessionContextRepository: SessionContextRepository,
     private readonly sessionTokenRepository: SessionTokenRepository,
@@ -35,14 +37,6 @@ export class AuthContextService {
   }
 
   /**
-   * Atomically fetch the session row + a JTI revocation flag in one query.
-   * Returns `{ session: null, revokedJti: false }` for unknown tokens.
-   */
-  findSessionByToken(token: string) {
-    return this.sessionTokenRepository.findByTokenWithJtiCheck(token);
-  }
-
-  /**
    * Fetch a user record by primary key. Guards use the full row because
    * SessionMapper turns it into the SessionUser DTO.
    */
@@ -51,13 +45,13 @@ export class AuthContextService {
   }
 
   /**
-   * Revoke + blocklist + delete a single session synchronously.
-   * Called by AuthPolicyService for the current session when a blocked/inactive
-   * account is detected — prevents immediate replay of the same token.
-   * Remaining sessions are cleaned up by SessionRevocationListener off the hot path.
+   * Revoke a single session synchronously.
+   * Called by AuthPolicyService when a blocked/inactive account is detected —
+   * prevents immediate replay of the same token. Remaining sessions are
+   * cleaned up by SessionRevocationListener off the hot path.
    */
-  revokeCurrentSession(sessionId: number, reason: string, jti?: string): Promise<void> {
-    return this.sessionRevocationRepository.revokeSession(sessionId, reason, jti);
+  revokeCurrentSession(sessionId: number, reason: string): Promise<void> {
+    return this.sessionRevocationRepository.revokeSession(sessionId, reason);
   }
 
   /**
@@ -78,12 +72,7 @@ export class AuthContextService {
     oldToken: string,
     newToken: string,
     newExpiresAt: Date,
-    newCsrfSecret: string,
   ): Promise<boolean> {
-    return this.sessionTokenRepository.rotateToken(oldToken, newToken, newExpiresAt, newCsrfSecret);
-  }
-
-  rotateCsrfSecret(sessionId: number, newCsrfSecret: string): Promise<void> {
-    return this.sessionTokenRepository.rotateCsrfSecret(sessionId, newCsrfSecret);
+    return this.sessionTokenRepository.rotateToken(oldToken, newToken, newExpiresAt);
   }
 }

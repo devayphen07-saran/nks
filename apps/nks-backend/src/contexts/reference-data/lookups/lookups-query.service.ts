@@ -159,10 +159,15 @@ export class LookupsQueryService {
     }
 
     // Route to the correct table based on hasTable flag
-    const { rows, total } = type.hasTable
+    const result = type.hasTable
       ? await this.repository.findDedicatedLookupValues(typeCode, opts)
       : await this.repository.findLookupValuesByType(typeCode, opts);
 
-    return paginated({ items: rows.map(AdminLookupMapper.buildLookupValueDto), page: opts.page, pageSize: opts.pageSize, total });
+    if (!result) {
+      this.logger.warn(`Lookup type marked hasTable=true but no dedicated table mapping: typeCode='${typeCode}'`);
+      throw new NotFoundException(errPayload(ErrorCode.LOOKUP_CATEGORY_NOT_FOUND));
+    }
+
+    return paginated({ items: result.rows.map(AdminLookupMapper.buildLookupValueDto), page: opts.page, pageSize: opts.pageSize, total: result.total });
   }
 }

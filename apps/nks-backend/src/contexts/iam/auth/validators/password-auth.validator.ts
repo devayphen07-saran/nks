@@ -28,13 +28,6 @@ export class PasswordAuthValidator {
     }
   }
 
-  static assertEmailVerified(user: { emailVerified?: boolean | null }): void {
-    if (!user.emailVerified)
-      throw new UnauthorizedException(
-        errPayload(ErrorCode.AUTH_EMAIL_NOT_VERIFIED),
-      );
-  }
-
   static assertPasswordValid(isValid: boolean): void {
     if (!isValid)
       throw new UnauthorizedException(

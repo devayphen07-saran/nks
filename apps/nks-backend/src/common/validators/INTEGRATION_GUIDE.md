@@ -20,7 +20,6 @@ SanitizerValidator.sanitizeEmail(email)           // trim, lowercase, remove spa
 SanitizerValidator.sanitizePhoneNumber(phone)     // remove non-digits except +
 SanitizerValidator.sanitizeName(name)             // proper case, normalize spaces
 SanitizerValidator.escapeHtml(text)               // XSS prevention
-SanitizerValidator.sanitizeSqlInput(input)        // SQL injection prevention (backup)
 SanitizerValidator.sanitizeString(text, maxLen)   // trim and limit length
 SanitizerValidator.removeControlCharacters(text)  // remove null bytes
 ```

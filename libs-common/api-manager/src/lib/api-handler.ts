@@ -27,6 +27,7 @@ type PossibleTypeId =
   | "outboxEventId"
   | "storeId"
   | "storeGuuid"
+  | "districtGuuid"
   | "guuid"
   | "code"
   | "id";

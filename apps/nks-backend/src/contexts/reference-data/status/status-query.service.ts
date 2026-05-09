@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { StatusRepository } from './repositories/status.repository';
 import { StatusMapper } from './mapper/status.mapper';
 import { paginated } from '../../../common/utils/paginated-result';
@@ -8,6 +8,8 @@ import type { Status } from '../../../core/database/schema/entity-system/status/
 
 @Injectable()
 export class StatusQueryService {
+  private readonly logger = new Logger(StatusQueryService.name);
+
   constructor(private readonly repository: StatusRepository) {}
 
   async getActiveStatuses(): Promise<StatusResponse[]> {

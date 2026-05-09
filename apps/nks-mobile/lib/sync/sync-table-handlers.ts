@@ -14,11 +14,13 @@
 import {
   stateRepository,
   districtRepository,
+  lookupRepository,
 } from "../database/repositories";
 
 import type {
   StateRow,
   DistrictRow,
+  LookupRow,
 } from "../database/schema";
 
 import { createLogger } from '../utils/logger';
@@ -109,6 +111,36 @@ export const TABLE_HANDLERS: Record<string, TableHandler> = {
     async onBatchDelete(ids) {
       log.debug(`district: onBatchDelete called with ${ids.length} ids`);
       await districtRepository.batchSoftDelete(ids);
+    },
+  },
+
+  // ── lookup (reference data — global and store-scoped) ────────────────────────
+  lookup: {
+    async onBatchUpsert(items) {
+      log.debug(`lookup: onBatchUpsert called with ${items.length} items`);
+      const rows: LookupRow[] = items.map(({ id, data: d }) => ({
+        id,
+        guuid:             str(d.guuid),
+        lookup_type_id:    typeof d.lookupTypeId === 'number' ? d.lookupTypeId : 0,
+        lookup_type_code:  str(d.lookupTypeCode),
+        code:              str(d.code),
+        label:             str(d.label),
+        description:       nullableStr(d.description),
+        store_id:          typeof d.storeId === 'number' ? d.storeId : null,
+        is_active:         bool(d.isActive),
+        is_system:         bool(d.isSystem),
+        is_hidden:         bool(d.isHidden),
+        sort_order:        typeof d.sortOrder === 'number' ? d.sortOrder : null,
+        version:           typeof d.version === 'number' ? d.version : 1,
+        updated_at:        str(d.updatedAt),
+        deleted_at:        nullableStr(d.deletedAt),
+      }));
+      await lookupRepository.batchUpsert(rows);
+      log.debug(`lookup: batchUpsert completed`);
+    },
+    async onBatchDelete(ids) {
+      log.debug(`lookup: onBatchDelete called with ${ids.length} ids`);
+      await lookupRepository.batchSoftDelete(ids);
     },
   },
 };

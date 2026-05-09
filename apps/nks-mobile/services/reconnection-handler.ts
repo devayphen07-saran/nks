@@ -30,6 +30,7 @@ import { runSync } from '../lib/sync/sync-engine';
 import { fetchWithTimeout } from '../lib/utils/fetch-with-timeout';
 import { createLogger } from '../lib/utils/logger';
 import { refreshTokenAttempt } from '../lib/auth/refresh-token-attempt';
+import { getDeviceHeaders } from '../lib/auth/axios-interceptors';
 import { getServerBaseUrl } from '../lib/utils/api-base-url';
 import type { AppDispatch } from "../store";
 
@@ -67,6 +68,7 @@ async function checkSessionRevocation(): Promise<{ revoked: boolean; wipe: boole
   if (!sessionToken) return { revoked: false, wipe: false };
 
   try {
+    const deviceHeaders = await getDeviceHeaders();
     const res = await fetchWithTimeout(
       `${API_BASE}/auth/session-status`,
       {
@@ -74,6 +76,7 @@ async function checkSessionRevocation(): Promise<{ revoked: boolean; wipe: boole
         headers: {
           Authorization: `Bearer ${sessionToken}`,
           "Content-Type": "application/json",
+          ...deviceHeaders,
         },
       },
       8_000,

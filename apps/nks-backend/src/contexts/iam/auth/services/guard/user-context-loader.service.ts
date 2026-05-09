@@ -41,7 +41,7 @@ export class UserContextLoaderService {
       roleRows,
     );
 
-    const sessionUser = SessionMapper.buildSessionUser(user, roleRows, resolvedStoreFk);
+    const sessionUser = SessionMapper.buildSessionUser(user, roleRows, resolvedStoreFk, sessionId);
     return { sessionUser, isActive: user.isActive ?? true };
   }
 

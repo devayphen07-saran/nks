@@ -32,13 +32,15 @@ const ratesByGstPercentage: Record<number, string[]> = {
 
 function getIndiaComponentRates(baseTaxRate: string) {
   const rate = parseFloat(baseTaxRate);
-  const componentRate = (rate / 2).toFixed(3);
+  const half = (rate / 2).toFixed(3);
   return {
-    component1: componentRate, // CGST
-    component2: componentRate, // SGST
-    component3: baseTaxRate,   // IGST (full rate for inter-state)
-    additional: '0',           // Cess (no default)
+    component1: half,  // CGST  (rate / 2)
+    component2: half,  // SGST  (rate / 2)
+    component3: null,  // IGST is inter-state context, not an additive component
+    additional: '0',   // Cess  (no default)
   };
+  // Constraint: base_tax_rate = component1 + component2 + component3 + additional
+  // For intra-state: rate/2 + rate/2 + 0 + 0 = rate ✓
 }
 
 export async function seedTaxRateMaster(db: Db) {

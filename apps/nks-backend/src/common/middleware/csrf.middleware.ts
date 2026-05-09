@@ -10,9 +10,6 @@ import { CsrfService } from '../csrf.service';
  * session exists so the login/register form can include X-CSRF-Token.
  * This is the double-submit baseline for unauthenticated requests.
  *
- * The token is IP-bound: HMAC-SHA256(nonce:clientIp, CSRF_HMAC_SECRET).
- * Binding to the originating IP makes the token harder to reuse from a
- * different network context even if intercepted.
  *
  * What this middleware does NOT do:
  *   - Validate X-CSRF-Token (guard owns that for authenticated routes)

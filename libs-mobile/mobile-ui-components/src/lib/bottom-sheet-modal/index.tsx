@@ -29,7 +29,6 @@ export const BottomSheetModal: React.FC<BottomSheetModalProps> = ({
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="pageSheet"
       transparent={true}
       onRequestClose={onClose}
       statusBarTranslucent

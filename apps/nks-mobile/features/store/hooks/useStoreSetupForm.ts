@@ -9,8 +9,8 @@ const storeSchema = z.object({
     .min(1, "Store name is required")
     .min(3, "Store name must be at least 3 characters"),
   storeCode: z.string().optional(),
-  storeCategoryCode: z.string().min(1, "Category is required"),
-  storeLegalTypeCode: z.string().min(1, "Legal type is required"),
+  storeCategoryCode: z.string().min(1, "Store category is required"),
+  storeLegalTypeCode: z.string().min(1, "Store legal type is required"),
   registrationNumber: z.string().optional(),
   taxNumber: z.string().optional(),
 
@@ -22,6 +22,8 @@ const storeSchema = z.object({
     .length(6, "Pincode must be 6 digits")
     .refine((v) => /^\d+$/.test(v), "Pincode must contain only digits"),
   city: z.string().min(1, "City is required"),
+  stateGuuid: z.string().min(1, "State is required"),
+  districtGuuid: z.string().optional(),
 });
 
 export type StoreFormValues = z.infer<typeof storeSchema>;
@@ -40,6 +42,8 @@ export const useStoreSetupForm = () => {
       addressLine2: "",
       pincode: "",
       city: "",
+      stateGuuid: "",
+      districtGuuid: "",
     },
     mode: "onChange",
   });

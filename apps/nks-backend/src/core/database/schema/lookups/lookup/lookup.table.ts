@@ -2,6 +2,7 @@ import { pgTable, varchar, bigint, uniqueIndex, index } from 'drizzle-orm/pg-cor
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { baseEntity, auditFields } from '../../base.entity';
+import { syncColumns } from '../../sync/sync-columns';
 import { users } from '../../auth/users';
 import { store } from '../../store/store';
 import { lookupType } from '../lookup-type/lookup-type.table';
@@ -38,8 +39,12 @@ export const lookup = pgTable(
     ),
 
     ...auditFields(() => users.id),
+    ...syncColumns(),
   },
   (table) => [
+    // Sync pull ordering: compound cursor for pagination without row skipping
+    index('lookup_updated_at_id_idx').on(table.updatedAt, table.id),
+
     // Global values: code unique within type
     uniqueIndex('lookup_code_type_global_idx')
       .on(table.code, table.lookupTypeFk)

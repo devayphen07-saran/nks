@@ -1,7 +1,7 @@
-import { BadRequestException, InternalServerException } from '../../../../common/exceptions';
+import { InternalServerException } from '../../../../common/exceptions';
+import { ErrorCode, errPayload } from '../../../../common/constants/error-codes.constants';
 import type { AuthResponseEnvelope } from '../dto/auth-response.dto';
-import { INITIAL_SYNC_CURSOR } from '../../../sync/sync.constants';
-// crypto import removed - UUID generation is business logic, not transformation
+import type { OfflineCredentials } from '../services/token/offline-token.service';
 
 export type PublicUserDto = {
   guuid: string;
@@ -26,12 +26,7 @@ interface AuthResult {
     email?: string | null;
     phoneNumber?: string | null;
   };
-  token?: string | null;
-  session?: {
-    token?: string;
-    expiresAt?: Date | string | null;
-    sessionId?: string;
-  };
+  bearerToken: string;
 }
 
 export type UserRoleEntry = {
@@ -55,96 +50,58 @@ export type PermissionContext = {
 };
 
 export type TokenPair = {
-  accessToken: string;
   refreshToken: string;
   jwtExpiresAt: Date;
   refreshTokenExpiresAt: Date;
 };
 
+export interface BuildEnvelopeOptions {
+  authResult: AuthResult;
+  tokenPair: TokenPair;
+  defaultStore: { id: number; guuid: string } | null | undefined;
+  sessionId: string;
+  sessionExpiresAt: string | Date;
+  refreshTokenExpiresAt: string | Date;
+  offline?: OfflineCredentials | null;
+}
+
+
 export class AuthMapper {
-  static buildAuthResponseEnvelope(
-    authResult: AuthResult,
-    tokenPair?: TokenPair,
-    defaultStore?: { guuid: string } | null,
-    sessionId?: string, // Business logic: must be generated in service
-    expiresAt?: string | Date, // Business logic: TTL calculation must be in service
-    refreshExpiresAt?: string | Date, // Business logic: TTL calculation must be in service
-    offlineToken?: string, // 3-day offline JWT for mobile offline verification
-    offlineSessionSignature?: string, // HMAC-SHA256 of the offline session payload (server-side signed)
-    deviceId?: string, // Echoed in sync.deviceId; null for web clients that don't send X-Device-Id
-    syncOpts?: { lastSyncedAt?: Date | null }, // null = full sync needed (fresh login); Date = last known server sync time
-  ): AuthResponseEnvelope {
-    const user = authResult.user;
-    const sessionToken = authResult.token ?? authResult.session?.token ?? '';
+  static buildAuthResponseEnvelope({
+    authResult,
+    tokenPair,
+    defaultStore,
+    sessionId,
+    sessionExpiresAt,
+    refreshTokenExpiresAt,
+    offline,
+  }: BuildEnvelopeOptions): AuthResponseEnvelope {
+    const { user, bearerToken } = authResult;
 
-    // Require sessionId from service (mapper is pure transformation only)
-    if (!sessionId) {
-      throw new BadRequestException(
-        'AuthMapper.toAuthResponseEnvelope: sessionId is required',
-      );
-    }
-
-    const accessToken = tokenPair?.accessToken;
-    const refreshToken = tokenPair?.refreshToken ?? sessionToken;
-
-    // Convert expiresAt/refreshExpiresAt to ISO string (transformation only, no calculation)
-    const expiresAtStr =
-      expiresAt instanceof Date
-        ? expiresAt.toISOString()
-        : String(expiresAt ?? '');
-    const refreshExpiresAtStr =
-      refreshExpiresAt instanceof Date
-        ? refreshExpiresAt.toISOString()
-        : String(refreshExpiresAt ?? '');
-    const lastSyncedAtStr =
-      syncOpts?.lastSyncedAt instanceof Date
-        ? syncOpts.lastSyncedAt.toISOString()
-        : null;
+    const sessionExpiresAtStr = sessionExpiresAt instanceof Date ? sessionExpiresAt.toISOString() : sessionExpiresAt;
+    const refreshTokenExpiresAtStr = refreshTokenExpiresAt instanceof Date ? refreshTokenExpiresAt.toISOString() : refreshTokenExpiresAt;
 
     return {
       user: this.buildPublicUserDto(user),
       auth: {
         sessionId,
-        sessionToken,
-        tokenType: 'Bearer' as const,
-        expiresAt: expiresAtStr,
-        refreshToken,
-        refreshExpiresAt: refreshExpiresAtStr,
-        ...(accessToken ? { accessToken } : {}),
+        bearerToken,
+        sessionExpiresAt: sessionExpiresAtStr,
+        refreshToken: tokenPair.refreshToken,
+        refreshTokenExpiresAt: refreshTokenExpiresAtStr,
       },
       context: {
         defaultStoreGuuid: defaultStore?.guuid ?? null,
+        defaultStoreId: defaultStore?.id ?? null,
       },
-      sync: {
-        cursor: INITIAL_SYNC_CURSOR,
-        lastSyncedAt: lastSyncedAtStr,
-        deviceId: deviceId ?? null,
-      },
-      offline: offlineToken
-        ? {
-            token: offlineToken,
-            ...(offlineSessionSignature ? { sessionSignature: offlineSessionSignature } : {}),
-          }
-        : null,
+      offline: offline ?? null,
     };
   }
 
-  static buildPublicUserDto(
-    user: AuthResult['user'] | null | undefined,
-  ): PublicUserDto {
-    if (!user)
-      throw new BadRequestException(
-        'AuthMapper.toPublicUserDto: user is required',
-      );
-
-    if (!user.guuid) {
-      throw new BadRequestException('AuthMapper.toPublicUserDto: user.guuid is required');
+  static buildPublicUserDto(user: AuthResult['user']): PublicUserDto {
+    if (!user.guuid || !user.iamUserId) {
+      throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
     }
-
-    if (!user.iamUserId) {
-      throw new InternalServerException('AuthMapper.toPublicUserDto: user row is missing iamUserId — data integrity violation');
-    }
-
     return {
       guuid: user.guuid,
       iamUserId: user.iamUserId,
@@ -171,15 +128,11 @@ export class AuthMapper {
     }>,
     storeIdOverride?: number,
   ): UserRoleEntry[] {
-    return roleRows.map((roleRow, index) => {
+    return roleRows.map((roleRow) => {
       const resolvedRoleCode = roleRow.roleCode ?? roleRow.code;
-
       if (!resolvedRoleCode) {
-        throw new BadRequestException(
-          `AuthMapper.mapToRoleEntries: roleCode is required (row ${index})`,
-        );
+        throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
       }
-
       const assignedAt =
         roleRow.assignedAt instanceof Date
           ? roleRow.assignedAt.toISOString()

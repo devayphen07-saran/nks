@@ -35,7 +35,7 @@ export const notifications = pgTable(
     }),
 
     // ── Type + Template ──────────────────────────────────────────────────────
-    // typeFk resolves to a row in notification_types (ORDER_UPDATE, INVITE, etc.)
+    // typeFk resolves to a row in notification_type (ORDER_UPDATE, INVITE, etc.)
     // templateFk records which template was rendered — nullable (system / ad-hoc notifications skip templates)
     typeFk: bigint('type_fk', { mode: 'number' })
       .notNull()

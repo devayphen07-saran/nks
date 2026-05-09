@@ -4,7 +4,7 @@ export const RAW_RESPONSE_KEY = 'rawResponse';
 
 /**
  * Declares that the handler owns its response format completely.
- * TransformInterceptor will pass the return value through unchanged.
+ * ResponseInterceptor will pass the return value through unchanged.
  *
  * Use for: file downloads, streams, SSE, JWKS endpoints, and any handler
  * that sets its own Content-Type or serializes data outside the standard

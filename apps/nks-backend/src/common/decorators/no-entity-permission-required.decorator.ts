@@ -3,11 +3,13 @@ import { SetMetadata } from '@nestjs/common';
 export const NO_ENTITY_PERMISSION_REQUIRED_KEY = 'noEntityPermissionRequired';
 
 /**
- * Explicit documentation decorator for authenticated endpoints that
- * intentionally do NOT use @RequireEntityPermission.
+ * Code-review marker for authenticated endpoints that intentionally do NOT use
+ * @RequireEntityPermission. NO RUNTIME EFFECT — this metadata is not read by
+ * any guard; it exists so reviewers can see at a glance that a missing
+ * @RequireEntityPermission was a deliberate decision, not an oversight.
  *
- * Every non-public endpoint must be one of:
- *   1. @RequireEntityPermission(...)  — entity-level RBAC enforced
+ * Every non-public endpoint should be one of:
+ *   1. @RequireEntityPermission(...)  — entity-level RBAC enforced by RBACGuard
  *   2. @Public()                      — unauthenticated access allowed
  *   3. @NoEntityPermissionRequired()  — authenticated, but self-service or
  *                                       structurally safe (see reason string)
@@ -15,12 +17,11 @@ export const NO_ENTITY_PERMISSION_REQUIRED_KEY = 'noEntityPermissionRequired';
  * The `reason` string is mandatory — it forces the developer to articulate
  * WHY the endpoint skips entity permission enforcement. Valid reasons:
  *   - 'self-service: user reading/writing their own data only'
- *   - 'structural: store membership enforced by StoresService.setDefaultStoreIfMember'
+ *   - 'structural: store membership enforced at service layer via X.verifyMembership'
  *   - 'platform: enforced by isSuperAdmin check in the service layer'
  *
- * This metadata is read by startup audit tooling to produce a report of
- * unprotected write endpoints — catch misconfigured controllers at deploy time,
- * not at runtime.
+ * Coverage is enforced by code review, not by tooling — same model as the
+ * Ayphen Java codebase's `PERMISSION_NAME_NR` approach.
  *
  * @example
  *   @NoEntityPermissionRequired('self-service: user reading their own profile')

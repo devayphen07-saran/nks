@@ -1,6 +1,21 @@
 export { syncStateRepository } from './sync-state.repository';
 export { mutationQueueRepository } from './mutation-queue.repository';
+export { mutationQueueLogRepository } from './mutation-queue-log.repository';
 export { stateRepository } from './state.repository';
 export { districtRepository } from './district.repository';
+export { lookupRepository } from './lookup.repository';
+export { storesRepository } from './stores.repository';
+export { stagingRepository } from './staging.repository';
+export { storeCacheRepository } from './store-cache.repository';
+export { storeSyncProgressRepository } from './store-sync-progress.repository';
+export { syncMetadataRepository } from './sync-metadata.repository';
+export { rolesRepository } from './roles.repository';
+export { permissionConstraintsRepository } from './permission-constraints.repository';
 
 export type { MutationQueueItem } from './mutation-queue.repository';
+export type { MutationLogStatus } from './mutation-queue-log.repository';
+export type { ReplicationStatus } from './stores.repository';
+export type { SyncProgressStatus, ProgressUpdate } from './store-sync-progress.repository';
+export type { MetadataUpdate } from './sync-metadata.repository';
+export type { StoreRolesSnapshot } from './roles.repository';
+export type { LookupRow } from '../schema';

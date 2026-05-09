@@ -17,7 +17,7 @@ export interface DeprecationMeta {
 export const DEPRECATED_KEY = 'deprecated';
 
 /**
- * Mark a route as deprecated. TransformInterceptor reads this metadata and sets
+ * Mark a route as deprecated. LoggingInterceptor reads this metadata and sets
  * RFC 8594 response headers on every matching request:
  *
  *   Deprecation: true

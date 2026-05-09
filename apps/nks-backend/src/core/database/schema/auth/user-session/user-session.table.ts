@@ -69,17 +69,9 @@ export const userSession = pgTable(
       withTimezone: true,
     }),
 
-    // Device fingerprint — HMAC-SHA256 of client IP (privacy-safe, server-keyed)
-    // Stored alongside raw ipAddress so fingerprint checks don't expose the raw IP
-    ipHash: varchar('ip_hash', { length: 64 }),
-
-    // Role hash (SHA256) for detecting role changes between requests
-    // If this differs from current role hash, roles have changed and session should be invalidated
-    roleHash: varchar('role_hash', { length: 64 }),
-
-    // JWT ID — the jti claim from the RS256 access token issued for this session.
-    // Stored here so that on logout/revoke we can blocklist this specific JWT
-    // without decoding the token string at revocation time.
+    // JWT ID — the jti claim embedded in the RS256 access token issued for this session.
+    // No JTI blocklist is maintained (dropped in migration 0007 — ADR-003).
+    // Revocation is handled via refreshTokenRevokedAt IS NULL in findSessionAuthContext.
     jti: uuid('jti'),
 
     // Refresh Token Rotation (security)
@@ -108,11 +100,11 @@ export const userSession = pgTable(
     // treated as createdAt for rotation threshold purposes.
     lastRotatedAt: timestamp('last_rotated_at', { withTimezone: true }),
 
-    // Per-session CSRF secret — random 32-byte hex generated at session creation.
-    // CSRF token = HMAC-SHA256(csrfSecret, CSRF_HMAC_SECRET).
-    // Independent of the session token: even if the session token leaks, an
-    // attacker cannot forge a CSRF token without also knowing csrfSecret.
-    // Rotated on every rolling session rotation and on @RotateCsrf() routes.
+    // Per-session CSRF secret. The cookie carries this value (so JS can read it
+    // and submit as X-CSRF-Token); validation compares the header against THIS
+    // column, not the cookie. That bind defeats subdomain cookie tossing — an
+    // attacker who controls a sibling subdomain can overwrite the cookie but
+    // cannot forge the DB value.
     csrfSecret: varchar('csrf_secret', { length: 64 }).notNull().default(''),
   },
   (table) => [

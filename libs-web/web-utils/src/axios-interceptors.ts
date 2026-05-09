@@ -22,6 +22,20 @@ const setupInterceptors = (instance: AxiosInstance): void => {
       // ✅ SECURITY: Don't add Bearer token manually.
       // Axios uses withCredentials: true to send the nks_session httpOnly cookie
       // automatically. The backend reads it in AuthGuard.
+
+      // CSRF: backend sets a JS-readable csrf_token cookie on login/register/refresh.
+      // For all unsafe methods (POST/PUT/PATCH/DELETE) with cookie transport, the
+      // guard requires X-CSRF-Token header matching the session's stored secret.
+      if (typeof document !== "undefined" && config.headers) {
+        const csrfToken = document.cookie
+          .split("; ")
+          .find((row) => row.startsWith("csrf_token="))
+          ?.split("=")[1];
+        if (csrfToken) {
+          config.headers["X-CSRF-Token"] = csrfToken;
+        }
+      }
+
       return config;
     },
     (error: AxiosError) => Promise.reject(error),
@@ -69,10 +83,12 @@ const setupInterceptors = (instance: AxiosInstance): void => {
           const refreshToken = getRefreshToken();
           const refreshResponse = await API.post("/auth/refresh-token", refreshToken ? { refreshToken } : undefined);
 
-          // Persist rotated tokens so the next expiry cycle works correctly
+          // Persist rotated tokens so the next expiry cycle works correctly.
+          // Backend response shape: { success, data: { user, auth: { refreshToken, accessToken, ... } } }
           const refreshData = (refreshResponse.data as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
-          if (refreshData?.refreshToken) setRefreshToken(refreshData.refreshToken as string);
-          if (refreshData?.jwtToken) setJwtCookie(refreshData.jwtToken as string);
+          const authPayload = refreshData?.auth as Record<string, unknown> | undefined;
+          if (authPayload?.refreshToken) setRefreshToken(authPayload.refreshToken as string);
+          if (authPayload?.accessToken) setJwtCookie(authPayload.accessToken as string);
 
           // Retry original request — browser auto-sends the new nks_session cookie
           return instance(originalRequest);

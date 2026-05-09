@@ -42,6 +42,9 @@ import {
   seedTaxFilingFrequencies,
   seedPlanTypes,
   seedTaxLineStatuses,
+  seedCustomerTypes,
+  seedSupplierTypes,
+  seedFileTypes,
   seedEntityTypes,
   seedPermissionActions,
   seedSuperAdminPermissions,
@@ -91,6 +94,9 @@ const seeds = [
   { name: 'tax_filing_frequency', fn: seedTaxFilingFrequencies },
   { name: 'plan_type', fn: seedPlanTypes },
   { name: 'tax_line_status', fn: seedTaxLineStatuses },
+  { name: 'customer_type', fn: seedCustomerTypes },
+  { name: 'supplier_type', fn: seedSupplierTypes },
+  { name: 'file_type', fn: seedFileTypes },
   // Statuses (business first so ACTIVE/CANCELED get canonical colors; subscription adds its own codes)
   { name: 'business_statuses', fn: seedBusinessStatuses }, // ← Must run before entity_status_mappings
   // Subscription System
@@ -120,7 +126,9 @@ async function seed() {
       console.log(`  ${name}: ${inserted} inserted`);
       success++;
     } catch (err: any) {
-      console.error(`  ${name}: ${err.message}`);
+      const cause = err.cause;
+      const detail = cause?.message ?? cause?.detail ?? '';
+      console.error(`  ${name}: ${err.message.split('\n')[0]}${detail ? ` | cause: ${detail}` : ''}`);
       failed++;
     }
   }

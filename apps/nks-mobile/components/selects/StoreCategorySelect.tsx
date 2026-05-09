@@ -1,19 +1,11 @@
-import {
-  SelectGeneric,
-  ConfigSelectItem,
-  Typography,
-} from "@nks/mobile-ui-components";
-import { useStoreCategories } from "@nks/api-manager";
-
-interface StoreCategory {
-  guuid: string;
-  code: string;
-  title: string;
-}
+import { SelectGeneric, ConfigSelectItem, Typography } from "@nks/mobile-ui-components";
+import { useStoreCategoriesSelect, type StoreCategorySelectItem } from "../../lib/hooks";
+import type { SelectMode } from "../../lib/hooks";
 
 interface Props {
   value?: string;
   onChange: (value?: string) => void;
+  mode?: SelectMode;
   label?: string;
   required?: boolean;
   errorMessage?: string;
@@ -22,15 +14,15 @@ interface Props {
 export const StoreCategorySelect = ({
   value,
   onChange,
-  label = "Store Category",
+  mode = "fallback",
+  label = "Store category",
   required,
   errorMessage,
 }: Props) => {
-  const { data, isLoading } = useStoreCategories();
-  const items: StoreCategory[] = data?.data ?? [];
+  const { items, isLoading } = useStoreCategoriesSelect(mode);
 
   return (
-    <SelectGeneric<StoreCategory>
+    <SelectGeneric<StoreCategorySelectItem>
       label={label}
       required={required}
       options={items}
@@ -42,7 +34,7 @@ export const StoreCategorySelect = ({
       errorMessage={errorMessage}
       displayRenderer={(selected) => (
         <Typography.Body>
-          {selected ? selected.title : "Select Category..."}
+          {selected ? selected.title : "Select a category"}
         </Typography.Body>
       )}
       renderItem={(item, onSelect, isSelected) => (

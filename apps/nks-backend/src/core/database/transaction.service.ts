@@ -8,9 +8,22 @@ export type DbTransaction = Parameters<
   Parameters<NodePgDatabase<typeof schema>['transaction']>[0]
 >[0];
 
+export type TransactionIsolationLevel =
+  | 'read uncommitted'
+  | 'read committed'
+  | 'repeatable read'
+  | 'serializable';
+
 export interface TransactionOptions {
   timeout?: number;
   name?: string;
+  /**
+   * PostgreSQL isolation level for this transaction.
+   * Default (when omitted) is the database's default — typically 'read committed'.
+   * Use 'repeatable read' when consistent reads across multiple statements matter
+   * (e.g. paginated pulls that capture server_time alongside the rowset).
+   */
+  isolationLevel?: TransactionIsolationLevel;
 }
 
 /**
@@ -84,19 +97,22 @@ export class TransactionService {
       // Drizzle's db.transaction() handles rollback automatically on error.
       // When timeout is set, apply it as a session-local limit so runaway
       // transactions fail fast rather than holding locks indefinitely.
-      const { timeout } = options;
-      const result = await this.db.transaction(async (tx) => {
-        if (timeout !== undefined) {
-          // PostgreSQL SET LOCAL does not support $1 parameters — interpolation is
-          // unavoidable. Guard with isSafeInteger (rejects NaN, Infinity, floats,
-          // strings) + an upper bound so only a plain positive ms value reaches SQL.
-          if (!Number.isSafeInteger(timeout) || timeout <= 0 || timeout > 3_600_000) {
-            throw new Error(`Invalid transaction timeout: ${String(timeout)}`);
+      const { timeout, isolationLevel } = options;
+      const result = await this.db.transaction(
+        async (tx) => {
+          if (timeout !== undefined) {
+            // PostgreSQL SET LOCAL does not support $1 parameters — interpolation is
+            // unavoidable. Guard with isSafeInteger (rejects NaN, Infinity, floats,
+            // strings) + an upper bound so only a plain positive ms value reaches SQL.
+            if (!Number.isSafeInteger(timeout) || timeout <= 0 || timeout > 3_600_000) {
+              throw new Error(`Invalid transaction timeout: ${String(timeout)}`);
+            }
+            await tx.execute(sql.raw(`SET LOCAL statement_timeout = ${timeout}`));
           }
-          await tx.execute(sql.raw(`SET LOCAL statement_timeout = ${timeout}`));
-        }
-        return fn(tx);
-      });
+          return fn(tx);
+        },
+        isolationLevel ? { isolationLevel } : undefined,
+      );
 
       const duration = Date.now() - startTime;
       this.logger.debug(`Transaction committed`, {

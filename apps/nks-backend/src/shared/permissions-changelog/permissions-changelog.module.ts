@@ -1,13 +1,10 @@
-import { Global, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { PermissionsChangelogService } from './permissions-changelog.service';
 
 /**
- * @Global() — feature modules (RolesModule, etc.) can inject
- * PermissionsChangelogService without each importing this module.
- *
- * Must be registered in AppModule before any module that injects it.
+ * Consumer modules (RolesModule, etc.) must import this module explicitly
+ * to surface PermissionsChangelogService coupling in the module graph.
  */
-@Global()
 @Module({
   providers: [PermissionsChangelogService],
   exports: [PermissionsChangelogService],

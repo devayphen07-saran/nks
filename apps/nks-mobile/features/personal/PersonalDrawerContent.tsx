@@ -50,7 +50,7 @@ export function PersonalDrawerContent(props: DrawerContentComponentProps) {
       items: [
         {
           label: "Switch to Store",
-          route: "/(protected)/(store)/list",
+          route: "/(protected)/(store)/(tabs)/home",
           iconName: "Store",
         },
       ],

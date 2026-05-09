@@ -40,7 +40,6 @@ export {
 // ─── React layer ──────────────────────────────────────────────────────────────
 export {
   MobileThemeProvider,
-  MobileThemeContext,
   useMobileTheme,
   useColorVariant,
 } from "./ThemeProvider";
@@ -49,4 +48,5 @@ export type {
   MobileThemeContextType,
   MobileThemeProviderProps,
   ColorPlace,
+  ThemePreference,
 } from "./ThemeProvider";

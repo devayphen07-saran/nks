@@ -1,6 +1,5 @@
-import type { UserSession } from '../../../../core/database/schema/auth/user-session';
+import type { UserSession, PublicUserSession } from '../../../../core/database/schema/auth/user-session';
 import type { User as DbUser } from '../../../../core/database/schema/auth/users/users.table';
-import type { PublicSession } from '../services/session/session-query.service';
 import type { SessionInfoDto } from '../dto';
 import type { SessionUser, SessionUserRole } from '../interfaces/session-user.interface';
 import { SystemRoleCodes } from '../../../../common/constants/system-role-codes.constant';
@@ -39,6 +38,7 @@ export class SessionMapper {
     dbUser: DbUser,
     roleRows: RoleRow[],
     activeStoreFk: number | null,
+    sessionId: number,
   ): SessionUser {
     const u = dbUser as BetterAuthUser;
 
@@ -59,6 +59,7 @@ export class SessionMapper {
     return {
       id: String(u.id),
       userId: Number(u.id),
+      sessionId,
       guuid: u.guuid ?? '',
       iamUserId: u.iamUserId ?? '',
       firstName: u.firstName ?? null,
@@ -82,20 +83,14 @@ export class SessionMapper {
     };
   }
 
-  static buildPublicSession(session: UserSession): PublicSession {
-    return {
-      guuid: session.guuid,
-      deviceId: session.deviceId ?? undefined,
-      deviceName: session.deviceName ?? undefined,
-      deviceType: session.deviceType ?? undefined,
-      platform: session.platform ?? undefined,
-      appVersion: session.appVersion ?? undefined,
-      expiresAt: session.expiresAt,
-      createdAt: session.createdAt,
-    };
+  private static buildPublicUserSession(session: UserSession): PublicUserSession {
+    // Cast to the schema's row shape — PublicUserSession is `Omit<UserSession, 'token'>`
+    // so the row is structurally compatible minus the redacted token field.
+    const { token: _token, ...rest } = session;
+    return rest;
   }
 
-  static buildSessionInfoDto(session: PublicSession): SessionInfoDto {
+  private static buildSessionInfoDto(session: PublicUserSession): SessionInfoDto {
     return {
       guuid: session.guuid,
       deviceId: session.deviceId ?? null,
@@ -109,6 +104,6 @@ export class SessionMapper {
   }
 
   static buildSessionInfoDtoFromRow(userSession: UserSession): SessionInfoDto {
-    return SessionMapper.buildSessionInfoDto(SessionMapper.buildPublicSession(userSession));
+    return SessionMapper.buildSessionInfoDto(SessionMapper.buildPublicUserSession(userSession));
   }
 }

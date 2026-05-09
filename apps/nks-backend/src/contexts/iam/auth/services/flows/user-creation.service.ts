@@ -12,7 +12,6 @@ import { RoleCommandService } from '../../../roles/role-command.service';
 import { AuthUtilsService } from '../shared/auth-utils.service';
 import { UserCreationValidator } from '../../validators';
 import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
-import { SYSTEM_USER_ID } from '../../../../../common/constants/app-constants';
 import { SanitizerValidator } from '../../../../../common/validators/sanitizer.validator';
 import * as schema from '../../../../../core/database/schema';
 import type { NewUser } from '../../../../../core/database/schema/auth/users';
@@ -31,17 +30,6 @@ type DbUser = typeof schema.users.$inferSelect;
 @Injectable()
 export class UserCreationService {
   private readonly logger = new Logger(UserCreationService.name);
-
-  /**
-   * Short-circuit flag: once a SUPER_ADMIN is confirmed, skip the DB check.
-   *
-   * Per-instance, intentionally. In a multi-pod deployment each pod warms up
-   * its own flag independently — that's fine because the underlying question
-   * is monotonic (once a SUPER_ADMIN exists it doesn't go away in normal
-   * operation), so every pod converges to the same `true` after one DB hit.
-   * If you ever soft-delete the SUPER_ADMIN, restart the pods.
-   */
-  private superAdminConfirmed = false;
 
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
@@ -97,7 +85,7 @@ export class UserCreationService {
       user = await this.authUsersRepository.createUserWithInitialRole(
         opts.buildPayload(),
         null,
-        SYSTEM_USER_ID,
+        null,
         (tx, userId) => this.assignUserRole(tx, userId),
       );
 
@@ -143,12 +131,8 @@ export class UserCreationService {
   /**
    * Guard: Reject registration if no SUPER_ADMIN exists yet.
    * The first admin must be created via email/password registration.
-   * Result is cached after the first success — once a super admin exists
-   * the answer never reverts.
    */
   private async ensureSuperAdminExists(): Promise<void> {
-    if (this.superAdminConfirmed) return;
-
     const superAdminRoleId = await this.authUtils.getCachedSystemRoleId(
       SystemRoleCodes.SUPER_ADMIN,
     );
@@ -163,8 +147,6 @@ export class UserCreationService {
 
     const exists = await this.roleQuery.hasSuperAdmin(superAdminRoleId);
     UserCreationValidator.assertAdminExists(exists);
-
-    this.superAdminConfirmed = true;
   }
 
   /**

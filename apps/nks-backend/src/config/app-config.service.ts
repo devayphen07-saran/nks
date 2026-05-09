@@ -42,10 +42,6 @@ export class AppConfigService {
     return this.config.get<number>('app.trustProxyHops') ?? 1;
   }
 
-  get csrfHmacSecret(): string {
-    return this.config.get<string>('app.csrfHmacSecret') ?? '';
-  }
-
   get csrfSameSite(): 'strict' | 'lax' | 'none' {
     return this.config.get<'strict' | 'lax' | 'none'>('app.csrfSameSite') ?? 'strict';
   }

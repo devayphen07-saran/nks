@@ -105,7 +105,7 @@ export const validateTokenExpiry = async (
 export interface RefreshValidationSuccess {
   canRefresh: true;
   refreshToken: string;
-  refreshExpiresAt?: string;
+  refreshTokenExpiresAt?: string;
 }
 
 export interface RefreshValidationFailure {
@@ -128,7 +128,7 @@ export async function validateTokensBeforeRefresh(
   envelope: SessionEnvelope<AuthResponse> | null,
 ): Promise<RefreshValidationResult> {
   const refreshToken = envelope?.data?.auth?.refreshToken;
-  const refreshExpiresAt = envelope?.data?.auth?.refreshExpiresAt;
+  const refreshTokenExpiresAt = envelope?.data?.auth?.refreshTokenExpiresAt;
 
   if (!refreshToken) {
     return {
@@ -138,14 +138,14 @@ export async function validateTokensBeforeRefresh(
     };
   }
 
-  const refreshExpiry = await validateTokenExpiry(refreshExpiresAt);
+  const refreshExpiry = await validateTokenExpiry(refreshTokenExpiresAt);
 
   if (refreshExpiry.isExpired) {
     return {
       canRefresh: false,
       error: "REFRESH_TOKEN_EXPIRED",
-      details: `Refresh token expired at ${refreshExpiresAt}`,
-      expiresAt: refreshExpiresAt,
+      details: `Refresh token expired at ${refreshTokenExpiresAt}`,
+      expiresAt: refreshTokenExpiresAt,
     };
   }
 
@@ -158,6 +158,6 @@ export async function validateTokensBeforeRefresh(
   return {
     canRefresh: true,
     refreshToken,
-    refreshExpiresAt,
+    refreshTokenExpiresAt,
   };
 }

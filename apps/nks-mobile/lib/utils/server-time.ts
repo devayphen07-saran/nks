@@ -132,3 +132,13 @@ export async function getServerAdjustedNow(): Promise<number> {
   const offsetSeconds = await getClockOffsetSeconds();
   return Date.now() + offsetSeconds * 1000;
 }
+
+/**
+ * Synchronous version — reads the in-memory cached offset without hitting SecureStore.
+ * Safe to call from sync contexts (e.g. JWT expiry predicates) after initServerTime()
+ * or syncServerTime() has been called at least once during this app session.
+ * Falls back to Date.now() if the offset has never been loaded.
+ */
+export function getServerAdjustedNowSync(): number {
+  return Date.now() + (cachedOffsetSeconds ?? 0) * 1000;
+}

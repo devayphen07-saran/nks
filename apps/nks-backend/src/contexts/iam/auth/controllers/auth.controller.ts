@@ -10,14 +10,19 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  Logger,
   UnauthorizedException,
   ParseUUIDPipe,
 } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../../../../common/guards/auth.guard';
 import type { Request, Response } from 'express';
-import { ErrorCode, errPayload } from '../../../../common/constants/error-codes.constants';
+import {
+  ErrorCode,
+  errPayload,
+} from '../../../../common/constants/error-codes.constants';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthControllerHelpers } from '../../../../common/utils/auth-helpers';
+import { DeviceDetector, type DeviceInfo } from '../../../../common/utils/device-detector';
 import { extractCookieValue } from '../../../../common/utils/cookie.utils';
 import { ResponseMessage } from '../../../../common/decorators/response-message.decorator';
 import {
@@ -26,9 +31,11 @@ import {
   RefreshTokenDto,
   AuthResponseEnvelope,
   MeResponseDto,
-  SyncTimeDto,
 } from '../dto';
-import { OnboardingCompleteDto, OnboardingCompleteResponseDto } from '../dto/onboarding.dto';
+import {
+  OnboardingCompleteDto,
+  OnboardingCompleteResponseDto,
+} from '../dto/onboarding.dto';
 import { SessionListDto } from '../dto/permissions.dto';
 import { Public } from '../../../../common/decorators/public.decorator';
 import { CurrentUser } from '../../../../common/decorators/current-user.decorator';
@@ -38,26 +45,40 @@ import { RawResponse } from '../../../../common/decorators/raw-response.decorato
 import { CsrfService } from '../../../../common/csrf.service';
 import { JWTConfigService } from '../../../../config/jwt.config';
 import type { SessionUser } from '../interfaces/session-user.interface';
-import {
-  AuthFlowUseCase,
-  SessionManagementUseCase,
-  UserOnboardingUseCase,
-  PermissionsQueryUseCase,
-} from '../use-cases';
+import { PasswordAuthService } from '../services/flows/password-auth.service';
+import { AuthQueryService } from '../services/session/auth-query.service';
+import { SessionCommandService } from '../services/session/session-command.service';
+import { SessionQueryService } from '../services/session/session-query.service';
+import { OnboardingService } from '../services/flows/onboarding.service';
+import { PermissionsService } from '../services/permissions/permissions.service';
 import { TokenLifecycleService } from '../services/token/token-lifecycle.service';
+import { DeviceRegistrationFlowService } from '../services/device/device-registration-flow.service';
+import {
+  MAX_SESSION_TOKEN_LENGTH,
+  MIN_SESSION_TOKEN_LENGTH,
+} from '../auth.constants';
+import {
+  DeviceContextHeaders,
+  type DeviceContext,
+} from '../../../../common/decorators/device-context.decorator';
 
 @ApiTags('Auth')
 @Controller('auth')
 @ApiBearerAuth()
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
-    private readonly authFlow: AuthFlowUseCase,
+    private readonly passwordAuth: PasswordAuthService,
     private readonly tokenLifecycle: TokenLifecycleService,
-    private readonly sessions: SessionManagementUseCase,
-    private readonly onboarding: UserOnboardingUseCase,
-    private readonly permissions: PermissionsQueryUseCase,
+    private readonly authQuery: AuthQueryService,
+    private readonly sessionCommand: SessionCommandService,
+    private readonly sessionQuery: SessionQueryService,
+    private readonly onboarding: OnboardingService,
+    private readonly permissions: PermissionsService,
     private readonly jwtConfig: JWTConfigService,
     private readonly csrf: CsrfService,
+    private readonly deviceRegistrationFlow: DeviceRegistrationFlowService,
   ) {}
 
   @Post('login')
@@ -71,13 +92,12 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponseEnvelope> {
-    const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
-    const result = await this.authFlow.login(dto, deviceInfo);
-    AuthControllerHelpers.applySessionCookie(res, result);
-    if (result.auth?.sessionToken && !AuthControllerHelpers.isMobile(deviceInfo.deviceType)) {
-      this.csrf.refresh(req, res, result.auth.sessionToken);
-    }
-    return AuthControllerHelpers.forClient(result, deviceInfo.deviceType);
+    const deviceInfo = DeviceDetector.extract(req);
+    const { envelope, csrfSecret } = await this.passwordAuth.login(
+      dto,
+      deviceInfo,
+    );
+    return this.applyAuthResponse(res, envelope, csrfSecret, deviceInfo);
   }
 
   @Post('register')
@@ -93,19 +113,34 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponseEnvelope> {
-    const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
-    const result = await this.authFlow.register(dto, deviceInfo);
-    AuthControllerHelpers.applySessionCookie(res, result);
-    if (result.auth?.sessionToken && !AuthControllerHelpers.isMobile(deviceInfo.deviceType)) {
-      this.csrf.refresh(req, res, result.auth.sessionToken);
-    }
-    return AuthControllerHelpers.forClient(result, deviceInfo.deviceType);
+    const deviceInfo = DeviceDetector.extract(req);
+    const { envelope, csrfSecret } = await this.passwordAuth.register(dto, deviceInfo);
+    return this.applyAuthResponse(res, envelope, csrfSecret, deviceInfo);
+  }
+
+  @Post('sync-time')
+  @HttpCode(HttpStatus.OK)
+  @NoEntityPermissionRequired(
+    'clock sync: authenticated but no entity permission needed',
+  )
+  @ResponseMessage('Success')
+  @ApiOperation({ summary: 'Calculate device clock offset relative to server' })
+  syncTime(@Body() body: { deviceTime?: number }): { offset: number } {
+    const serverTime = Math.floor(Date.now() / 1000);
+    const deviceTime = body?.deviceTime ?? serverTime;
+    return { offset: serverTime - deviceTime };
   }
 
   @Post('refresh-token')
   @Public()
   @HttpCode(HttpStatus.OK)
-  @RateLimit(10)
+  // No per-IP @RateLimit here. Refresh is keyed per-user inside
+  // TokenLifecycleService.enforceRateLimit (60 per 15 min per userId), which
+  // is the correct granule. A per-IP cap on this @Public endpoint also
+  // collapses every device behind a shared NAT (store WiFi, office, hotspot)
+  // into one bucket and turns flaky-network refresh bursts into 429 cascades
+  // — we hit that exact trap in production. The global default (100/15min)
+  // still backstops anonymous abuse before the service layer is reached.
   @ResponseMessage('Token refreshed successfully')
   @ApiOperation({
     summary: 'Refresh access token using refresh token',
@@ -116,31 +151,40 @@ export class AuthController {
     @Body() dto: RefreshTokenDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<AuthResponseEnvelope & { permissionsChanged: boolean }> {
+    @DeviceContextHeaders() device: DeviceContext,
+  ): Promise<AuthResponseEnvelope> {
     const cookieToken = this.parseSessionCookie(req);
     const providedRefreshToken = dto.refreshToken ?? cookieToken;
 
     if (!providedRefreshToken) {
-      throw new UnauthorizedException(errPayload(ErrorCode.AUTH_REFRESH_TOKEN_INVALID));
+      throw new UnauthorizedException(
+        errPayload(ErrorCode.AUTH_REFRESH_TOKEN_INVALID),
+      );
     }
 
-    const deviceId =
-      (req.headers as Record<string, string | undefined>)['x-device-id'] ?? null;
+    const isMobile = DeviceDetector.isMobile(device.deviceType ?? undefined);
+    const { envelope, csrfSecret } =
+      await this.tokenLifecycle.refreshAccessToken(
+        providedRefreshToken,
+        device.deviceId,
+        isMobile,
+      );
 
-    const result = await this.tokenLifecycle.refreshAccessToken(providedRefreshToken, deviceId);
-
-    const deviceType =
-      (req.headers as Record<string, string | undefined>)['x-device-type'];
-    AuthControllerHelpers.applySessionCookie(res, result);
-    if (result.auth?.sessionToken && !AuthControllerHelpers.isMobile(deviceType)) {
-      this.csrf.refresh(req, res, result.auth.sessionToken);
+    AuthControllerHelpers.applySessionCookie(res, envelope);
+    if (envelope.auth?.bearerToken && !isMobile) {
+      this.csrf.refresh(res, csrfSecret);
     }
-    return AuthControllerHelpers.forClient(result, deviceType);
+    return AuthControllerHelpers.forClient(
+      envelope,
+      device.deviceType ?? undefined,
+    );
   }
 
   @Get('me')
   @HttpCode(HttpStatus.OK)
-  @NoEntityPermissionRequired('self-service: user reading their own session and profile data')
+  @NoEntityPermissionRequired(
+    'self-service: user reading their own session and profile data',
+  )
   @ResponseMessage('Authenticated')
   @ApiOperation({
     summary: 'Get current authenticated user',
@@ -176,9 +220,10 @@ export class AuthController {
       this.parseSessionCookie(req) ??
       (req.headers.authorization?.replace(/^Bearer\s+/i, '') || undefined);
     if (token) {
-      await this.sessions.logout(token, req.user.userId);
+      await this.sessionCommand.logout(token, req.user.userId);
     }
     AuthControllerHelpers.clearSessionCookie(res);
+    this.csrf.clear(res);
     return null;
   }
 
@@ -209,15 +254,23 @@ export class AuthController {
   })
   async getSessions(
     @Req() req: AuthenticatedRequest,
+    @DeviceContextHeaders() device: DeviceContext,
   ): Promise<SessionListDto> {
-    const activeSessions = await this.sessions.getUserSessions(req.user.userId);
-    const currentSessionId = (req.headers['x-session-id'] as string) ?? null;
-    return { sessions: activeSessions, currentSessionId, total: activeSessions.length };
+    const activeSessions = await this.sessionQuery.getUserSessions(
+      req.user.userId,
+    );
+    return {
+      sessions: activeSessions,
+      currentSessionId: device.sessionId,
+      total: activeSessions.length,
+    };
   }
 
   @Delete('sessions/:sessionGuuid')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @NoEntityPermissionRequired('self-service: user revoking one of their own sessions')
+  @NoEntityPermissionRequired(
+    'self-service: user revoking one of their own sessions',
+  )
   @ApiOperation({
     summary: 'Terminate a specific session',
     description: 'Remotely logout from a specific device/session',
@@ -226,26 +279,32 @@ export class AuthController {
     @Param('sessionGuuid', ParseUUIDPipe) sessionGuuid: string,
     @Req() req: AuthenticatedRequest,
   ): Promise<void> {
-    await this.sessions.terminateSession(req.user.userId, sessionGuuid);
+    await this.sessionCommand.terminateSession(req.user.userId, sessionGuuid);
   }
 
   @Delete('sessions')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @NoEntityPermissionRequired('self-service: user revoking all their own sessions')
+  @NoEntityPermissionRequired(
+    'self-service: user revoking all their own sessions',
+  )
   @ApiOperation({
     summary: 'Terminate all sessions',
     description:
       'Remote logout from all devices (e.g., after password change or compromise)',
   })
-  async terminateAllSessions(
-    @Req() req: AuthenticatedRequest,
-  ): Promise<void> {
-    await this.sessions.terminateAllSessions(req.user.userId);
+  async terminateAllSessions(@Req() req: AuthenticatedRequest): Promise<void> {
+    await this.sessionCommand.terminateAllSessions(req.user.userId);
   }
 
   @Get('session-status')
   @Public()
-  @RateLimit(3)
+  // 20 per 15 min per IP. This is the mobile reconnection handler — a single
+  // device flapping between WiFi/cellular can legitimately call it several
+  // times in seconds, and shared NAT (store/office/hotspot) multiplies that
+  // across devices on the same egress IP. 3 was too tight; 20 still blocks
+  // enumeration because the response only echoes the caller's own session
+  // state (no oracle for unrelated tokens).
+  @RateLimit(20)
   @HttpCode(HttpStatus.OK)
   @ResponseMessage('Session status checked')
   @ApiOperation({
@@ -265,12 +324,20 @@ export class AuthController {
       : this.parseSessionCookie(req);
 
     // Reject obviously invalid tokens before touching the DB.
-    // Real session tokens are 64-char hex; anything shorter is a probe.
-    if (!token || token.length < 32 || token.length > 512) {
+    if (
+      !token ||
+      token.length < MIN_SESSION_TOKEN_LENGTH ||
+      token.length > MAX_SESSION_TOKEN_LENGTH
+    ) {
       return { active: false, revoked: true, wipe: false };
     }
 
-    return this.sessions.checkStatus(token);
+    // Caller must supply X-Device-Id when the session is device-bound. This
+    // closes the public-probe oracle: a stolen token alone returns 'revoked'
+    // unless the caller can also prove device possession.
+    const requestDeviceId =
+      (req.headers['x-device-id'] as string | undefined) ?? null;
+    return this.authQuery.checkSessionStatus(token, requestDeviceId);
   }
 
   @Post('profile-complete')
@@ -285,27 +352,29 @@ export class AuthController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: OnboardingCompleteDto,
   ): Promise<OnboardingCompleteResponseDto> {
-    return this.onboarding.completeProfile(req.user.userId, dto);
+    return this.onboarding.completeOnboarding(req.user.userId, dto);
   }
 
   @Get('permissions-snapshot')
   @HttpCode(HttpStatus.OK)
-  @NoEntityPermissionRequired('self-service: user reading their own permission snapshot')
+  @NoEntityPermissionRequired(
+    'self-service: user reading their own permission snapshot',
+  )
   @ResponseMessage('Permissions snapshot retrieved')
   @ApiOperation({
     summary: 'Get full permissions snapshot',
     description:
       'Returns all entity permissions for the authenticated user across all their stores. Used by mobile for offline caching and by frontend for permission-aware UI rendering.',
   })
-  async getPermissionsSnapshot(
-    @CurrentUser() user: SessionUser,
-  ) {
-    return this.permissions.getSnapshot(user.userId);
+  async getPermissionsSnapshot(@CurrentUser() user: SessionUser) {
+    return this.permissions.buildPermissionsSnapshot(user.userId);
   }
 
   @Get('permissions-delta')
   @HttpCode(HttpStatus.OK)
-  @NoEntityPermissionRequired('self-service: user reading their own permissions delta')
+  @NoEntityPermissionRequired(
+    'self-service: user reading their own permissions delta',
+  )
   @ResponseMessage('Permissions delta retrieved')
   @ApiOperation({
     summary: 'Get permissions delta since version',
@@ -316,26 +385,72 @@ export class AuthController {
     @CurrentUser() user: SessionUser,
     @Query('version') sinceVersion: string,
   ) {
-    return this.permissions.getDelta(user.userId, sinceVersion ?? '');
+    return this.permissions.calculateDelta(user.userId, sinceVersion ?? '');
   }
 
-  @Post('sync-time')
-  @Public()
+  @Post('switch-store')
   @HttpCode(HttpStatus.OK)
-  @ResponseMessage('Server time')
+  @NoEntityPermissionRequired('self-service: user switching their active store')
+  @ResponseMessage('Store switched successfully')
   @ApiOperation({
-    summary: 'Sync device clock with server time',
-    description: 'Returns the offset between server and device time in seconds. Used by mobile for clock drift detection before offline operations.',
+    summary: 'Switch active store for current session',
+    description:
+      'Updates the session to a different store. Used by mobile to switch between managed stores. Device is automatically registered for the new store.',
   })
-  getSyncTime(@Body() dto: SyncTimeDto): { serverTime: number; offset: number } {
-    const serverTime = Math.floor(Date.now() / 1000);
-    const offset = serverTime - dto.deviceTime;
-    return { serverTime, offset };
+  async switchStore(
+    @Body() dto: { storeId: number },
+    @CurrentUser() user: SessionUser,
+    @DeviceContextHeaders() device: DeviceContext,
+  ): Promise<{ success: boolean; activeStoreId: number }> {
+    const { storeId } = dto;
+
+    // Atomic: update session.activeStoreFk and upsert device_registration in
+    // one transaction. Awaited so the response is only sent once both writes
+    // are committed — eliminates the race where mobile starts syncing the
+    // new store before the device registration row exists.
+    //
+    // The session id comes from the bearer-validated SessionUser (set by
+    // AuthGuard) — never from a client-supplied header. This prevents a
+    // request from being told which session row to mutate.
+    await this.deviceRegistrationFlow.switchActiveStore(
+      user.sessionId,
+      storeId,
+      device.deviceId ?? null,
+    );
+
+    return { success: true, activeStoreId: storeId };
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────
 
+  /**
+   * Shared post-auth wiring for login and register:
+   * set session cookie, refresh CSRF, strip token for web.
+   *
+   * Device registration is handled by AuthFlowOrchestratorService — both
+   * password and OTP flows register the device atomically as part of the
+   * unified auth flow. Controllers are no longer involved.
+   */
+  private applyAuthResponse(
+    res: Response,
+    envelope: AuthResponseEnvelope,
+    csrfSecret: string,
+    deviceInfo: DeviceInfo,
+  ): AuthResponseEnvelope {
+    const isMobile = DeviceDetector.isMobile(deviceInfo.deviceType);
+    AuthControllerHelpers.applySessionCookie(res, envelope);
+
+    if (envelope.auth?.bearerToken && !isMobile) {
+      this.csrf.refresh(res, csrfSecret);
+    }
+
+    return AuthControllerHelpers.forClient(envelope, deviceInfo.deviceType);
+  }
+
   private parseSessionCookie(req: Request): string | undefined {
-    return extractCookieValue(req.headers.cookie ?? '', AuthControllerHelpers.SESSION_COOKIE_NAME);
+    return extractCookieValue(
+      req.headers.cookie ?? '',
+      AuthControllerHelpers.SESSION_COOKIE_NAME,
+    );
   }
 }

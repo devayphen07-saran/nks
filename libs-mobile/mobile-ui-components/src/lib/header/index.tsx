@@ -6,17 +6,36 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 interface HeaderProps {
   title?: string;
+  subtitle?: string;
+  /** Replaces the title/subtitle block when provided. */
+  centerElement?: React.ReactNode;
   leftElement?: React.ReactNode;
   rightElement?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
 }
 
-export const Header: React.FC<HeaderProps> = ({ title, leftElement, rightElement, style }) => {
+export const Header: React.FC<HeaderProps> = ({
+  title,
+  subtitle,
+  centerElement,
+  leftElement,
+  rightElement,
+  style,
+}) => {
   return (
     <HeaderSafe edges={["top"]} collapsable={false}>
       <HeaderContainer style={style}>
         <SideContainer>{leftElement}</SideContainer>
-        <Title numberOfLines={1}>{title}</Title>
+        <TitleBlock>
+          {centerElement ? (
+            centerElement
+          ) : (
+            <>
+              <Title numberOfLines={1}>{title}</Title>
+              {subtitle ? <Subtitle numberOfLines={1}>{subtitle}</Subtitle> : null}
+            </>
+          )}
+        </TitleBlock>
         <SideContainer>{rightElement}</SideContainer>
       </HeaderContainer>
     </HeaderSafe>
@@ -39,10 +58,20 @@ const HeaderContainer = styled(View)`
   border-bottom-color: ${({ theme }) => theme.colorBorder};
 `;
 
-const Title = styled(Typography.H5)`
+const TitleBlock = styled(View)`
   flex: 1;
+  align-items: center;
+  justify-content: center;
+`;
+
+const Title = styled(Typography.H5)`
   text-align: center;
   color: ${({ theme }) => theme.colorText};
+`;
+
+const Subtitle = styled(Typography.Caption)`
+  text-align: center;
+  color: ${({ theme }) => theme.colorTextSecondary};
 `;
 
 const SideContainer = styled(View)`

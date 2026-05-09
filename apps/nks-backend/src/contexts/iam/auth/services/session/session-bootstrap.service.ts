@@ -1,6 +1,5 @@
 import * as crypto from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { SessionTokenRepository } from '../../repositories/session-token.repository';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { PermissionsService } from '../permissions/permissions.service';
@@ -12,8 +11,27 @@ import {
   errPayload,
 } from '../../../../../common/constants/error-codes.constants';
 import { DeviceTypeEnum } from '../../../../../common/validators/session.validator';
-import type { UserRoleEntry } from '../../mapper/auth-mapper';
+import type { UserRoleEntry, PermissionContext } from '../../mapper/auth-mapper';
 import type { DeviceInfo } from '../../interfaces/device-info.interface';
+
+export interface SessionContext {
+  /**
+   * Numeric primary key of the user_session row.
+   *
+   * Use for backend writes that target a specific session (device
+   * registration upsert, active-store updates, audit log linkage).
+   * The guuid above is the public identifier exposed to clients.
+   */
+  id: number;
+  token: string;
+  expiresAt: Date;
+  sessionGuuid: string;
+  jti: string;
+  csrfSecret: string;
+  userRoles: UserRoleEntry[];
+  userEmail: string | null;
+  permissions: PermissionContext;
+}
 
 /**
  * SessionBootstrapService — application service for full session initialisation.
@@ -28,30 +46,18 @@ import type { DeviceInfo } from '../../interfaces/device-info.interface';
 @Injectable()
 export class SessionBootstrapService {
   private readonly logger = new Logger(SessionBootstrapService.name);
-  private readonly ipHmacSecret: string;
 
   constructor(
     private readonly sessionTokenRepository: SessionTokenRepository,
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly permissionsService: PermissionsService,
     private readonly authUtils: AuthUtilsService,
-    private readonly configService: ConfigService,
-  ) {
-    this.ipHmacSecret = this.configService.getOrThrow<string>('IP_HMAC_SECRET');
-  }
+  ) {}
 
   async createForUser(
     userId: number,
     deviceInfo?: DeviceInfo,
-  ): Promise<{
-    token: string;
-    expiresAt: Date;
-    sessionGuuid: string;
-    jti: string;
-    userRoles: UserRoleEntry[];
-    userEmail: string;
-    permissions: Awaited<ReturnType<PermissionsService['getUserPermissions']>>;
-  }> {
+  ): Promise<SessionContext> {
     // BREAKING: tied to better-auth@^1.6.2 internalAdapter API.
     const ctx = await this.authUtils.getBetterAuthContext();
     const session = await ctx.internalAdapter.createSession(String(userId));
@@ -66,29 +72,21 @@ export class SessionBootstrapService {
         throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
       }
 
-      const roleHash = this.authUtils.hashRoles(userRoles);
-
       const rawType = deviceInfo?.deviceType?.toUpperCase();
       const validatedDeviceType =
         rawType && Object.values(DeviceTypeEnum).includes(rawType as DeviceTypeEnum)
           ? (rawType as DeviceTypeEnum)
           : null;
 
-      const ipHash = deviceInfo?.ipAddress
-        ? crypto.createHmac('sha256', this.ipHmacSecret).update(deviceInfo.ipAddress).digest('hex')
-        : null;
-
-      const defaultStoreId = user.defaultStoreFk ?? null;
-      const activeStoreFk =
-        defaultStoreId !== null && userRoles.some((r) => r.storeId === defaultStoreId)
-          ? defaultStoreId
-          : null;
+      const activeStoreFk = AuthUtilsService.resolveStoreIfMember(
+        user.defaultStoreFk,
+        userRoles,
+      );
 
       const jti = crypto.randomUUID();
       const csrfSecret = crypto.randomBytes(32).toString('hex');
 
       const updatedSession = await this.sessionTokenRepository.updateByToken(session.token, {
-        roleHash,
         activeStoreFk,
         jti,
         csrfSecret,
@@ -100,7 +98,6 @@ export class SessionBootstrapService {
               appVersion: deviceInfo.appVersion ?? null,
               ipAddress: deviceInfo.ipAddress ?? null,
               userAgent: deviceInfo.userAgent ?? null,
-              ipHash,
             }
           : {}),
       });
@@ -112,12 +109,14 @@ export class SessionBootstrapService {
       this.logger.log(`Session bootstrapped for user ${userId}.`);
 
       return {
+        id: updatedSession.id,
         token: session.token,
         expiresAt: session.expiresAt,
         sessionGuuid: updatedSession.guuid,
         jti,
+        csrfSecret,
         userRoles,
-        userEmail: user.email ?? '',
+        userEmail: user.email,
         permissions,
       };
     } catch (err) {

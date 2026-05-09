@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { eq, and, isNotNull, isNull, gt, or, lt } from 'drizzle-orm';
+import { eq, and, isNull, or, lt } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
@@ -17,33 +17,6 @@ type Db = NodePgDatabase<typeof schema>;
 @Injectable()
 export class SessionTokenRepository extends BaseRepository {
   constructor(@InjectDb() db: Db) { super(db); }
-
-  /**
-   * Find session by token with atomic JTI blocklist check
-   */
-  async findByTokenWithJtiCheck(token: string): Promise<{
-    session: UserSession | null;
-    revokedJti: string | null;
-  }> {
-    const [row] = await this.db
-      .select({
-        session: schema.userSession,
-        revokedJti: schema.jtiBlocklist.jti,
-      })
-      .from(schema.userSession)
-      .leftJoin(
-        schema.jtiBlocklist,
-        and(
-          isNotNull(schema.userSession.jti),
-          eq(schema.jtiBlocklist.jti, schema.userSession.jti),
-          gt(schema.jtiBlocklist.expiresAt, new Date()),
-        ),
-      )
-      .where(eq(schema.userSession.token, token))
-      .limit(1);
-
-    return { session: row?.session ?? null, revokedJti: row?.revokedJti ?? null };
-  }
 
   /**
    * Find session by guuid with exclusive lock for atomic rotation
@@ -72,17 +45,22 @@ export class SessionTokenRepository extends BaseRepository {
   }
 
   /**
-   * Update session by token (returns guuid)
+   * Update session by token. Returns the row's numeric id and guuid so
+   * callers can use either: id for backend writes (FK targets, audit log
+   * linkage), guuid for client-facing identifiers.
    */
   async updateByToken(
     token: string,
     data: UpdateUserSession,
-  ): Promise<{ guuid: string } | null> {
+  ): Promise<{ id: number; guuid: string } | null> {
     const [updated] = await this.db
       .update(schema.userSession)
       .set(data)
       .where(eq(schema.userSession.token, token))
-      .returning({ guuid: schema.userSession.guuid });
+      .returning({
+        id: schema.userSession.id,
+        guuid: schema.userSession.guuid,
+      });
     return updated ?? null;
   }
 
@@ -125,13 +103,14 @@ export class SessionTokenRepository extends BaseRepository {
   }
 
   /**
-   * Rolling session: atomically rotate the opaque session token
+   * Rolling session: atomically rotate the opaque session token.
+   * The WHERE clause guards against double rotation under concurrent requests —
+   * losers see lastRotatedAt > threshold and the UPDATE matches zero rows.
    */
   async rotateToken(
     oldToken: string,
     newToken: string,
     newExpiresAt: Date,
-    newCsrfSecret: string,
   ): Promise<boolean> {
     const rotationThreshold = new Date(
       Date.now() - AUTH_CONSTANTS.SESSION.ROTATION_INTERVAL_SECONDS * 1000,
@@ -143,7 +122,6 @@ export class SessionTokenRepository extends BaseRepository {
         token: newToken,
         lastRotatedAt: new Date(),
         expiresAt: newExpiresAt,
-        csrfSecret: newCsrfSecret,
       })
       .where(
         and(
@@ -156,15 +134,5 @@ export class SessionTokenRepository extends BaseRepository {
       )
       .returning({ id: schema.userSession.id });
     return !!updated;
-  }
-
-  /**
-   * Rotate CSRF secret for a session
-   */
-  async rotateCsrfSecret(sessionId: number, newCsrfSecret: string): Promise<void> {
-    await this.db
-      .update(schema.userSession)
-      .set({ csrfSecret: newCsrfSecret })
-      .where(eq(schema.userSession.id, sessionId));
   }
 }

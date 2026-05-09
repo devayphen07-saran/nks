@@ -11723,10 +11723,10 @@
           "onDelete": "set null",
           "onUpdate": "no action"
         },
-        "notifications_type_fk_notification_types_id_fk": {
-          "name": "notifications_type_fk_notification_types_id_fk",
+        "notifications_type_fk_notification_type_id_fk": {
+          "name": "notifications_type_fk_notification_type_id_fk",
           "tableFrom": "notifications",
-          "tableTo": "notification_types",
+          "tableTo": "notification_type",
           "columnsFrom": [
             "type_fk"
           ],
@@ -11777,8 +11777,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.notification_types": {
-      "name": "notification_types",
+    "public.notification_type": {
+      "name": "notification_type",
       "schema": "",
       "columns": {
         "id": {
@@ -11870,15 +11870,15 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "notification_types_guuid_unique": {
-          "name": "notification_types_guuid_unique",
+        "notification_type_guuid_unique": {
+          "name": "notification_type_guuid_unique",
           "nullsNotDistinct": false,
           "columns": [
             "guuid"
           ]
         },
-        "notification_types_code_unique": {
-          "name": "notification_types_code_unique",
+        "notification_type_code_unique": {
+          "name": "notification_type_code_unique",
           "nullsNotDistinct": false,
           "columns": [
             "code"
@@ -12025,10 +12025,10 @@
         }
       },
       "foreignKeys": {
-        "notification_templates_type_fk_notification_types_id_fk": {
-          "name": "notification_templates_type_fk_notification_types_id_fk",
+        "notification_templates_type_fk_notification_type_id_fk": {
+          "name": "notification_templates_type_fk_notification_type_id_fk",
           "tableFrom": "notification_templates",
-          "tableTo": "notification_types",
+          "tableTo": "notification_type",
           "columnsFrom": [
             "type_fk"
           ],

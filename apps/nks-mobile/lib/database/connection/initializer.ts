@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import type { ExpoSQLiteDatabase } from 'drizzle-orm/expo-sqlite';
+import Constants from 'expo-constants';
 import { getOrCreateDbKey } from '../../device/db-key';
 import { createLogger } from '../../utils/logger';
 import * as schema from '../schema';
@@ -10,6 +11,10 @@ import { validateEncryptionKey, applyEncryptionKey } from './encryption';
 import { checkIntegrity, wipeCorruptedDatabase } from './integrity';
 import { applyPragmas } from './pragmas';
 import { runMigrations } from './migrations';
+
+// Expo Go does not ship SQLCipher — encryption must be skipped to avoid SIGSEGV.
+// Dev builds and release builds include SQLCipher and run with a real key.
+const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
 
 const log = createLogger('DatabaseConnection');
 
@@ -71,22 +76,19 @@ export function getDatabase(): ExpoSQLiteDatabase<typeof schema> {
 // ─── Internals ────────────────────────────────────────────────────────────────
 
 async function _runInit(): Promise<void> {
-  // Validate key format before opening the file — avoids acquiring a handle
-  // we would immediately have to close on a bad key.
-  const encryptionKey = await getOrCreateDbKey();
-  validateEncryptionKey(encryptionKey);
+  // Expo Go does not include SQLCipher — skip encryption to avoid SIGSEGV.
+  // Dev builds and production builds include SQLCipher and use a real key.
+  let encryptionKey: string | null = null;
+  if (!IS_EXPO_GO) {
+    encryptionKey = await getOrCreateDbKey();
+    validateEncryptionKey(encryptionKey);
+  }
 
   try {
     await _openAndConfigure(encryptionKey);
   } catch (err) {
-    // Two wipe-and-retry paths:
-    // 1. Integrity check failed (wasWiped=true) — DB file is corrupted.
-    // 2. Migration failed — DB is in a partially-applied state (e.g. a migration
-    //    was edited after being applied, leaving some tables present but the
-    //    tracking record absent). Wipe and re-migrate on a clean file.
     if (state.wasWiped || _isMigrationError(err)) {
       if (!state.wasWiped) {
-        // Migration failure: close the handle and delete the file ourselves.
         await state.rawSqlite?.closeAsync().catch(() => {});
         await SQLite.deleteDatabaseAsync(DB_NAME).catch(() => {});
         state.rawSqlite = null;
@@ -109,20 +111,22 @@ function _isMigrationError(err: unknown): boolean {
   return (
     msg.includes('Failed to run the query') ||
     msg.includes('already exists') ||
-    msg.includes('SQLITE_ERROR')
+    msg.includes('no such table') ||
+    msg.includes('SQLITE_ERROR') ||
+    msg.includes('Migration')
   );
 }
 
-async function _openAndConfigure(encryptionKey: string): Promise<void> {
+async function _openAndConfigure(encryptionKey: string | null): Promise<void> {
   try {
-    // useNewConnection: true is REQUIRED — prevents expo-sqlite from returning
-    // a cached connection that hasn't had PRAGMA key applied, which would cause
-    // all reads to silently return garbage on an encrypted database.
-    state.rawSqlite = await SQLite.openDatabaseAsync(DB_NAME, {
-      useNewConnection: true,
-    });
+    state.rawSqlite = await SQLite.openDatabaseAsync(
+      DB_NAME,
+      IS_EXPO_GO ? undefined : { useNewConnection: true },
+    );
 
-    await applyEncryptionKey(state.rawSqlite, encryptionKey);
+    if (encryptionKey) {
+      await applyEncryptionKey(state.rawSqlite, encryptionKey);
+    }
 
     const isIntact = await checkIntegrity(state.rawSqlite);
     if (!isIntact) {
@@ -140,7 +144,6 @@ async function _openAndConfigure(encryptionKey: string): Promise<void> {
     state.isInitialized = true;
     log.info(`Database ready — ${DB_NAME}`);
   } catch (err) {
-    // Close the raw handle to prevent a connection leak before allowing a retry
     await state.rawSqlite?.closeAsync().catch(() => {});
     state.rawSqlite = null;
     state.drizzleDb = null;

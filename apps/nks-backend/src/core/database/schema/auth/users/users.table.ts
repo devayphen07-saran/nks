@@ -79,13 +79,6 @@ export const users = pgTable(
     failedLoginAttempts: integer('failed_login_attempts').notNull().default(0),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
 
-    // Default store — user's preferred store, auto-populated into session on login.
-    // NULL for new users with no store. Set on first store creation.
-    // Changed via PUT /stores/default. Only one default at a time.
-    // FK (→ store.id ON DELETE SET NULL) is in migration 031 — cannot be declared
-    // here due to the users ↔ store circular import. Relation in users.relations.ts.
-    defaultStoreFk: bigint('default_store_fk', { mode: 'number' }),
-
     // Onboarding lifecycle
     profileCompleted: boolean('profile_completed').notNull().default(false),
     profileCompletedAt: timestamp('profile_completed_at', {
@@ -110,7 +103,6 @@ export const users = pgTable(
     index('users_email_idx').on(table.email),
     index('users_phone_number_idx').on(table.phoneNumber),
     uniqueIndex('users_iam_user_id_idx').on(table.iamUserId),
-    index('users_default_store_idx').on(table.defaultStoreFk),
     index('users_blocked_by_idx').on(table.blockedBy),
     index('users_profile_completed_idx').on(table.profileCompleted),
     index('users_permissions_version_idx').on(table.permissionsVersion),

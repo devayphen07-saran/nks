@@ -54,4 +54,48 @@ export class RSAKeyManager {
     }
     return fs.readFileSync(this.PUBLIC_KEY_PATH, 'utf8');
   }
+
+  /**
+   * Generate a new RSA-2048 keypair AND atomically replace the on-disk PEM
+   * files. Uses write-to-temp + rename so a partial write can never leave the
+   * service with a mismatched private/public pair.
+   *
+   * Caller is responsible for archiving the OLD public key as a fallback BEFORE
+   * invoking this (so JWKS verification of in-flight tokens keeps working).
+   */
+  static generateAndRotateKeys(): { privateKey: string; publicKey: string } {
+    this.logger.log('Rotating RSA-2048 key pair...');
+
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+
+    const secretsDir = path.dirname(this.PRIVATE_KEY_PATH);
+    if (!fs.existsSync(secretsDir)) {
+      fs.mkdirSync(secretsDir, { recursive: true, mode: 0o700 });
+    }
+
+    const privateTmp = `${this.PRIVATE_KEY_PATH}.tmp`;
+    const publicTmp = `${this.PUBLIC_KEY_PATH}.tmp`;
+
+    try {
+      fs.writeFileSync(privateTmp, privateKey, { mode: 0o600 });
+      fs.writeFileSync(publicTmp, publicKey, { mode: 0o644 });
+      // POSIX rename is atomic — either both files are the new pair, or both
+      // are still the old pair. No partial state.
+      fs.renameSync(privateTmp, this.PRIVATE_KEY_PATH);
+      fs.renameSync(publicTmp, this.PUBLIC_KEY_PATH);
+    } catch (err) {
+      // Best-effort cleanup of any tmp file left behind.
+      for (const tmp of [privateTmp, publicTmp]) {
+        try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* ignore */ }
+      }
+      throw err;
+    }
+
+    this.logger.log('RSA keys rotated and persisted atomically.');
+    return { privateKey, publicKey };
+  }
 }

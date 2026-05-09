@@ -5,10 +5,7 @@ import type { PgTable } from 'drizzle-orm/pg-core';
 import { InjectDb } from './inject-db.decorator';
 import * as schema from './schema';
 import type { DbTransaction } from './transaction.service';
-import {
-  BadRequestException,
-  InternalServerException,
-} from '../../common/exceptions';
+import { InternalServerException } from '../../common/exceptions';
 import {
   ErrorCode,
   errPayload,
@@ -28,10 +25,14 @@ type UpdateAuditKeys = 'modifiedBy' | 'updatedAt';
  *   raw `db.insert(...)` / `db.update(...)`. Drizzle's generic `PgTable`
  *   cannot enforce this at the type level — enforce via code review.
  *
+ * Sync columns: For syncable tables (with version, createdByDevice):
+ *   Use insertOneSync() and updateOneSync() instead of the audit variants.
+ *   Sync methods automatically manage version incrementing and created_by_device.
+ *
  * Error strategy:
- *   • insertOneAudited  → always throws on failure (caller expects a row)
- *   • updateOneAudited  → returns null when WHERE matches nothing
- *   • softDeleteAudited → returns null when WHERE matches nothing
+ *   • insertOneAudited/Sync → always throws on failure (caller expects a row)
+ *   • updateOneAudited/Sync → returns null when WHERE matches nothing
+ *   • softDeleteAudited      → returns null when WHERE matches nothing
  *   Services map null to 404 or treat as no-op. This is intentional — a
  *   zero-match update is a valid outcome, a zero-row insert is not.
  *
@@ -63,7 +64,7 @@ export abstract class BaseRepository {
   protected async insertOneAudited<T extends PgTable>(
     table: T,
     values: Omit<T['$inferInsert'], CreateAuditKeys>,
-    userId: number,
+    userId: number | null,
     tx?: DbTransaction,
   ): Promise<T['$inferSelect']> {
     const rows = (await (tx ?? this.db)
@@ -92,8 +93,18 @@ export abstract class BaseRepository {
     userId: number,
     tx?: DbTransaction,
   ): Promise<T['$inferSelect'] | null> {
+    // Repository-layer invariant: callers must never request an empty update.
+    // An empty `set` would update only audit columns, which is almost certainly
+    // a bug at the call site (forgot to populate the patch). This is a
+    // programmer error, not user input — surface as InternalServerException
+    // rather than a user-facing 4xx.
     if (!set || Object.keys(set).length === 0) {
-      throw new BadRequestException(errPayload(ErrorCode.VALIDATION_ERROR));
+      this.baseLogger.error(
+        `updateOneAudited invariant violated: empty set passed for table ${(table as any).name ?? 'unknown'}`,
+      );
+      throw new InternalServerException(
+        errPayload(ErrorCode.INTERNAL_SERVER_ERROR),
+      );
     }
 
     const rows = (await (tx ?? this.db)

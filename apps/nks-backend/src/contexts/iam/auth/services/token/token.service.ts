@@ -1,37 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { signOfflineSession } from '../../../../../common/utils/offline-session-hmac';
+import { generateRefreshToken, verifyRefreshTokenHash } from '../../../../../common/utils/refresh-token.util';
 import { JWTConfigService, JWTPayload } from '../../../../../config/jwt.config';
-import { RoleQueryService } from '../../../roles/role-query.service';
-import { PermissionsService } from '../permissions/permissions.service';
-import { AuthUtilsService } from '../shared/auth-utils.service';
-import { TokenPairGeneratorService } from './token-pair-generator.service';
-import { AuthMapper, type TokenPair } from '../../mapper/auth-mapper';
-import type { AuthResponseEnvelope } from '../../dto';
+import { SessionTokenRepository } from '../../repositories/session-token.repository';
+import type { TokenPair } from '../../mapper/auth-mapper';
 import {
-  JWT_AUDIENCE,
-  OFFLINE_JWT_TTL_DAYS,
-  OFFLINE_JWT_EXPIRATION,
+  ACCESS_TOKEN_TTL_MS,
   REFRESH_TOKEN_TTL_MS,
 } from '../../auth.constants';
-import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
 
 /**
- * TokenService — auth response assembly and session coordination.
+ * TokenService — pure token issuance: JWT signing, refresh token generation/verification,
+ * and token-pair persistence.
  *
- * Token lifecycle responsibilities:
- *   session token  — opaque 64-char hex; primary auth credential for cookie/bearer transport;
- *                    long-lived (30 days), rotated every 1h for web by SessionRotationService.
- *   access JWT     — RS256, 15-min TTL; short-lived authorization artifact for API calls;
- *                    never stored; signed from the session token's backing session row.
- *   refresh token  — opaque 32-byte base64url; used ONLY for token renewal; rotated
- *                    on every use (in-place, same session row); 7-day TTL.
- *   offline JWT    — RS256, 3-day TTL; mobile-only; verifiable without a network round trip.
+ * Token taxonomy:
+ *   refresh token  — opaque 32-byte base64url; rotated on every use; 7-day TTL.
+ *   offline JWT    — RS256, 3-day TTL; mobile-only; verifiable without network.
  *
- * Methods:
- *   createAccessToken  — raw RS256 JWT wrapper
- *   createTokenPair    — delegates to TokenPairGeneratorService for token generation
- *   buildAuthResponse  — full AuthResponseEnvelope (permissions, offline token, HMAC)
+ * Rotation lives in TokenLifecycleService — that flow is security-critical
+ * (CAS, theft detection, per-user rate limit) and intentionally separated.
  */
 @Injectable()
 export class TokenService {
@@ -39,176 +25,53 @@ export class TokenService {
 
   constructor(
     private readonly jwtConfigService: JWTConfigService,
-    private readonly tokenPairGenerator: TokenPairGeneratorService,
-    private readonly roleQuery: RoleQueryService,
-    private readonly permissionsService: PermissionsService,
-    private readonly configService: ConfigService,
-    private readonly authUtils: AuthUtilsService,
+    private readonly sessionTokenRepository: SessionTokenRepository,
   ) {}
 
-  // ─── Existing API ─────────────────────────────────────────────────────────
+  // ─── JWT signing ──────────────────────────────────────────────────────────
 
   createAccessToken(payload: Omit<JWTPayload, 'iat' | 'exp' | 'kid'>): string {
-    const token = this.jwtConfigService.signToken(payload);
-    this.logger.debug(`Access token created for user ${payload.sub}`);
-    return token;
+    return this.jwtConfigService.signToken(payload);
   }
 
-  verifyAccessToken(token: string): JWTPayload {
-    return this.jwtConfigService.verifyToken(token);
-  }
-
-  decodeToken(token: string): JWTPayload | null {
-    if (!token) return null;
-    try {
-      return this.jwtConfigService.decodeToken(token);
-    } catch (err: unknown) {
-      this.logger.debug(`Token decode failed: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
-    }
-  }
-
-  // ─── Token Pair ────────────────────────────────────────────────────────────
+  // ─── Refresh token (opaque) ───────────────────────────────────────────────
 
   /**
-   * Create an RS256 access token + opaque refresh token pair.
-   * Delegates to TokenPairGeneratorService for token generation and persistence.
+   * 32 random bytes → base64url for the client, sha256 hex for DB storage.
+   * No session info embedded — lookup is by hash, not by decoded value.
    */
-  async createTokenPair(
-    userGuuid: string,
-    sessionToken: string,
-    userRoles: Array<{ roleCode: string }>,
-    userEmail: string,
-    sessionGuuid: string,
-    jti: string,
-    iamUserId: string,
-    firstName?: string,
-    lastName?: string,
-  ): Promise<TokenPair> {
-    return this.tokenPairGenerator.generateTokenPair(
-      userGuuid,
-      sessionGuuid,
-      sessionToken,
-      userRoles,
-      userEmail,
-      jti,
-      iamUserId,
-      firstName,
-      lastName,
-    );
+  generateRefreshToken(): { token: string; tokenHash: string } {
+    return generateRefreshToken();
   }
 
-  // ─── Auth Response Assembly ────────────────────────────────────────────────
+  /** Timing-safe comparison of a precomputed hex hash against the stored hash. */
+  verifyRefreshTokenHash(computedHash: string, storedHash: string | null): boolean {
+    return verifyRefreshTokenHash(computedHash, storedHash);
+  }
+
+  // ─── Token pair (login / register / OTP) ──────────────────────────────────
 
   /**
-   * Assemble the AuthResponseEnvelope used by login, register, and OTP flows.
+   * Issue an opaque refresh token and persist its hash to the session row.
+   * accessTokenExpiresAt is still written to the DB for session management.
+   * Refresh-token rotation lives in TokenLifecycleService.
    */
-  async buildAuthResponse(
-    user: {
-      id: number;
-      guuid: string;
-      iamUserId: string;
-      firstName: string;
-      lastName: string;
-      email: string | null;
-      emailVerified: boolean;
-      image: string | null | undefined;
-      phoneNumber: string | null | undefined;
-      phoneNumberVerified: boolean;
-      defaultStoreFk?: number | null;
-    },
-    token: string,
-    expiresAt: Date,
-    sessionGuuid: string,
-    tokenPair?: TokenPair,
-    cachedPermissions?: Awaited<
-      ReturnType<PermissionsService['getUserPermissions']>
-    >,
-    deviceId?: string,
-  ): Promise<AuthResponseEnvelope> {
-    const sessionId = sessionGuuid;
-    const refreshExpiresAt =
-      tokenPair?.refreshTokenExpiresAt ??
-      new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+  async createTokenPair(opts: {
+    sessionToken: string;
+  }): Promise<TokenPair> {
+    const { sessionToken } = opts;
 
-    const permissions =
-      cachedPermissions ??
-      (await this.permissionsService.getUserPermissions(user.id));
+    const { token: refreshToken, tokenHash: refreshTokenHash } = this.generateRefreshToken();
+    const now = new Date();
+    const jwtExpiresAt = new Date(now.getTime() + ACCESS_TOKEN_TTL_MS);
+    const refreshTokenExpiresAt = new Date(now.getTime() + REFRESH_TOKEN_TTL_MS);
 
-    // Default store: from users.defaultStoreFk (persistent preference).
-    // Validate the user still has a role in that store before trusting it.
-    const defaultStoreId = user.defaultStoreFk ?? null;
-    const primaryStoreId =
-      defaultStoreId !== null &&
-      permissions.roles.some((r) => r.storeId === defaultStoreId)
-        ? defaultStoreId
-        : null;
+    await this.sessionTokenRepository.setRefreshTokenData(sessionToken, {
+      refreshTokenHash,
+      refreshTokenExpiresAt,
+      accessTokenExpiresAt: jwtExpiresAt,
+    });
 
-    // Resolve store guuid using existing repository pattern.
-    const storeOwnerRoleId = await this.authUtils.getCachedSystemRoleId(
-      SystemRoleCodes.STORE_OWNER,
-    );
-    const primaryStore = storeOwnerRoleId && primaryStoreId
-      ? await this.roleQuery.findPrimaryStoreForUser(
-          user.id,
-          storeOwnerRoleId,
-        )
-      : null;
-
-    const offlineToken = this.jwtConfigService.signOfflineToken(
-      {
-        sub: user.guuid,
-        sid: sessionId,
-        ...(user.email ? { email: user.email } : {}),
-        roles: permissions.roles.map((r) => r.roleCode),
-        stores: permissions.roles
-          .filter((r) => r.storeGuuid && r.storeName)
-          .map((r) => ({
-            guuid: r.storeGuuid as string,
-            name: r.storeName as string,
-          })),
-        activeStoreGuuid: primaryStore?.guuid ?? null,
-      },
-      OFFLINE_JWT_EXPIRATION,
-    );
-
-    const offlineSessionSecret = this.configService.getOrThrow<string>(
-      'OFFLINE_SESSION_HMAC_SECRET',
-    );
-    const offlineSessionSignature = signOfflineSession(
-      {
-        userGuuid: user.guuid,
-        storeGuuid: primaryStore?.guuid ?? null,
-        roles: permissions.roles.map((r) => r.roleCode),
-        offlineValidUntil:
-          Date.now() + OFFLINE_JWT_TTL_DAYS * 24 * 60 * 60 * 1000,
-      },
-      offlineSessionSecret,
-    );
-
-    return AuthMapper.buildAuthResponseEnvelope(
-      {
-        user: {
-          id: user.id,
-          guuid: user.guuid,
-          iamUserId: user.iamUserId,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-          phoneNumber: user.phoneNumber ?? null,
-        },
-        token,
-        session: { token, expiresAt, sessionId },
-      },
-      tokenPair,
-      primaryStore ? { guuid: primaryStore.guuid } : null,
-      sessionId,
-      expiresAt,
-      refreshExpiresAt,
-      offlineToken,
-      offlineSessionSignature,
-      deviceId,
-    );
+    return { refreshToken, jwtExpiresAt, refreshTokenExpiresAt };
   }
-
 }

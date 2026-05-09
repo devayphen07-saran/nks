@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JWTConfigService } from '../../../../../config/jwt.config';
+import { RSAKeyManager } from '../../../../../core/crypto/rsa-keys';
 import { KeyRotationAlertService } from './key-rotation-alert.service';
 import { InternalServerException } from '../../../../../common/exceptions';
 import { ErrorCode, errPayload } from '../../../../../common/constants/error-codes.constants';
@@ -64,7 +65,7 @@ export class KeyRotationScheduler implements OnModuleInit, OnModuleDestroy {
     }
 
     this.logger.log(
-      `Key rotation scheduler initialized (interval: ${this.config.scheduleIntervalDays} days)`,
+      `Key rotation scheduler initialized (interval: ${this.config.scheduleIntervalDays} days, in-process RSA generation)`,
     );
 
     // Start the rotation scheduler
@@ -88,13 +89,50 @@ export class KeyRotationScheduler implements OnModuleInit, OnModuleDestroy {
   private startScheduler() {
     // Check every hour if we need to rotate
     this.rotationInterval = setInterval(async () => {
-      await this.checkAndRotateIfNeeded();
+      try {
+        await this.checkAndRotateIfNeeded();
+        await this.checkRotationOverdue();
+      } catch (error) {
+        // performKeyRotation already alerts via KeyRotationAlertService — log here
+        // for the maintenance-window check failure path that doesn't reach rotation.
+        this.logger.error(
+          { err: error instanceof Error ? error.message : String(error) },
+          'Key rotation scheduler tick failed',
+        );
+      }
     }, 60 * 60 * 1000); // 1 hour
 
     // Also run check on startup (in case server was down)
     this.checkAndRotateIfNeeded().catch((error) => {
       this.logger.error('Initial rotation check failed', error);
     });
+  }
+
+  /**
+   * Liveness check: alert if rotation hasn't happened in 2× the configured interval.
+   *
+   * The hourly tick already self-heals when it lands inside the maintenance window.
+   * This guard catches the failure mode where rotation kept silently throwing OR
+   * the maintenance window has been mis-configured to never trigger.
+   */
+  private async checkRotationOverdue(): Promise<void> {
+    if (!this.lastRotationTime) return;
+    const intervalMs = this.config.scheduleIntervalDays * 24 * 60 * 60 * 1000;
+    const elapsed = Date.now() - this.lastRotationTime.getTime();
+    if (elapsed > intervalMs * 2) {
+      const overdueDays = Math.floor(elapsed / (24 * 60 * 60 * 1000));
+      this.logger.error(
+        { lastRotation: this.lastRotationTime.toISOString(), overdueDays },
+        `Key rotation overdue by ${overdueDays}d — investigate scheduler`,
+      );
+      await this.alertService.alertRotationFailure({
+        oldKid: this.jwtConfig.getCurrentKid(),
+        reason: 'scheduled',
+        error: `Rotation overdue by ${overdueDays} days (last: ${this.lastRotationTime.toISOString()})`,
+        durationMs: 0,
+        timestamp: new Date(),
+      });
+    }
   }
 
   /**
@@ -176,20 +214,13 @@ export class KeyRotationScheduler implements OnModuleInit, OnModuleDestroy {
     );
 
     try {
-      // Step 1: Archive the current active key as fallback
       this.jwtConfig.archiveCurrentKeyAsFallback();
 
-      // Step 2: Generate new RSA key pair
-      // Currently returns null — key generation must be done externally via HSM/KMS.
-      // When ready, implement generateNewKeyPair() to call your key management service.
+      // generateNewKeyPair persists to disk atomically and installs the new
+      // pair in JWTConfigService so subsequent signs use it.
       const newKeyPair = await this.generateNewKeyPair();
       if (!newKeyPair) {
-        this.logger.warn(
-          'Key generation not yet implemented — rotate keys manually: ' +
-          '1) Generate new PEM files via HSM/KMS, ' +
-          '2) Replace secrets/jwt_rsa_*.pem, ' +
-          '3) Restart the service.',
-        );
+        // Should not happen — generateNewKeyPair throws on failure. Defensive only.
         throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
       }
 
@@ -231,70 +262,26 @@ export class KeyRotationScheduler implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // Key generation is intentionally not implemented — use HSM/KMS externally.
-  // To rotate: replace secrets/jwt_rsa_*.pem and restart the service.
+  /**
+   * Generate a new RSA-2048 keypair, atomically replace the on-disk PEM files,
+   * and install the new pair as the active signing key in JWTConfigService.
+   *
+   * The caller has already invoked `jwtConfig.archiveCurrentKeyAsFallback()`,
+   * so the previous public key remains in JWKS for the grace period — JWTs
+   * signed before this rotation continue to verify cleanly until expiry.
+   *
+   * For HSM/KMS-backed deployments, replace this method with one that calls
+   * the key management service: generate inside the HSM, fetch the public key
+   * for JWKS, and configure JWT signing to call HSM `Sign` instead of using a
+   * local private PEM. The public method shape stays the same.
+   */
   private async generateNewKeyPair(): Promise<{
     privateKey: string;
     publicKey: string;
-  } | null> {
-    this.logger.warn(
-      'Key generation not implemented in application (use HSM/KMS in production)',
-    );
-    return null;
-  }
-
-  /**
-   * Manual trigger for emergency key rotation
-   * Use only if current key is compromised
-   *
-   * Call via admin endpoint: POST /admin/auth/rotate-keys-emergency
-   */
-  async rotateKeysEmergency(): Promise<{
-    success: boolean;
-    oldKid: string;
-    newKid: string;
-    message: string;
   }> {
-    const oldKid = this.jwtConfig.getCurrentKid();
-    await this.performKeyRotation('emergency');
-    const newKid = this.jwtConfig.getCurrentKid();
-    return {
-      success: true,
-      oldKid,
-      newKid,
-      message: 'Emergency key rotation completed successfully',
-    };
+    const newKeyPair = RSAKeyManager.generateAndRotateKeys();
+    this.jwtConfig.installNewKeyPair(newKeyPair.privateKey, newKeyPair.publicKey);
+    return newKeyPair;
   }
 
-  /**
-   * Get current rotation status
-   */
-  getRotationStatus(): {
-    enabled: boolean;
-    currentKid: string;
-    lastRotation: Date | null;
-    nextRotationWindow: {
-      start: string;
-      duration: number;
-    };
-    fallbackKeysCount: number;
-    activeKeys: Array<{
-      kid: string;
-      type: 'active' | 'fallback';
-      expiresAt?: string;
-    }>;
-  } {
-    return {
-      enabled: this.config.enabled,
-      currentKid: this.jwtConfig.getCurrentKid(),
-      lastRotation: this.lastRotationTime,
-      nextRotationWindow: {
-        start: this.config.maintenanceWindowStart,
-        duration: this.config.maintenanceWindowDuration,
-      },
-      fallbackKeysCount: this.jwtConfig.listActiveKeys().filter((k) => k.type === 'fallback')
-        .length,
-      activeKeys: this.jwtConfig.listActiveKeys(),
-    };
-  }
 }

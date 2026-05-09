@@ -3,13 +3,13 @@ import { baseEntity } from '../../base.entity';
 import { notificationChannelEnum } from '../../enums';
 
 /**
- * notification_types — reference table replacing the notificationTypeEnum.
+ * notification_type — reference table replacing the notificationTypeEnum.
  * Add a new type by inserting a row — no code change or migration needed.
  *
  * isSystem = true  → seeded types (ORDER_UPDATE, INVITE, SYSTEM, PROMO) — cannot be deleted
  * isSystem = false → custom types added by admin
  */
-export const notificationTypes = pgTable('notification_types', {
+export const notificationTypes = pgTable('notification_type', {
   ...baseEntity(), // id, guuid, isActive, createdAt, updatedAt, deletedAt, sortOrder, isHidden, isSystem
 
   code: varchar('code', { length: 50 }).notNull().unique(), // 'ORDER_UPDATE' — used in code

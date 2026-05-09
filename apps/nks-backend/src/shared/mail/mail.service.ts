@@ -5,13 +5,13 @@ import { fullName } from '../../common/utils/full-name';
 /**
  * MailService — email delivery abstraction.
  *
- * Currently a stub; replace the send implementations with
- * a real provider (Nodemailer/SendGrid/AWS SES) when email
- * delivery is configured.
+ * Currently a stub; replace the send implementations with a real provider
+ * (Nodemailer/SendGrid/AWS SES) when email delivery is configured.
  *
- * In production, the stub logs a critical error at startup and throws on every
- * call — this surfaces the misconfiguration immediately rather than silently
- * dropping emails and leaking OTPs into server logs.
+ * Boot guard: in production the constructor throws immediately, failing
+ * NestFactory.create() before the app starts listening. A misconfigured
+ * deploy never gets the chance to drop OTP emails into server logs at
+ * first send — readiness probe fails, k8s rolls back.
  */
 @Injectable()
 export class MailService implements OnModuleInit {
@@ -20,16 +20,16 @@ export class MailService implements OnModuleInit {
 
   constructor(appConfig: AppConfigService) {
     this.isProduction = appConfig.isProduction;
+    if (this.isProduction) {
+      throw new Error(
+        'MailService stub cannot run in production — wire a real SMTP provider ' +
+        '(Nodemailer/SendGrid/AWS SES) before deploying. Refusing to start.',
+      );
+    }
   }
 
   onModuleInit(): void {
-    if (this.isProduction) {
-      this.logger.error(
-        'MailService is a stub — SMTP provider is not configured. ' +
-        'Email delivery will fail in production. ' +
-        'Replace this stub with a real provider (Nodemailer/SendGrid/AWS SES).',
-      );
-    }
+    this.logger.warn('[MAIL STUB] Email delivery is stubbed — OTP values will be logged at debug level. Dev only.');
   }
 
   async sendOtp(
@@ -38,9 +38,6 @@ export class MailService implements OnModuleInit {
     recipientFirstName?: string | null,
     recipientLastName?: string | null,
   ): Promise<void> {
-    if (this.isProduction) {
-      throw new Error('MailService: SMTP not configured — cannot send OTP email in production');
-    }
     const displayName = fullName(recipientFirstName, recipientLastName);
     this.logger.log(`[MAIL STUB] OTP email to ${displayName ?? to} — subject: "Your verification code"`);
     this.logger.debug(`[MAIL STUB] OTP value (dev only): ${otp}`);

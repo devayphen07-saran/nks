@@ -3,9 +3,13 @@
  * by AuthGuard after token validation.
  *
  * ID fields:
- *   `id`     → string  — numeric PK as string (e.g. "1")
- *   `userId` → number  — numeric PK, use this for all DB queries
- *   `guuid`  → string  — public-safe UUID, use for external references
+ *   `id`        → string  — numeric PK as string (e.g. "1")
+ *   `userId`    → number  — numeric PK, use this for all DB queries
+ *   `guuid`     → string  — public-safe UUID, use for external references
+ *   `sessionId` → number  — primary key of the validated user_session row;
+ *                           use for session-scoped writes (e.g. switching
+ *                           the active store). Set by the auth guard after
+ *                           bearer/refresh token validation.
  *
  * Role fields (populated per-request from user_role_mapping — always fresh):
  *   `roles`         → role entries from user_role_mapping
@@ -26,6 +30,7 @@ export interface SessionUserRole {
 export interface SessionUser {
   id: string;
   userId: number;
+  sessionId: number;
   guuid: string;
   /**
    * Cross-service external user identifier used as a URL path parameter.

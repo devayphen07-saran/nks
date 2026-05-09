@@ -1,93 +1,26 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import type { AuthResponseEnvelope } from '../../contexts/iam/auth/dto';
-import { DeviceValidator } from '../validators';
 import { AUTH_CONSTANTS } from '../constants/app-constants';
+import { DeviceDetector } from './device-detector';
 
 /**
- * Shared utilities for auth controllers.
+ * Session-cookie + response shaping helpers for auth endpoints.
  *
  * ── Platform split (web vs mobile) ────────────────────────────────────────
  *
- *  The same endpoints (`/auth/login`, `/auth/otp/verify`, `/auth/register`,
- *  `/auth/refresh-token`) serve both web and mobile clients. The body shape
- *  is identical; only the transport for the session token differs.
+ *   WEB  — server sets `nks_session` httpOnly cookie. The body's
+ *          `auth.bearerToken` is null'd out so the credential never appears
+ *          in JS scope, CDN logs, or API gateway traces.
  *
- *    WEB (deviceType === undefined or 'WEB'):
- *      - Server sets `nks_session` as an httpOnly / sameSite=strict cookie
- *        containing the session token.
- *      - Web client does NOT read sessionToken from the body; relies on the
- *        cookie being sent automatically on subsequent requests.
+ *   MOBILE — server skips the cookie. Body carries `auth.bearerToken` so the
+ *          client can attach `Authorization: Bearer <bearerToken>` on requests.
  *
- *    MOBILE (deviceType ∈ {'ANDROID', 'IOS'}):
- *      - Server does NOT set the session cookie (controllers skip the call
- *        based on `deviceInfo.deviceType`).
- *      - Mobile stores `auth.sessionToken` and `auth.accessToken` from
- *        the body and attaches `Authorization: Bearer <token>` on requests.
- *      - Mobile additionally consumes `offline.token` / `offline.sessionSignature`
- *        for offline-capable verification.
- *
- *  Detection: driven by the `X-Device-Type` request header (normalised by
- *  `DeviceValidator` against `User-Agent`). If absent or 'WEB', cookie path.
- *  If 'ANDROID' / 'IOS', token-in-body path.
- *
- *  Logout / refresh mirror the same split:
- *    - web clears the cookie via `clearSessionCookie`;
- *    - mobile discards the locally-stored token and calls `/auth/logout`.
+ * Detection lives in {@link DeviceDetector}; this class only owns the
+ * cookie/response side-effects.
  */
 export class AuthControllerHelpers {
   static readonly SESSION_COOKIE_NAME = 'nks_session';
 
-  // Max lengths for free-form device header fields.
-  // Guards against oversized inputs reaching audit log and session row writes.
-  private static readonly DEVICE_FIELD_MAX = {
-    deviceId: 64,
-    deviceName: 100,
-    appVersion: 32,
-    userAgent: 512,
-  } as const;
-
-  /**
-   * Extract device identification headers from request.
-   * Validates device type against User-Agent to prevent spoofing.
-   * Caps free-form string fields to prevent oversized inputs reaching DB writes.
-   */
-  static extractDeviceInfo(req: Request) {
-    const deviceTypeHeader = (req.headers['x-device-type'] as string) || undefined;
-    const rawUserAgent = (req.headers['user-agent'] as string) || undefined;
-
-    const validatedDeviceType = DeviceValidator.validateAndNormalize(
-      deviceTypeHeader,
-      rawUserAgent,
-    );
-
-    const ipAddress: string | undefined = req.ip ?? undefined;
-
-    return {
-      deviceId: AuthControllerHelpers.cap(
-        req.headers['x-device-id'] as string,
-        AuthControllerHelpers.DEVICE_FIELD_MAX.deviceId,
-      ),
-      deviceName: AuthControllerHelpers.cap(
-        req.headers['x-device-name'] as string,
-        AuthControllerHelpers.DEVICE_FIELD_MAX.deviceName,
-      ),
-      deviceType: validatedDeviceType || undefined,
-      appVersion: AuthControllerHelpers.cap(
-        req.headers['x-app-version'] as string,
-        AuthControllerHelpers.DEVICE_FIELD_MAX.appVersion,
-      ),
-      ipAddress,
-      userAgent: AuthControllerHelpers.cap(
-        rawUserAgent,
-        AuthControllerHelpers.DEVICE_FIELD_MAX.userAgent,
-      ),
-    };
-  }
-
-  /**
-   * Set httpOnly session cookie in response
-   * Used for WEB clients only (mobile ignores this)
-   */
   static setSessionCookie(res: Response, token: string): void {
     const sameSite = AUTH_CONSTANTS.SESSION.COOKIE_SAME_SITE;
     res.cookie(AuthControllerHelpers.SESSION_COOKIE_NAME, token, {
@@ -100,41 +33,12 @@ export class AuthControllerHelpers {
     });
   }
 
-  /**
-   * Apply session cookie from AuthResponseEnvelope.
-   */
+  /** Apply session cookie from AuthResponseEnvelope. */
   static applySessionCookie(res: Response, result: AuthResponseEnvelope): void {
-    const token = result.auth?.sessionToken;
+    const token = result.auth?.bearerToken;
     if (token) {
-      this.setSessionCookie(res, token);
+      AuthControllerHelpers.setSessionCookie(res, token);
     }
-  }
-
-  /**
-   * Returns true when the request comes from a native mobile client.
-   * Web clients (no deviceType, or deviceType === 'WEB') return false.
-   */
-  static isMobile(deviceType?: string): boolean {
-    return deviceType === 'ANDROID' || deviceType === 'IOS';
-  }
-
-  /**
-   * Null out sessionToken for web clients.
-   *
-   * The sessionToken is an opaque credential (functionally equivalent to a
-   * password). Web clients receive it via an httpOnly cookie — the body field
-   * is set to null so the schema stays consistent across platforms while the
-   * actual credential never appears in CDN logs, API gateways, or JS scope.
-   *
-   * Mobile clients need it in the body because they cannot use httpOnly cookies.
-   * Call this AFTER applySessionCookie() so the cookie is set first.
-   */
-  static forClient<T extends AuthResponseEnvelope>(
-    result: T,
-    deviceType?: string,
-  ): T {
-    if (AuthControllerHelpers.isMobile(deviceType)) return result;
-    return { ...result, auth: { ...result.auth, sessionToken: null } };
   }
 
   static clearSessionCookie(res: Response): void {
@@ -147,7 +51,15 @@ export class AuthControllerHelpers {
     });
   }
 
-  private static cap(value: string | undefined, max: number): string | undefined {
-    return value ? value.slice(0, max) : undefined;
+  /**
+   * Null out bearerToken for web clients.
+   * Web receives it via the httpOnly cookie set by applySessionCookie() —
+   * the body field is replaced with null so the credential never appears in
+   * CDN logs, API gateways, or JS scope.
+   * Call AFTER applySessionCookie() so the cookie is written first.
+   */
+  static forClient<T extends AuthResponseEnvelope>(result: T, deviceType?: string): T {
+    if (DeviceDetector.isMobile(deviceType)) return result;
+    return { ...result, auth: { ...result.auth, bearerToken: null } };
   }
 }

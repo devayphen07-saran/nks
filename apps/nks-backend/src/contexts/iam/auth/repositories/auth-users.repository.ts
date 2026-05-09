@@ -306,7 +306,6 @@ export class AuthUsersRepository extends BaseRepository {
         email: schema.users.email,
         guuid: schema.users.guuid,
         iamUserId: schema.users.iamUserId,
-        defaultStoreFk: schema.users.defaultStoreFk,
         firstName: schema.users.firstName,
         lastName: schema.users.lastName,
         phoneNumber: schema.users.phoneNumber,
@@ -320,7 +319,26 @@ export class AuthUsersRepository extends BaseRepository {
       )
       .limit(1);
 
-    return user ?? null;
+    if (!user) return null;
+
+    const defaultStoreFk = await this.findDefaultStoreId(userId);
+    return { ...user, defaultStoreFk };
+  }
+
+  async findDefaultStoreId(userId: number): Promise<number | null> {
+    const [row] = await this.db
+      .select({ id: schema.store.id })
+      .from(schema.store)
+      .where(
+        and(
+          eq(schema.store.ownerUserFk, userId),
+          eq(schema.store.isDefault, true),
+          eq(schema.store.isActive, true),
+          isNull(schema.store.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row?.id ?? null;
   }
 
   /**
@@ -471,7 +489,7 @@ export class AuthUsersRepository extends BaseRepository {
       password: string | null;
       isVerified: boolean;
     } | null,
-    createdBy: number,
+    createdBy: number | null,
     onRoleAssignment: (
       tx: DbTransaction,
       userId: number,
@@ -479,12 +497,9 @@ export class AuthUsersRepository extends BaseRepository {
   ): Promise<DbUser | null> {
     try {
       const user = await this.txService.run(async (tx) => {
-        // Step 1: Create user with audit fields
         const created = await this.insertOneAudited(schema.users, userData, createdBy, tx);
-
         if (!created) return null;
 
-        // Step 2: Create auth provider (only if provider data supplied)
         if (authProviderData) {
           await tx.insert(schema.userAuthProvider).values({
             userId: created.id,
@@ -495,7 +510,6 @@ export class AuthUsersRepository extends BaseRepository {
           });
         }
 
-        // Step 3: Assign initial role (SUPER_ADMIN if first, else USER)
         await onRoleAssignment(tx, created.id);
 
         return created;

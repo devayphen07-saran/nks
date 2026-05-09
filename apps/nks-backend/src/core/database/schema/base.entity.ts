@@ -25,9 +25,13 @@ export const coreEntity = () => ({
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).$onUpdateFn(
-    () => new Date(),
-  ),
+  // updatedAt is non-null with a NOW() default so freshly inserted rows have a
+  // real timestamp. Without this, sync-pull's `WHERE updated_at > cursor` query
+  // misses every seeded row (NULL comparisons return UNKNOWN).
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdateFn(() => new Date()),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 });
 
@@ -45,9 +49,10 @@ export const betterAuthEntity = () => ({
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).$onUpdateFn(
-    () => new Date(),
-  ),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdateFn(() => new Date()),
 });
 
 /**

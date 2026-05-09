@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { BadRequestException, UnauthorizedException } from '../../exceptions';
 import { ErrorCode } from '../../constants/error-codes.constants';
 import { AuthControllerHelpers } from '../../utils/auth-helpers';
+import { MAX_SESSION_TOKEN_LENGTH } from '../../../contexts/iam/auth/auth.constants';
 
 export type AuthType = 'cookie' | 'bearer';
 
@@ -38,16 +39,16 @@ export class TokenExtractorService {
     }
 
     // Cap session token length before any DB lookup — prevents hash-computation DoS
-    // on arbitrarily large inputs. Session tokens are 64-char hex; 512 is generous headroom.
+    // on arbitrarily large inputs. See MAX_SESSION_TOKEN_LENGTH comment in auth.constants.
     if (bearer) {
-      if (bearer.length > 512) {
-        throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_TOKEN_INVALID, message: 'No token provided.' });
+      if (bearer.length > MAX_SESSION_TOKEN_LENGTH) {
+        throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_TOKEN_INVALID, message: 'Token exceeds maximum length.' });
       }
       return { token: bearer, authType: 'bearer' };
     }
     if (cookie) {
-      if (cookie.length > 512) {
-        throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_TOKEN_INVALID, message: 'No token provided.' });
+      if (cookie.length > MAX_SESSION_TOKEN_LENGTH) {
+        throw new UnauthorizedException({ errorCode: ErrorCode.AUTH_TOKEN_INVALID, message: 'Token exceeds maximum length.' });
       }
       return { token: cookie, authType: 'cookie' };
     }

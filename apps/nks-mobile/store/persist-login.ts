@@ -1,7 +1,6 @@
 import type { AuthResponse } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
 import { sessionTokenReg } from "@nks/utils";
-import { jwtDecode } from "jwt-decode";
 import { syncServerTime } from '../lib/utils/server-time';
 import { setCredentials, logout } from "./auth-slice";
 import { clearAuthState } from "./clear-auth-state";
@@ -12,8 +11,9 @@ import {
 } from '../lib/auth/token-validators';
 import { sanitizeError } from '../lib/utils/log-sanitizer';
 import { JWTManager } from '../lib/auth/jwt-manager';
-import { offlineSession } from '../lib/auth/offline-session';
+import { createOfflineSessionFromAuth } from '../lib/auth/offline-session';
 import { seedSyncStateFromAuth } from '../lib/sync/sync-engine';
+import { initializeStoresAfterLogin } from '../lib/store/initialize-stores';
 import { createLogger } from '../lib/utils/logger';
 import type { AppDispatch } from "./index";
 
@@ -66,27 +66,25 @@ export async function persistLogin(
     // ════════════════════════════════════════════════════════════════════════════
     // IN-MEMORY: Set the session token for immediate use
     // ════════════════════════════════════════════════════════════════════════════
-    const sessionToken = authResponse.auth.sessionToken;
-    if (!sessionToken || !sessionTokenReg.test(sessionToken)) {
+    const bearerToken = authResponse.auth.bearerToken;
+    if (!bearerToken || !sessionTokenReg.test(bearerToken)) {
       throw new Error(
-        `Session token missing or format invalid: length ${sessionToken?.length ?? 0}`,
+        `Bearer token missing or format invalid: length ${bearerToken?.length ?? 0}`,
       );
     }
-    tokenManager.set(sessionToken);
+    tokenManager.set(bearerToken, authResponse.auth.sessionId);
     log.info("In-memory token set");
 
     // ════════════════════════════════════════════════════════════════════════════
     // NON-CRITICAL: Sync server time + create offline session in parallel
     // Neither blocks login — failures are logged and swallowed.
     // ════════════════════════════════════════════════════════════════════════════
-    // Persist dual tokens (accessToken, offlineToken, refreshToken) into JWTManager
+    // Persist offline + refresh tokens into JWTManager
     const jwtPersistPromise = (async () => {
-      const accessToken = authResponse.auth?.accessToken;
       const offlineToken = authResponse.offline?.token;
       const refreshToken = authResponse.auth?.refreshToken;
-      if (accessToken && offlineToken && refreshToken) {
+      if (offlineToken && refreshToken) {
         await JWTManager.persistTokens({
-          accessToken,
           offlineToken,
           refreshToken,
         });
@@ -100,35 +98,25 @@ export async function persistLogin(
       .then(() => log.info("Server time synced"))
       .catch((err) => log.warn("Server time sync failed (non-critical):", sanitizeError(err)));
 
-    const offlineSessionPromise = (async () => {
-      const offlineToken = authResponse.offline?.token;
-      const userGuuid = authResponse.user?.guuid;
-      if (!offlineToken || !userGuuid) return;
+    const offlineSessionPromise = createOfflineSessionFromAuth(authResponse)
+      .then((session) => {
+        if (session) log.info("Offline session created");
+      })
+      .catch((err) => log.warn("Offline session create failed (non-critical):", sanitizeError(err)));
 
-      let roles: string[] = [];
-      try {
-        const decoded = jwtDecode<{ roles?: string[] }>(offlineToken);
-        roles = decoded.roles ?? [];
-      } catch {
-        // Empty roles OK — updated on next token refresh
-      }
-
-      await offlineSession.create({
-        userGuuid,
-        storeGuuid: authResponse.context?.defaultStoreGuuid ?? null,
-        storeName: '',
-        roles,
-        offlineToken,
-        signature: authResponse.offline?.sessionSignature,
-        deviceId: authResponse.sync?.deviceId ?? undefined,
-      });
-      log.info("Offline session created");
-    })().catch((err) => log.warn("Offline session create failed (non-critical):", sanitizeError(err)));
-
-    const syncSeedPromise = seedSyncStateFromAuth(authResponse.sync?.lastSyncedAt ?? null)
+    const syncSeedPromise = seedSyncStateFromAuth(null)
       .catch((err) => log.warn("Sync state seed failed (non-critical):", sanitizeError(err)));
 
-    await Promise.allSettled([jwtPersistPromise, syncPromise, offlineSessionPromise, syncSeedPromise]);
+    const storeBootstrapPromise = initializeStoresAfterLogin(authResponse)
+      .catch((err) => log.warn("Store bootstrap failed (non-critical):", sanitizeError(err)));
+
+    await Promise.allSettled([
+      jwtPersistPromise,
+      syncPromise,
+      offlineSessionPromise,
+      syncSeedPromise,
+      storeBootstrapPromise,
+    ]);
 
     // ════════════════════════════════════════════════════════════════════════════
     // STATE: Update Redux store

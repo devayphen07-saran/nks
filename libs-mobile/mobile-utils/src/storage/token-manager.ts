@@ -5,6 +5,7 @@ import {
 } from "./secure-store";
 
 let _token: string | null = null;
+let _sessionId: string | null = null;
 let _onExpired: (() => void) | null = null;
 let _onRefresh: (() => void) | null = null;
 let _expiredFired = false;
@@ -36,15 +37,32 @@ export const tokenManager = {
     return _token;
   },
 
-  /** Stores the access token in memory only. Never written to disk. */
-  set(token: string): void {
+  /**
+   * Returns the current session id. Used by the request interceptor to
+   * attach the X-Session-Id header so endpoints like POST /auth/switch-store
+   * can identify the caller's session.
+   */
+  getSessionId(): string | null {
+    return _sessionId;
+  },
+
+  /**
+   * Stores the access token (and optionally the session id) in memory.
+   * Both come from the same auth response, so they are set together.
+   * Never written to disk — persistSession() handles that.
+   */
+  set(token: string, sessionId?: string): void {
     _token = token;
+    if (sessionId !== undefined) {
+      _sessionId = sessionId;
+    }
     _expiredFired = false;
   },
 
-  /** Clears the in-memory access token. Call on logout initiation. */
+  /** Clears the in-memory access token and session id. Call on logout initiation. */
   clear(): void {
     _token = null;
+    _sessionId = null;
   },
 
   /**

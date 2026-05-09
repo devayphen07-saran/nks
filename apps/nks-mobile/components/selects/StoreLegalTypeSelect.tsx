@@ -1,19 +1,11 @@
-import {
-  SelectGeneric,
-  ConfigSelectItem,
-  Typography,
-} from "@nks/mobile-ui-components";
-import { useStoreLegalTypes } from "@nks/api-manager";
-
-interface StoreLegalType {
-  guuid: string;
-  code: string;
-  title: string;
-}
+import { SelectGeneric, ConfigSelectItem, Typography } from "@nks/mobile-ui-components";
+import { useStoreLegalTypesSelect, type StoreLegalTypeSelectItem } from "../../lib/hooks";
+import type { SelectMode } from "../../lib/hooks";
 
 interface Props {
   value?: string;
   onChange: (value?: string) => void;
+  mode?: SelectMode;
   label?: string;
   required?: boolean;
   errorMessage?: string;
@@ -22,15 +14,15 @@ interface Props {
 export const StoreLegalTypeSelect = ({
   value,
   onChange,
-  label = "Legal Type",
+  mode = "fallback",
+  label = "Legal type",
   required,
   errorMessage,
 }: Props) => {
-  const { data, isLoading } = useStoreLegalTypes();
-  const items: StoreLegalType[] = data?.data ?? [];
+  const { items, isLoading } = useStoreLegalTypesSelect(mode);
 
   return (
-    <SelectGeneric<StoreLegalType>
+    <SelectGeneric<StoreLegalTypeSelectItem>
       label={label}
       required={required}
       options={items}
@@ -42,7 +34,7 @@ export const StoreLegalTypeSelect = ({
       errorMessage={errorMessage}
       displayRenderer={(selected) => (
         <Typography.Body>
-          {selected ? selected.title : "Select Legal Type..."}
+          {selected ? selected.title : "Select a legal type"}
         </Typography.Body>
       )}
       renderItem={(item, onSelect, isSelected) => (

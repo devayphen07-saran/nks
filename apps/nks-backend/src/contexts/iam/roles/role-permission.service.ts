@@ -79,8 +79,9 @@ export class RolePermissionService {
    * Validate ceiling + bulk-upsert permissions.
    *
    * When `tx` is provided the caller owns the transaction — this method only
-   * writes to the DB and skips post-commit effects so the caller can run them
-   * after the outer tx commits.  Call `postCommitEffects()` afterwards.
+   * writes to the DB. The caller MUST call `postCommitEffects()` after the
+   * outer transaction commits, unconditionally. Skipping it leaves the
+   * permission cache stale and drops audit/changelog entries.
    *
    * When `tx` is omitted this method is self-contained: it creates its own
    * transaction and runs all post-commit effects before returning.

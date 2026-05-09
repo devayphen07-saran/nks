@@ -10,8 +10,8 @@ export class LocationValidator {
     if (!district) throw new NotFoundException(errPayload(ErrorCode.ADMIN_DIVISION_NOT_FOUND));
   }
 
-  static assertDistrictsFound(districts: unknown[] | null | undefined): asserts districts is unknown[] {
-    if (!districts) throw new NotFoundException(errPayload(ErrorCode.STATE_NOT_FOUND));
+  static assertDistrictsFound<T>(result: T | null | undefined): asserts result is T {
+    if (!result) throw new NotFoundException(errPayload(ErrorCode.STATE_NOT_FOUND));
   }
 
   static assertPincodeFound<T>(pincode: T | null | undefined): asserts pincode is T {

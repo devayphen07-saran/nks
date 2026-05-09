@@ -7,7 +7,9 @@ import {
   numeric,
   text,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { users } from '../../auth/users';
 import { country } from '../../location/country';
@@ -80,6 +82,10 @@ export const store = pgTable(
     // logoUrl — displayed in app header, receipts, and staff invite emails.
     logoUrl: text('logo_url'),
 
+    // isDefault — owner's preferred store. At most one default per owner_user_fk.
+    // Enforced by partial unique index: (owner_user_fk) WHERE is_default = true.
+    isDefault: boolean('is_default').notNull().default(false),
+
     // ── Hierarchy ────────────────────────────────────────────────────────────
     parentStoreFk: bigint('parent_store_fk', { mode: 'number' }).references(
       (): AnyPgColumn => store.id,
@@ -92,6 +98,7 @@ export const store = pgTable(
     index('store_owner_user_idx').on(table.ownerUserFk),
     index('store_parent_store_idx').on(table.parentStoreFk),
     index('store_status_fk_idx').on(table.statusFk),
+    uniqueIndex('store_owner_default_uidx').on(table.ownerUserFk).where(sql`is_default = true`),
   ],
 );
 

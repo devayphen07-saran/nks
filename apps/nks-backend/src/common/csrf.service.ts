@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AppConfigService } from '../config/app-config.service';
 import { ForbiddenException } from './exceptions';
@@ -7,61 +7,55 @@ import { ErrorCode } from './constants/error-codes.constants';
 import { AUTH_CONSTANTS } from './constants/app-constants';
 
 const CSRF_UNSAFE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+const CSRF_COOKIE = 'csrf_token';
+const CSRF_HEADER = 'x-csrf-token';
 
 /**
- * CsrfService — single source of truth for all CSRF token logic.
+ * CsrfService — session-bound double-submit.
  *
- * Three responsibilities, one service:
+ * The cookie carries the value so JS can read it for the X-CSRF-Token header,
+ * but validation compares the header against the SESSION'S csrfSecret column
+ * (not the cookie). That bind defeats subdomain cookie tossing: an attacker
+ * who controls a sibling subdomain can overwrite the cookie but cannot forge
+ * the DB-stored value.
  *
- *   generate(ip)         — IP-bound pre-auth token for unauthenticated requests.
- *   computeForSession()  — derive the session-bound token from the per-session secret.
- *   validateRequest()    — check X-CSRF-Token header on state-mutating requests.
- *   refresh()            — keep the csrf_token cookie in sync post-handler.
- *
- * Previously split across CsrfTokenService (compute/generate) and
- * CsrfValidationService (validate/syncCookie). Consolidated so every layer
- * (middleware, guard, interceptor, auth controllers) injects one service
- * and CSRF reasoning stays in one place.
+ * Pure double-submit (header == cookie) was rejected because cookie tossing
+ * collapses the protection. The DB lookup costs nothing extra since the auth
+ * context query already SELECTs the session row.
  */
 @Injectable()
-export class CsrfService {
+export class CsrfService implements OnModuleInit {
   private readonly logger = new Logger(CsrfService.name);
-  private readonly csrfHmacSecret: string;
 
-  constructor(private readonly appConfig: AppConfigService) {
-    this.csrfHmacSecret = this.appConfig.csrfHmacSecret;
+  constructor(private readonly appConfig: AppConfigService) {}
+
+  onModuleInit(): void {
+    if (this.appConfig.isProduction && this.appConfig.csrfSameSite === 'none') {
+      this.logger.warn(
+        {
+          config: { CSRF_SAME_SITE: 'none' },
+          impact: 'SameSite cross-origin cookie gate disabled — CSRF token is the sole CSRF defense',
+          action: 'Verify all state-mutating endpoints enforce X-CSRF-Token; prefer SameSite=strict unless cross-origin is required',
+        },
+        'CSRF misconfiguration: CSRF_SAME_SITE=none in production',
+      );
+    }
   }
 
-  /**
-   * Generate a pre-auth CSRF token for unauthenticated requests.
-   * Pure random 32 bytes — no IP binding (IP binding causes false mismatches
-   * on mobile networks, VPNs, and proxies with no meaningful security gain).
-   */
+  /** Generate a fresh random secret (32 bytes hex). Used by session bootstrap. */
   generate(): string {
     return crypto.randomBytes(32).toString('hex');
   }
 
   /**
-   * Derive the session-bound CSRF token from the per-session secret.
-   */
-  computeForSession(csrfSecret: string): string {
-    return crypto
-      .createHmac('sha256', this.csrfHmacSecret)
-      .update(csrfSecret)
-      .digest('hex');
-  }
-
-  /**
-   * Validate the X-CSRF-Token request header for state-mutating methods.
-   * No-op for GET / HEAD / OPTIONS — those cannot carry state mutations.
+   * Validate the X-CSRF-Token header against the session's stored secret.
+   * No-op for safe methods. Throws ForbiddenException on mismatch.
    */
   validateRequest(req: Request, csrfSecret: string): void {
     if (!CSRF_UNSAFE_METHODS.has(req.method)) return;
 
-    const expected = this.computeForSession(csrfSecret);
-    const provided = req.headers['x-csrf-token'];
-
-    if (typeof provided !== 'string' || !this.timingSafeEqual(provided, expected)) {
+    const header = req.headers[CSRF_HEADER];
+    if (typeof header !== 'string' || !this.timingSafeEqual(header, csrfSecret)) {
       throw new ForbiddenException({
         errorCode: ErrorCode.FORBIDDEN,
         message: 'CSRF token missing or invalid',
@@ -70,18 +64,13 @@ export class CsrfService {
   }
 
   /**
-   * Keep the csrf_token cookie in sync with the current session secret.
-   * Sets the cookie only when the current cookie value is absent or stale.
-   * Called post-handler by SessionRotationService and immediately after
-   * login/register/OTP-verify by auth controllers.
+   * Set the csrf_token cookie to the session's secret. Idempotent — caller can
+   * invoke after every login/register/refresh; if the cookie already matches
+   * the secret, the browser just receives the same Set-Cookie header again.
    */
-  refresh(req: Request, res: Response, csrfSecret: string): void {
-    const expected = this.computeForSession(csrfSecret);
-    const existing = (req.cookies as Record<string, string | undefined>)['csrf_token'];
-    if (existing === expected) return;
-
+  refresh(res: Response, csrfSecret: string): void {
     const sameSite = AUTH_CONSTANTS.SESSION.COOKIE_SAME_SITE;
-    res.cookie('csrf_token', expected, {
+    res.cookie(CSRF_COOKIE, csrfSecret, {
       httpOnly: false,
       secure: AUTH_CONSTANTS.SESSION.COOKIE_SECURE || sameSite === 'none',
       sameSite,
@@ -90,12 +79,21 @@ export class CsrfService {
     });
   }
 
+  /** Clear the cookie on logout. */
+  clear(res: Response): void {
+    const sameSite = AUTH_CONSTANTS.SESSION.COOKIE_SAME_SITE;
+    res.clearCookie(CSRF_COOKIE, {
+      httpOnly: false,
+      secure: AUTH_CONSTANTS.SESSION.COOKIE_SECURE || sameSite === 'none',
+      sameSite,
+      path: '/',
+    });
+  }
+
   /**
-   * Constant-time equality check for CSRF token comparison.
-   *
-   * Both inputs are SHA-256 hashed before comparison so timingSafeEqual
-   * always receives equal-length buffers — eliminates the early-exit length
-   * oracle that would otherwise leak token length information.
+   * Constant-time equality. Both inputs hashed first so timingSafeEqual always
+   * sees equal-length buffers — eliminates the early-exit length oracle that
+   * would otherwise leak token length information.
    */
   private timingSafeEqual(a: string, b: string): boolean {
     const bufA = crypto.createHash('sha256').update(a).digest();

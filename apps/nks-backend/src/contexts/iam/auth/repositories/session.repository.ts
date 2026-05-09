@@ -5,6 +5,7 @@ import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
 import * as schema from '../../../../core/database/schema';
 import type { UserSession, NewUserSession, UpdateUserSession } from '../../../../core/database/schema/auth/user-session';
+import type { DbTransaction } from '../../../../core/database/transaction.service';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -171,11 +172,23 @@ export class SessionRepository extends BaseRepository {
     return session ?? null;
   }
 
-  async setActiveStore(sessionId: number, storeId: number): Promise<void> {
-    await this.db
+  async setActiveStore(
+    sessionId: number,
+    storeId: number,
+    tx?: DbTransaction,
+  ): Promise<void> {
+    const conn = tx ?? this.db;
+    await conn
       .update(schema.userSession)
       .set({ activeStoreFk: storeId })
       .where(eq(schema.userSession.id, sessionId));
+  }
+
+  async setActiveStoreForUser(userId: number, storeId: number): Promise<void> {
+    await this.db
+      .update(schema.userSession)
+      .set({ activeStoreFk: storeId })
+      .where(this.activeSessionWhere(userId));
   }
 
   async clearActiveStore(sessionId: number): Promise<void> {

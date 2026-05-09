@@ -1,6 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
-import { searchableSchema } from '../../../../common/dto/pagination.schema';
+import { searchableSchema, pageSizeColumn } from '../../../../common/dto/pagination.schema';
 
 /**
  * Shared query schema for location list endpoints that support optional text search.
@@ -28,7 +28,7 @@ export class LocationSearchQueryDto extends createZodDto(LocationSearchQuerySche
  * - isActive: Filter active/inactive/all
  */
 export const PincodeQuerySchema = searchableSchema.extend({
-  pageSize: z.coerce.number().int().positive().max(200).default(50),
+  pageSize: pageSizeColumn({ max: 200, default: 50 }),
   search:   z.string().trim().min(2).max(100).optional(),
   sortBy: z.enum(['code', 'area', 'createdAt']).default('code'),
   sortOrder: z.enum(['asc', 'desc']).default('asc'),

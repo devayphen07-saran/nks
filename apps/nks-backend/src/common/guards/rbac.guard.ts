@@ -4,6 +4,7 @@ import {
   ExecutionContext,
   ForbiddenException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PermissionEvaluatorService } from '../../contexts/iam/roles/permission-evaluator.service';
@@ -15,6 +16,8 @@ import {
   EntityPermissionRequirement,
 } from '../decorators/require-entity-permission.decorator';
 import { ENTITY_RESOURCE_KEY } from '../decorators/entity-resource.decorator';
+import { NO_ENTITY_PERMISSION_REQUIRED_KEY } from '../decorators/no-entity-permission-required.decorator';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import type { AuthenticatedRequest } from './auth.guard';
 
 /**
@@ -45,6 +48,8 @@ import type { AuthenticatedRequest } from './auth.guard';
  */
 @Injectable()
 export class RBACGuard implements CanActivate {
+  private readonly logger = new Logger(RBACGuard.name);
+
   constructor(
     private readonly reflector: Reflector,
     private readonly permissionEvaluator: PermissionEvaluatorService,
@@ -62,8 +67,29 @@ export class RBACGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    // No decorator on this handler — nothing to enforce.
-    if (!requirement) return true;
+    if (!requirement) {
+      // Warn at startup-time when a route has none of the three required markers:
+      //   1. @RequireEntityPermission  — RBAC enforced
+      //   2. @Public                   — unauthenticated access
+      //   3. @NoEntityPermissionRequired — authenticated, intentional bypass
+      // A missing marker is almost always an oversight, not intentional.
+      const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      const hasExplicitBypass = this.reflector.getAllAndOverride<string | undefined>(
+        NO_ENTITY_PERMISSION_REQUIRED_KEY,
+        [context.getHandler(), context.getClass()],
+      );
+      if (!isPublic && !hasExplicitBypass) {
+        const handler = context.getHandler().name;
+        const controller = context.getClass().name;
+        this.logger.warn(
+          `${controller}.${handler} has no RBAC marker — add @RequireEntityPermission, @Public, or @NoEntityPermissionRequired.`,
+        );
+      }
+      return true;
+    }
 
     // ── Resolve entity code ──────────────────────────────────────────────────
     // Three-tier resolution (first match wins):

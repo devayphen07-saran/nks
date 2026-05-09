@@ -62,29 +62,38 @@ export class LocationRepository extends BaseRepository {
    * Phase 1: Helper to build isActive filter
    * true = active only, false = inactive only, undefined = active only (default)
    */
-  async getStates(
-    search?: string,
-    sortBy = 'name',
-    sortOrder = 'asc',
-    isActive?: boolean,
-  ): Promise<State[]> {
-    const activeFilter = eq(schema.state.isActive, isActive ?? true);
+  async getStates(opts: {
+    page: number;
+    pageSize: number;
+    search?: string;
+    sortBy?: string;
+    sortOrder?: string;
+    isActive?: boolean;
+  }): Promise<{ rows: State[]; total: number }> {
+    const { page, pageSize, search, sortBy = 'name', sortOrder = 'asc', isActive } = opts;
+    const offset = LocationRepository.toOffset(page, pageSize);
 
-    const whereConditions = [
+    const where = and(
       isNull(schema.state.deletedAt),
-      activeFilter,
+      eq(schema.state.isActive, isActive ?? true),
       ilikeAny(search, schema.state.stateName, schema.state.stateCode),
-    ].filter((c): c is typeof c & {} => c !== null);
+    );
 
-    return this.db
-      .select()
-      .from(schema.state)
-      .where(and(...whereConditions))
-      .orderBy(this.applySortDirection(this.resolveOrderColumn(sortBy, {
-        code: schema.state.stateCode,
-        createdAt: schema.state.createdAt,
-        name: schema.state.stateName,
-      }, 'name'), sortOrder));
+    return this.paginate(
+      this.db
+        .select()
+        .from(schema.state)
+        .where(where)
+        .orderBy(this.applySortDirection(this.resolveOrderColumn(sortBy, {
+          code: schema.state.stateCode,
+          createdAt: schema.state.createdAt,
+          name: schema.state.stateName,
+        }, 'name'), sortOrder))
+        .limit(pageSize)
+        .offset(offset),
+      () => this.db.select({ total: count() }).from(schema.state).where(where),
+      page, pageSize,
+    );
   }
 
   async getDistrictByGuuid(guuid: string): Promise<District | null> {
@@ -139,33 +148,45 @@ export class LocationRepository extends BaseRepository {
 
   async getDistrictsByStateCode(
     code: string,
-    search?: string,
-    sortBy = 'name',
-    sortOrder = 'asc',
-    isActive?: boolean,
-  ): Promise<(District & { stateGuuid: string })[] | null> {
+    opts: {
+      page: number;
+      pageSize: number;
+      search?: string;
+      sortBy?: string;
+      sortOrder?: string;
+      isActive?: boolean;
+    },
+  ): Promise<{ rows: (District & { stateGuuid: string })[]; total: number } | null> {
     const state = await this.getStateByCode(code);
     if (!state) return null;
 
-    const districtActiveFilter = isActive === undefined ? true : isActive;
-    const districts = await this.db
-      .select()
-      .from(schema.district)
-      .where(
-        and(
-          eq(schema.district.stateFk, state.id),
-          eq(schema.district.isActive, districtActiveFilter),
-          isNull(schema.district.deletedAt),
-          ilikeAny(search, schema.district.districtName),
-        ),
-      )
-      .orderBy(this.applySortDirection(this.resolveOrderColumn(sortBy, {
-        code: schema.district.districtCode,
-        createdAt: schema.district.createdAt,
-        name: schema.district.districtName,
-      }, 'name'), sortOrder));
+    const { page, pageSize, search, sortBy = 'name', sortOrder = 'asc', isActive } = opts;
+    const offset = LocationRepository.toOffset(page, pageSize);
 
-    return districts.map((d) => ({ ...d, stateGuuid: state.guuid }));
+    const where = and(
+      eq(schema.district.stateFk, state.id),
+      eq(schema.district.isActive, isActive ?? true),
+      isNull(schema.district.deletedAt),
+      ilikeAny(search, schema.district.districtName),
+    );
+
+    const { rows, total } = await this.paginate(
+      this.db
+        .select()
+        .from(schema.district)
+        .where(where)
+        .orderBy(this.applySortDirection(this.resolveOrderColumn(sortBy, {
+          code: schema.district.districtCode,
+          createdAt: schema.district.createdAt,
+          name: schema.district.districtName,
+        }, 'name'), sortOrder))
+        .limit(pageSize)
+        .offset(offset),
+      () => this.db.select({ total: count() }).from(schema.district).where(where),
+      page, pageSize,
+    );
+
+    return { rows: rows.map((d) => ({ ...d, stateGuuid: state.guuid })), total };
   }
 
   async getPincodesByDistrict(

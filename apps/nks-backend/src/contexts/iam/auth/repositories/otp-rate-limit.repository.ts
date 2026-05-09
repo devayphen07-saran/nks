@@ -38,10 +38,7 @@ export class OtpRateLimitRepository extends BaseRepository {
   }
 
   /** Atomic counter increment (race-safe). */
-  async incrementCounter(
-    id: number,
-    field: 'requestCount' | 'consecutiveFailures',
-  ): Promise<void> {
+  async incrementCounter(id: number, field: 'requestCount'): Promise<void> {
     const col = schema.otpRequestLog[field];
     await this.db
       .update(schema.otpRequestLog)

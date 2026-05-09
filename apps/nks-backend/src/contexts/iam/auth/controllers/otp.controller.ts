@@ -13,6 +13,7 @@ import { OtpService } from '../services/otp/otp.service';
 import { OtpAuthOrchestrator } from '../services/orchestrators/otp-auth-orchestrator.service';
 import { CsrfService } from '../../../../common/csrf.service';
 import { AuthControllerHelpers } from '../../../../common/utils/auth-helpers';
+import { DeviceDetector } from '../../../../common/utils/device-detector';
 import { SendOtpDto, VerifyOtpDto, ResendOtpDto } from '../dto/otp.dto';
 import { VerifyEmailOtpDto } from '../dto/email-verify.dto';
 import { CurrentUser } from '../../../../common/decorators/current-user.decorator';
@@ -23,11 +24,13 @@ import {
   ResendOtpResponseDto,
 } from '../dto/otp-response.dto';
 import { Public } from '../../../../common/decorators/public.decorator';
+import { NoEntityPermissionRequired } from '../../../../common/decorators/no-entity-permission-required.decorator';
 import { RateLimit } from '../../../../common/decorators/rate-limit.decorator';
 import type { AuthResponseEnvelope } from '../dto';
 
 @ApiTags('Auth')
 @Controller('auth/otp')
+@ApiBearerAuth()
 export class OtpController {
   constructor(
     private readonly otpService: OtpService,
@@ -56,14 +59,14 @@ export class OtpController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponseEnvelope> {
-    const deviceInfo = AuthControllerHelpers.extractDeviceInfo(req);
-    const result = await this.otpAuthOrchestrator.verifyOtpAndBuildAuthResponse(dto, deviceInfo);
+    const deviceInfo = DeviceDetector.extract(req);
+    const { envelope, csrfSecret } = await this.otpAuthOrchestrator.verifyOtpAndBuildAuthResponse(dto, deviceInfo);
 
-    AuthControllerHelpers.applySessionCookie(res, result);
-    if (result.auth?.sessionToken && !AuthControllerHelpers.isMobile(deviceInfo.deviceType)) {
-      this.csrf.refresh(req, res, result.auth.sessionToken);
+    AuthControllerHelpers.applySessionCookie(res, envelope);
+    if (envelope.auth?.bearerToken && !DeviceDetector.isMobile(deviceInfo.deviceType)) {
+      this.csrf.refresh(res, csrfSecret);
     }
-    return AuthControllerHelpers.forClient(result, deviceInfo.deviceType);
+    return AuthControllerHelpers.forClient(envelope, deviceInfo.deviceType);
   }
 
   @Post('resend')
@@ -78,7 +81,7 @@ export class OtpController {
 
   @Post('email/send')
   @HttpCode(HttpStatus.OK)
-  @ApiBearerAuth()
+  @NoEntityPermissionRequired('self-service: user requesting OTP for their own email verification')
   @RateLimit(3)
   @ResponseMessage('OTP sent to email')
   @ApiOperation({
@@ -91,7 +94,7 @@ export class OtpController {
 
   @Post('email/verify')
   @HttpCode(HttpStatus.OK)
-  @ApiBearerAuth()
+  @NoEntityPermissionRequired('self-service: user verifying OTP for their own email')
   @RateLimit(5)
   @ResponseMessage('Email verified successfully')
   @ApiOperation({

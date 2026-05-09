@@ -9,6 +9,50 @@ import { RSAKeyManager } from '../core/crypto/rsa-keys';
 import { InternalServerException } from '../common/exceptions';
 import { ErrorCode, errPayload } from '../common/constants/error-codes.constants';
 
+// ─── FallbackKeyStore — disk persistence for key rotation grace period ───────
+// Keeps the concern of reading/writing JSON off JWTConfigService.
+// An in-memory fallback is used when the file cannot be read (fresh start,
+// read-only filesystem, containerized env without a mounted secrets volume).
+
+interface PersistedFallbackKey {
+  kid: string;
+  publicKeyPem: string;
+  jwk: JWK;
+  rotatedAt: string;
+  expiresAt: string;
+}
+
+class FallbackKeyStore {
+  private readonly logger = new Logger(FallbackKeyStore.name);
+
+  constructor(private readonly filePath: string) {}
+
+  load(): Array<{ kid: string; publicKeyPem: string; jwk: JWK; rotatedAt: Date; expiresAt: Date }> {
+    try {
+      if (!fs.existsSync(this.filePath)) return [];
+      const raw = fs.readFileSync(this.filePath, 'utf8');
+      const parsed: PersistedFallbackKey[] = JSON.parse(raw);
+      const now = new Date();
+      return parsed
+        .map((k) => ({ ...k, rotatedAt: new Date(k.rotatedAt), expiresAt: new Date(k.expiresAt) }))
+        .filter((k) => k.expiresAt > now);
+    } catch {
+      this.logger.warn('Could not read fallback keys from disk — starting fresh');
+      return [];
+    }
+  }
+
+  save(keys: Array<{ kid: string; publicKeyPem: string; jwk: JWK; rotatedAt: Date; expiresAt: Date }>): void {
+    try {
+      const dir = path.dirname(this.filePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(this.filePath, JSON.stringify(keys, null, 2), { mode: 0o600 });
+    } catch (err) {
+      this.logger.error('Failed to persist fallback keys to disk', err);
+    }
+  }
+}
+
 export interface JWTPayload {
   sub: string;
   sid: string;
@@ -18,27 +62,8 @@ export interface JWTPayload {
    * never null, embedded as a URL path parameter in clients.
    */
   iamUserId: string;
-  firstName?: string;
-  lastName?: string;
   email?: string;
   roles: string[];
-  iat: number;
-  exp: number;
-  iss: string;
-  aud: string;
-  kid?: string;
-}
-
-/** Offline JWT payload — identity + authorization + session binding */
-export interface OfflineJWTPayload {
-  sub: string;
-  /** Session guuid — lets mobile detect revocation when coming online. */
-  sid: string;
-  jti: string;
-  email?: string;
-  roles: string[];
-  stores: Array<{ guuid: string; name: string }>;
-  activeStoreGuuid: string | null;
   iat: number;
   exp: number;
   iss: string;
@@ -53,25 +78,8 @@ const JWTPayloadSchema = z.object({
   sid: z.string(),
   jti: z.string(),
   iamUserId: z.string(),
-  firstName: z.string().optional(),
-  lastName: z.string().optional(),
   email: z.string().optional(),
   roles: z.array(z.string()),
-  iat: z.number(),
-  exp: z.number(),
-  iss: z.string(),
-  aud: z.string(),
-  kid: z.string().optional(),
-});
-
-const OfflineJWTPayloadSchema = z.object({
-  sub: z.string(),
-  sid: z.string(),
-  jti: z.string(),
-  email: z.string().optional(),
-  roles: z.array(z.string()),
-  stores: z.array(z.object({ guuid: z.string(), name: z.string() })),
-  activeStoreGuuid: z.string().nullable(),
   iat: z.number(),
   exp: z.number(),
   iss: z.string(),
@@ -134,75 +142,24 @@ export class JWTConfigService {
   private currentKeyId: string = '';
   private fallbackKeys: FallbackKey[] = [];
   private readonly FALLBACK_KEY_DURATION_DAYS = 30;
-  private readonly fallbackKeysPath: string;
+  private readonly keyStore: FallbackKeyStore;
 
   constructor(private readonly configService: ConfigService) {
     const keysDir = this.configService.get<string>('JWT_KEYS_DIR') ?? path.join(process.cwd(), 'secrets');
-    this.fallbackKeysPath = path.join(keysDir, 'jwt_fallback_keys.json');
+    this.keyStore = new FallbackKeyStore(path.join(keysDir, 'jwt_fallback_keys.json'));
     try {
       this.privateKey = RSAKeyManager.getPrivateKey();
       this.publicKey = RSAKeyManager.getPublicKey();
       this.logger.debug('✅ RSA keys loaded');
 
-      // Compute kid as SHA-256 thumbprint of public key (RFC 7638)
-      // This allows kid to automatically change on key rotation without hardcoding
       this.currentKeyId = this.computeKeyThumbprint(this.publicKey);
-      this.logger.debug(
-        `✅ Current key ID computed: ${this.currentKeyId.substring(0, 8)}...`,
-      );
+      this.logger.debug(`✅ Current key ID computed: ${this.currentKeyId.substring(0, 8)}...`);
 
-      // Load persisted fallback keys (survives restarts)
-      this.fallbackKeys = this.loadFallbackKeysFromDisk();
-      this.logger.debug(
-        `✅ Loaded ${this.fallbackKeys.length} fallback key(s) from disk`,
-      );
+      this.fallbackKeys = this.keyStore.load();
+      this.logger.debug(`✅ Loaded ${this.fallbackKeys.length} fallback key(s) from disk`);
     } catch (error) {
       this.logger.error('Failed to load RSA keys', error);
       throw error;
-    }
-  }
-
-  /** Load fallback keys from disk, filtering out expired ones. */
-  private loadFallbackKeysFromDisk(): FallbackKey[] {
-    try {
-      if (!fs.existsSync(this.fallbackKeysPath)) return [];
-      const raw = fs.readFileSync(this.fallbackKeysPath, 'utf8');
-      const parsed: Array<{
-        kid: string;
-        publicKeyPem: string;
-        jwk: JWK;
-        rotatedAt: string;
-        expiresAt: string;
-      }> = JSON.parse(raw);
-      const now = new Date();
-      return parsed
-        .map((k) => ({
-          ...k,
-          rotatedAt: new Date(k.rotatedAt),
-          expiresAt: new Date(k.expiresAt),
-        }))
-        .filter((k) => k.expiresAt > now);
-    } catch {
-      this.logger.warn(
-        'Could not read fallback keys from disk — starting fresh',
-      );
-      return [];
-    }
-  }
-
-  /** Persist fallback keys to disk so they survive restarts. */
-  private saveFallbackKeysToDisk(): void {
-    try {
-      const dir = path.dirname(this.fallbackKeysPath);
-      if (!fs.existsSync(dir))
-        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      fs.writeFileSync(
-        this.fallbackKeysPath,
-        JSON.stringify(this.fallbackKeys, null, 2),
-        { mode: 0o600 },
-      );
-    } catch (err) {
-      this.logger.error('Failed to persist fallback keys to disk', err);
     }
   }
 
@@ -214,6 +171,35 @@ export class JWTConfigService {
     const key = crypto.createPublicKey({ key: publicKeyPem, format: 'pem' });
     const derBuffer = key.export({ format: 'der', type: 'spki' });
     return crypto.createHash('sha256').update(derBuffer).digest('hex');
+  }
+
+  /**
+   * Sign an offline JWT with RS256 for mobile clients.
+   * Same key-pair as the access token — mobile verifies against cached JWKS.
+   * TTL is provided by the caller (auth.constants.ts OFFLINE_TOKEN_TTL_MS).
+   */
+  signOfflineToken(
+    payload: Omit<JWTPayload, 'iat' | 'exp' | 'kid'>,
+    ttlSeconds: number,
+  ): string {
+    const now = Math.floor(Date.now() / 1000);
+
+    const tokenPayload: JWTPayload = {
+      ...payload,
+      iat: now,
+      exp: now + ttlSeconds,
+      kid: this.currentKeyId,
+    };
+
+    try {
+      return jwt.sign(tokenPayload, this.privateKey, {
+        algorithm: 'RS256',
+        keyid: this.currentKeyId,
+      });
+    } catch (error) {
+      this.logger.error('Failed to sign offline JWT', error);
+      throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
+    }
   }
 
   /**
@@ -239,74 +225,7 @@ export class JWTConfigService {
       });
     } catch (error) {
       this.logger.error('Failed to sign JWT', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Sign an offline JWT for mobile offline verification.
-   * FIX #12: TTL is configurable via expiresIn parameter (default: 3 days for NKS).
-   * The offline JWT's own exp claim IS the offline window boundary.
-   * Mobile does NOT need a separate grace period calculation.
-   * FIX #8: audience aligned to JWT_AUDIENCE ('nks-app'), was 'nks-offline'.
-   */
-  signOfflineToken(
-    payload: {
-      sub: string;
-      sid: string;
-      email?: string;
-      roles: string[];
-      stores: Array<{ guuid: string; name: string }>;
-      activeStoreGuuid: string | null;
-    },
-    expiresIn: string = '3d',
-  ): string {
-    const now = Math.floor(Date.now() / 1000);
-    const seconds = this.parseExpiresIn(expiresIn);
-
-    const tokenPayload: OfflineJWTPayload = {
-      sub: payload.sub,
-      sid: payload.sid,
-      jti: crypto.randomUUID(),
-      ...(payload.email ? { email: payload.email } : {}),
-      roles: payload.roles,
-      stores: payload.stores,
-      activeStoreGuuid: payload.activeStoreGuuid,
-      iss: 'nks-auth',
-      aud: 'nks-app',
-      iat: now,
-      exp: now + seconds,
-      kid: this.currentKeyId,
-    };
-
-    try {
-      return jwt.sign(tokenPayload, this.privateKey, {
-        algorithm: 'RS256',
-        keyid: this.currentKeyId,
-      });
-    } catch (error) {
-      this.logger.error('Failed to sign offline JWT', error);
-      throw error;
-    }
-  }
-
-  /** Parse duration strings like '3d', '12h', '30m' to seconds */
-  private parseExpiresIn(value: string): number {
-    const match = value.match(/^(\d+)([dhm])$/);
-    if (!match) {
-      this.logger.error(`Invalid expiresIn format: ${value}`);
       throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
-    }
-    const num = parseInt(match[1], 10);
-    switch (match[2]) {
-      case 'd':
-        return num * 86400;
-      case 'h':
-        return num * 3600;
-      case 'm':
-        return num * 60;
-      default:
-        return num;
     }
   }
 
@@ -336,7 +255,6 @@ export class JWTConfigService {
       }
 
       const kid = decoded.header?.kid as string | undefined;
-      const payload = decoded.payload as any;
 
       if (kid && kid !== this.currentKeyId) {
         const fallback = this.getFallbackKey(kid);
@@ -448,6 +366,26 @@ export class JWTConfigService {
   }
 
   /**
+   * Install a freshly-generated keypair as the active signing key.
+   *
+   * Caller (KeyRotationScheduler) MUST have called archiveCurrentKeyAsFallback()
+   * first so the previous public key is still in the JWKS for verification of
+   * in-flight tokens.
+   *
+   * Recomputes `currentKeyId` from the new public key (RFC 7638 thumbprint) so
+   * the next signed JWT carries the new `kid` claim and JWKS consumers route
+   * verification to the right key.
+   */
+  installNewKeyPair(privateKey: string, publicKey: string): void {
+    this.privateKey = privateKey;
+    this.publicKey = publicKey;
+    this.currentKeyId = this.computeKeyThumbprint(publicKey);
+    this.logger.log(
+      `Installed new active signing key (kid: ${this.currentKeyId.substring(0, 8)}...)`,
+    );
+  }
+
+  /**
    * Archive the current active key as a fallback key when rotating
    * Called before generating a new key
    */
@@ -471,8 +409,7 @@ export class JWTConfigService {
       expiresAt,
     });
 
-    // Persist to disk so the grace period survives server restarts
-    this.saveFallbackKeysToDisk();
+    this.keyStore.save(this.fallbackKeys);
 
     this.logger.log(
       `Archived key ${this.currentKeyId} as fallback until ${expiresAt.toISOString()}`,
@@ -522,55 +459,6 @@ export class JWTConfigService {
         expiresAt: key.expiresAt.toISOString(),
       })),
     ];
-  }
-
-  /**
-   * Verify an offline JWT (RS256) issued by signOfflineToken().
-   *
-   * Supports fallback keys so clients that received an offline token before
-   * a key rotation can still push sync operations during the 30-day grace period.
-   *
-   * Throws JsonWebTokenError / TokenExpiredError (from jsonwebtoken) on failure —
-   * callers should map these to ForbiddenException.
-   *
-   * @param token - The raw offline JWT string from the AuthResponse
-   * @returns Verified and decoded OfflineJWTPayload
-   */
-  verifyOfflineToken(token: string): OfflineJWTPayload {
-    try {
-      const raw = jwt.verify(token, this.publicKey, {
-        algorithms: ['RS256'],
-        issuer: 'nks-auth',
-        audience: 'nks-app',
-      });
-      return OfflineJWTPayloadSchema.parse(raw);
-    } catch (primaryError) {
-      // Attempt verification with a fallback key if kid differs from current
-      const decoded = jwt.decode(token, { complete: true });
-      const kid = decoded?.header?.kid as string | undefined;
-
-      if (kid && kid !== this.currentKeyId) {
-        const fallback = this.getFallbackKey(kid);
-        if (fallback) {
-          try {
-            const raw = jwt.verify(token, fallback.publicKeyPem, {
-              algorithms: ['RS256'],
-              issuer: 'nks-auth',
-              audience: 'nks-app',
-            });
-            return OfflineJWTPayloadSchema.parse(raw);
-          } catch (fallbackError) {
-            this.logger.warn(
-              `Offline JWT verification failed with fallback key (kid=${kid})`,
-              fallbackError,
-            );
-          }
-        }
-      }
-
-      this.logger.warn('Offline JWT verification failed', primaryError);
-      throw primaryError;
-    }
   }
 
   decodeToken(token: string): JWTPayload {

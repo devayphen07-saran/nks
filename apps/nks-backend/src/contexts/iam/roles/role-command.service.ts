@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { RolesRepository } from './repositories/roles.repository';
 import type { DbTransaction } from '../../../core/database/transaction.service';
 
@@ -16,6 +16,8 @@ import type { DbTransaction } from '../../../core/database/transaction.service';
  */
 @Injectable()
 export class RoleCommandService {
+  private readonly logger = new Logger(RoleCommandService.name);
+
   constructor(private readonly rolesRepository: RolesRepository) {}
 
   /**

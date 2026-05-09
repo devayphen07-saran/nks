@@ -53,7 +53,6 @@ export async function seedStoreOwnerPermissions(db: Db): Promise<{ rowCount: num
     rows.push({
       roleFk:       storeOwnerRole.id,
       entityTypeFk: entityId,
-      allow:        true,
       canView:      true,
       canCreate:    true,
       canEdit:      true,
@@ -69,7 +68,6 @@ export async function seedStoreOwnerPermissions(db: Db): Promise<{ rowCount: num
     rows.push({
       roleFk:       storeOwnerRole.id,
       entityTypeFk: entityId,
-      allow:        true,
       canView:      true,
       canCreate:    false,
       canEdit:      false,
@@ -87,7 +85,6 @@ export async function seedStoreOwnerPermissions(db: Db): Promise<{ rowCount: num
     .onConflictDoUpdate({
       target: [rolePermissions.roleFk, rolePermissions.entityTypeFk],
       set: {
-        allow:     true,
         canView:   rolePermissions.canView,
         canCreate: rolePermissions.canCreate,
         canEdit:   rolePermissions.canEdit,

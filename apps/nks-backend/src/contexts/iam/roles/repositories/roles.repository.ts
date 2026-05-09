@@ -542,14 +542,14 @@ export class RolesRepository extends BaseRepository {
 
   /**
    * Find the primary store (STORE_OWNER) for a user.
-   * Returns the store guuid, or null if the user owns no store.
+   * Returns { id, guuid }, or null if the user owns no store.
    */
   async findPrimaryStoreForUser(
     userId: number,
     storeOwnerRoleId: number,
-  ): Promise<{ guuid: string } | null> {
+  ): Promise<{ id: number; guuid: string } | null> {
     const [row] = await this.db
-      .select({ guuid: schema.store.guuid })
+      .select({ id: schema.store.id, guuid: schema.store.guuid })
       .from(userRoleMapping)
       .innerJoin(schema.store, eq(schema.store.id, userRoleMapping.storeFk))
       .where(

@@ -4,8 +4,8 @@
  * Key-value store for sync cursors and timestamps.
  *
  * Per-table cursors:
- *   getCursorForTable('routes')           → number (0 = never synced)
- *   saveCursorForTable('routes', 1714000000)
+ *   getCursorForTable('state')           → number (0 = never synced)
+ *   saveCursorForTable('state', 1714000000)
  *
  * The cursor value is a Unix millisecond timestamp.
  * It represents the `updated_at` of the last change successfully applied
@@ -15,7 +15,6 @@
  *   LAST_PULL_AT       → timestamp of last completed pull
  *   LAST_PUSH_AT       → timestamp of last completed push
  *   LAST_FULL_SYNC_AT  → timestamp of last full pull + push cycle
- *   LOOKUP_SYNCED_AT   → timestamp of last lookup TTL sync
  */
 
 import { eq } from 'drizzle-orm';
@@ -114,18 +113,6 @@ export class SyncStateRepository {
     } catch (err) {
       log.error(`Failed to set value [${key}]:`, err);
     }
-  }
-
-  // ── Compatibility shims (used by sync-engine via local-db.ts) ─────────────
-
-  /** @deprecated Use getCursorForTable('routes') */
-  async getCursor(): Promise<number> {
-    return this.getCursorForTable('routes');
-  }
-
-  /** @deprecated Use saveCursorForTable('routes', cursorMs) */
-  async saveCursor(cursorMs: number): Promise<void> {
-    return this.saveCursorForTable('routes', cursorMs);
   }
 
   // ── Cleanup ────────────────────────────────────────────────────────────────

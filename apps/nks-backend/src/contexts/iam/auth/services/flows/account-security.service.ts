@@ -6,10 +6,9 @@ import { SessionEvents } from '../../../../../common/events/session.events';
 import { AccountSecurityPolicy } from '../../domain/account-security.policy';
 import { PasswordAuthValidator } from '../../validators';
 import type { DeviceInfo } from '../../interfaces/device-info.interface';
+import * as schema from '../../../../../core/database/schema';
 
-type AuthUser = NonNullable<
-  Awaited<ReturnType<AuthUsersRepository['findByEmail']>>
->;
+type AuthUser = typeof schema.users.$inferSelect;
 type AuditMeta = { deviceId?: string; deviceType?: string };
 
 /**

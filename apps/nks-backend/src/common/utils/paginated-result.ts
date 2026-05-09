@@ -3,7 +3,7 @@ import type { PaginationMeta } from './api-response';
 /**
  * Typed wrapper for paginated controller responses.
  *
- * Using a class (not an interface) means TransformInterceptor can identify
+ * Using a class (not an interface) means ResponseInterceptor can identify
  * paginated results via `instanceof` — an explicit, standard type check —
  * rather than inspecting a magic `__paginated` flag. No domain object can
  * accidentally satisfy `instanceof PaginatedResult`.

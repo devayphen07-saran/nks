@@ -1,29 +1,19 @@
-import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SanitizerValidator } from '../../../../../common/validators/sanitizer.validator';
 import { PasswordAuthValidator } from '../../validators';
+import { UnauthorizedException } from '../../../../../common/exceptions';
+import { ErrorCode, errPayload } from '../../../../../common/constants/error-codes.constants';
 import { LoginDto, RegisterDto } from '../../dto';
 import type { AuthResponseEnvelope } from '../../dto';
 import { AuthFlowOrchestratorService } from '../orchestrators/auth-flow-orchestrator.service';
 import { PasswordService } from '../security/password.service';
 import { AuthUsersRepository } from '../../repositories/auth-users.repository';
 import { AuditCommandService } from '../../../../compliance/audit/audit-command.service';
-import { AuthUtilsService } from '../shared/auth-utils.service';
-import { RoleQueryService } from '../../../roles/role-query.service';
 import { AccountSecurityService } from './account-security.service';
 import { InitialRoleAssignmentService } from './initial-role-assignment.service';
-import { SystemRoleCodes } from '../../../../../common/constants/system-role-codes.constant';
-import { SYSTEM_USER_ID } from '../../../../../common/constants/app-constants';
 import type { DeviceInfo } from '../../interfaces/device-info.interface';
 
-// Pre-computed once at module load with the same cost factor used by PasswordService.
-// Used to normalize response time when the email is not found — prevents timing-based enumeration.
-const DUMMY_BCRYPT_HASH = bcrypt.hashSync('__nks_timing_guard__', 12);
-
-type AuthUser = NonNullable<
-  Awaited<ReturnType<AuthUsersRepository['findByEmail']>>
->;
 type AuditMeta = { deviceId?: string; deviceType?: string };
 
 /**
@@ -35,33 +25,41 @@ type AuditMeta = { deviceId?: string; deviceType?: string };
  *
  * Delegates the session + token + response pipeline to AuthFlowOrchestrator.
  *
- * Dependencies (6):
+ * Dependencies (8):
  *   - authUsersRepository (user CRUD, reset login state)
  *   - passwordService (hash and compare)
  *   - authFlow (session + token + response envelope)
  *   - authUtils (system role caching)
  *   - auditService (login audit logging)
- *   - roleQuery (isSuperAdminSeeded check)
+ *   - roleQuery (first-user SUPER_ADMIN check)
  *   - accountSecurityService (lockout, brute-force, auto-unlock)
  *   - initialRoleAssignmentService (role assignment on register)
  */
 @Injectable()
-export class PasswordAuthService {
+export class PasswordAuthService implements OnModuleInit {
+  private readonly logger = new Logger(PasswordAuthService.name);
+
+  // Computed in onModuleInit so the cost factor matches PasswordService's configured BCRYPT_ROUNDS.
+  // Used to normalize response time when the email is not found — prevents timing-based enumeration.
+  private dummyBcryptHash!: string;
+
   constructor(
     private readonly authUsersRepository: AuthUsersRepository,
     private readonly passwordService: PasswordService,
     private readonly authFlow: AuthFlowOrchestratorService,
-    private readonly authUtils: AuthUtilsService,
     private readonly auditService: AuditCommandService,
-    private readonly roleQuery: RoleQueryService,
     private readonly accountSecurityService: AccountSecurityService,
     private readonly initialRoleAssignmentService: InitialRoleAssignmentService,
   ) {}
 
+  async onModuleInit(): Promise<void> {
+    this.dummyBcryptHash = await this.passwordService.hashRaw('__nks_timing_guard__');
+  }
+
   async login(
     dto: LoginDto,
     deviceInfo?: DeviceInfo,
-  ): Promise<AuthResponseEnvelope> {
+  ): Promise<{ envelope: AuthResponseEnvelope; csrfSecret: string }> {
     const auditMeta: AuditMeta = {
       deviceId: deviceInfo?.deviceId,
       deviceType: deviceInfo?.deviceType,
@@ -72,8 +70,16 @@ export class PasswordAuthService {
       dto.email,
     );
 
-    if (!record) await this.runTimingGuard(dto.password);
-    PasswordAuthValidator.assertUserFound(record);
+    // Phone-only users (OTP-onboarded, no email auth_provider) come back from the
+    // LEFT JOIN with passwordHash=null. Treat them identically to "email not found":
+    // run the timing guard, then throw INVALID_CREDENTIALS. Without this branch,
+    // bcrypt.compare(plaintext, null) either rejects (node-bcrypt) → 500 leak, or
+    // returns false (bcryptjs) → silent oracle that distinguishes phone-only
+    // accounts from non-existent ones via downstream behaviour.
+    if (!record || !record.passwordHash) {
+      await this.runTimingGuard(dto.password);
+      throw new UnauthorizedException(errPayload(ErrorCode.AUTH_INVALID_CREDENTIALS));
+    }
 
     const { user, passwordHash } = record;
 
@@ -109,7 +115,7 @@ export class PasswordAuthService {
   async register(
     dto: RegisterDto,
     deviceInfo?: DeviceInfo,
-  ): Promise<AuthResponseEnvelope> {
+  ): Promise<{ envelope: AuthResponseEnvelope; csrfSecret: string }> {
     dto.email = SanitizerValidator.sanitizeEmail(dto.email);
     dto.firstName = SanitizerValidator.sanitizeName(dto.firstName);
     dto.lastName = SanitizerValidator.sanitizeName(dto.lastName);
@@ -128,7 +134,7 @@ export class PasswordAuthService {
         password: passwordHash,
         isVerified: false,
       },
-      SYSTEM_USER_ID, // self-registration — no logged-in actor exists
+      null, // self-registration — no logged-in actor exists
       async (tx, userId) => {
         await this.initialRoleAssignmentService.assignInitialRoleInTransaction(userId, tx);
       },
@@ -154,19 +160,11 @@ export class PasswordAuthService {
     return this.authFlow.execute(user, deviceInfo);
   }
 
-  async isSuperAdminSeeded(): Promise<boolean> {
-    const superAdminRoleId = await this.authUtils.getCachedSystemRoleId(
-      SystemRoleCodes.SUPER_ADMIN,
-    );
-    if (!superAdminRoleId) return false;
-    return this.roleQuery.hasUserWithRole(superAdminRoleId);
-  }
-
   // ─── Private Helpers ───────────────────────────────────────────────────────
 
   // Prevents email enumeration via response-time difference when user is not found.
   private async runTimingGuard(password: string): Promise<void> {
-    await this.passwordService.compare(password, DUMMY_BCRYPT_HASH);
+    await this.passwordService.compare(password, this.dummyBcryptHash);
   }
 
   private loginAuditBase(

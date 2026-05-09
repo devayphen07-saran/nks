@@ -134,7 +134,6 @@ export class PermissionsRepository extends BaseRepository implements OnModuleIni
       rows.push({
         roleFk:       roleId,
         entityTypeFk,
-        allow:     !entry.deny,
         canView:   entry.canView   ?? false,
         canCreate: entry.canCreate ?? false,
         canEdit:   entry.canEdit   ?? false,
@@ -152,7 +151,6 @@ export class PermissionsRepository extends BaseRepository implements OnModuleIni
       .onConflictDoUpdate({
         target: [rolePermissions.roleFk, rolePermissions.entityTypeFk],
         set: {
-          allow:     sql`excluded.allow`,
           canView:   sql`excluded.can_view`,
           canCreate: sql`excluded.can_create`,
           canEdit:   sql`excluded.can_edit`,
@@ -442,8 +440,15 @@ export class PermissionsRepository extends BaseRepository implements OnModuleIni
 
   /**
    * Merge permission rows (potentially from multiple roles) into one map.
-   * Deny wins: if any role denies an entity, all grants for that entity are wiped.
-   * Grants: OR across roles.
+   *
+   * Semantics (intentional — multi-role assignment is additive by design):
+   *   - Grants: OR across roles per action. {canView}+{canCreate} = both.
+   *   - Deny:   OR across roles per entity. Any deny=true wipes all grants
+   *             for that entity, regardless of how many roles grant it.
+   *
+   * This means union across roles, not intersection: granting RoleA(canView)
+   * and RoleB(canCreate) yields a user with both. Deny is the escape hatch
+   * when a role must hard-block an entity regardless of other assignments.
    */
   private mergePermissions(
     rows: Array<{

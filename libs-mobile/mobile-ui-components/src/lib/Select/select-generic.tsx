@@ -127,12 +127,13 @@ export function SelectGeneric<T>({
             <ThemedFlatList
               data={options}
               keyExtractor={keyExtractor}
+              scrollEnabled={true}
               renderItem={({ item }) =>
                 renderItem(
                   item,
                   (i) => {
                     const _item = item as { disabled?: boolean; isHidden?: boolean };
-                  if (!_item.disabled && !_item.isHidden) {
+                    if (!_item.disabled && !_item.isHidden) {
                       onChange(i);
                       setVisible(false);
                     }

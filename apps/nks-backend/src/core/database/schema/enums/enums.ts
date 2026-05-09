@@ -1,7 +1,7 @@
 import { pgEnum } from 'drizzle-orm/pg-core';
 
 // notificationTypeEnum intentionally removed — notification types are now
-// stored in the notification_types reference table so new types can be
+// stored in the notification_type reference table so new types can be
 // added by inserting a row without a code change or migration.
 
 // push_tokens: WEB intentionally excluded — web users do not register Expo push tokens

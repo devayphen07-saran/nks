@@ -22,6 +22,15 @@ export interface RegisterRequest {
   password: string;
 }
 
+export interface SwitchStoreRequest {
+  storeId: number;
+}
+
+export interface SwitchStoreResponse {
+  data: { success: boolean; activeStoreId: number };
+  message: string;
+}
+
 // ─── Response DTOs ────────────────────────────────────────────────────────────
 
 export interface AuthUserResponse {
@@ -36,27 +45,19 @@ export interface AuthUserResponse {
 export interface AuthTokenResponse {
   sessionId: string;
   /** Populated for mobile clients (X-Device-Type: ANDROID|IOS); null for web. */
-  sessionToken: string | null;
-  tokenType: 'Bearer';
-  expiresAt: string;
+  bearerToken: string | null;
+  sessionExpiresAt: string;
   refreshToken: string;
-  refreshExpiresAt: string;
-  accessToken?: string;
+  refreshTokenExpiresAt: string;
 }
 
 export interface AuthContextResponse {
   defaultStoreGuuid: string | null;
 }
 
-export interface AuthSyncResponse {
-  cursor: string;
-  lastSyncedAt: string | null;
-  deviceId: string | null;
-}
-
 export interface AuthOfflineResponse {
   token: string;
-  sessionSignature?: string;
+  sessionSignature: string;
 }
 
 /** @deprecated Renamed to AuthTokenResponse — update imports */
@@ -123,7 +124,6 @@ export interface AuthResponse {
   user: AuthUserResponse;
   auth: AuthTokenResponse;
   context: AuthContextResponse;
-  sync: AuthSyncResponse;
   offline: AuthOfflineResponse | null;
 }
 

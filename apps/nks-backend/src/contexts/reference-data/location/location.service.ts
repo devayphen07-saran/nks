@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { LocationRepository } from './repositories/location.repository';
 import { LocationMapper } from './location.mapper';
 import type { StateResponse, DistrictResponse, PincodeResponse } from './dto/location-response.dto';
@@ -6,15 +6,31 @@ import { LocationValidator } from './validators';
 import { paginated } from '../../../common/utils/paginated-result';
 import type { PaginatedResult } from '../../../common/utils/paginated-result';
 
+type ListOpts = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sortBy?: string;
+  sortOrder?: string;
+  isActive?: boolean;
+};
+
 @Injectable()
 export class LocationService {
+  private readonly logger = new Logger(LocationService.name);
+
   constructor(
     private readonly locationRepository: LocationRepository,
   ) {}
 
-  async listStates(search?: string, sortBy = 'name', sortOrder = 'asc', isActive?: boolean): Promise<StateResponse[]> {
-    const rows = await this.locationRepository.getStates(search, sortBy, sortOrder, isActive);
-    return rows.map(LocationMapper.buildStateDto);
+  async listStates(opts: ListOpts): Promise<PaginatedResult<StateResponse>> {
+    const { rows, total } = await this.locationRepository.getStates(opts);
+    return paginated({
+      items: rows.map(LocationMapper.buildStateDto),
+      page: opts.page,
+      pageSize: opts.pageSize,
+      total,
+    });
   }
 
   async getStateByCode(code: string): Promise<StateResponse> {
@@ -25,14 +41,16 @@ export class LocationService {
 
   async listDistrictsByStateCode(
     code: string,
-    search?: string,
-    sortBy = 'name',
-    sortOrder = 'asc',
-    isActive?: boolean,
-  ): Promise<DistrictResponse[]> {
-    const districts = await this.locationRepository.getDistrictsByStateCode(code, search, sortBy, sortOrder, isActive);
-    LocationValidator.assertDistrictsFound(districts);
-    return districts.map(LocationMapper.buildDistrictDto);
+    opts: ListOpts,
+  ): Promise<PaginatedResult<DistrictResponse>> {
+    const result = await this.locationRepository.getDistrictsByStateCode(code, opts);
+    LocationValidator.assertDistrictsFound(result);
+    return paginated({
+      items: result.rows.map(LocationMapper.buildDistrictDto),
+      page: opts.page,
+      pageSize: opts.pageSize,
+      total: result.total,
+    });
   }
 
   async listPincodes(

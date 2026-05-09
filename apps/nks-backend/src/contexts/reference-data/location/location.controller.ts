@@ -13,7 +13,7 @@ import {
   PincodeParamDto,
   DistrictGuuidParamDto,
 } from './dto';
-import type { PaginatedResult } from '../../../common/utils/paginated-result';
+import { PaginatedResult } from '../../../common/utils/paginated-result';
 
 @ApiTags('Location')
 @Controller('location')
@@ -26,8 +26,8 @@ export class LocationController {
   @ApiOperation({ summary: 'List all states' })
   async getStates(
     @Query() query: LocationSearchQueryDto,
-  ): Promise<StateResponse[]> {
-    return this.locationService.listStates(query.search, query.sortBy, query.sortOrder, query.isActive);
+  ): Promise<PaginatedResult<StateResponse>> {
+    return this.locationService.listStates(query);
   }
 
   @Get('states/code/:code')
@@ -47,14 +47,8 @@ export class LocationController {
   async getDistrictsByState(
     @Param() params: StateCodeParamDto,
     @Query() query: LocationSearchQueryDto,
-  ): Promise<DistrictResponse[]> {
-    return this.locationService.listDistrictsByStateCode(
-      params.code,
-      query.search,
-      query.sortBy,
-      query.sortOrder,
-      query.isActive,
-    );
+  ): Promise<PaginatedResult<DistrictResponse>> {
+    return this.locationService.listDistrictsByStateCode(params.code, query);
   }
 
   @Get('districts/:districtGuuid/pincodes')

@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import { createZodDto } from 'nestjs-zod';
-import { paginationSchema } from '../../../../../common/dto/pagination.schema';
+import { paginationSchema, pageSizeColumn } from '../../../../../common/dto/pagination.schema';
 
 // pageSize max 500 (audit logs can be large); no search — uses typed filters instead
 export const AuditListQuerySchema = paginationSchema.extend({
-  pageSize:   z.coerce.number().int().min(1).max(500).default(50),
+  pageSize:   pageSizeColumn({ max: 500, default: 50 }),
   userGuuid:  z.string().uuid().optional(),
   storeGuuid: z.string().uuid().optional(),
   action:     z.string().min(1).optional(),

@@ -1,4 +1,4 @@
-import { pgTable, bigint, boolean, check, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, bigint, boolean, unique, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { roles } from '../roles';
 import { entityType } from '../../lookups/entity-type';
@@ -8,7 +8,6 @@ import { coreEntity } from '../../base.entity';
  * Role Permissions — one wide row per (role, entity).
  *
  * Boolean columns:
- *   allow      — master access grant for the entity
  *   can_view   — read permission
  *   can_create — create permission
  *   can_edit   — update permission
@@ -16,10 +15,15 @@ import { coreEntity } from '../../base.entity';
  *
  * Deny semantics:
  *   deny = true → hard block; all grants for that entity are suppressed
- *   regardless of other roles. deny overrides allow.
+ *   regardless of other roles. deny is set-membership absolute, not a weight.
  *
  * Merge rule across multiple roles: OR for grants (any role granting = granted),
- * OR for deny (any role denying = denied — deny overrides).
+ * OR for deny (any role denying = denied — deny overrides every grant).
+ *
+ * NOTE: a previous `allow` column was dropped in migration 0016 — it was
+ * derived as `!deny` on write and never read. Do not reintroduce it; if a
+ * "master grant" semantic is ever needed, add it explicitly to the merge
+ * logic in PermissionsRepository.mergePermissions.
  */
 export const rolePermissions = pgTable(
   'role_permissions',
@@ -34,7 +38,6 @@ export const rolePermissions = pgTable(
       .notNull()
       .references(() => entityType.id, { onDelete: 'restrict' }),
 
-    allow:     boolean('allow').notNull().default(false),
     canView:   boolean('can_view').notNull().default(false),
     canCreate: boolean('can_create').notNull().default(false),
     canEdit:   boolean('can_edit').notNull().default(false),
@@ -49,7 +52,6 @@ export const rolePermissions = pgTable(
     index('role_permissions_role_entity_idx')
       .on(table.roleFk, table.entityTypeFk)
       .where(sql`is_active = true AND deleted_at IS NULL`),
-    check('role_permissions_no_allow_deny_conflict', sql`NOT (allow = true AND deny = true)`),
   ],
 );
 

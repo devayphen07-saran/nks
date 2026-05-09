@@ -4,6 +4,7 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { AuthController } from './controllers/auth.controller';
 import { OtpController } from './controllers/otp.controller';
 import { RolesModule } from '../roles/roles.module';
+import { RateLimitingModule } from '../../../common/guards/rate-limiting.module';
 
 // Sub-modules
 import { OtpModule } from './modules/otp.module';
@@ -14,6 +15,7 @@ import { TokenModule } from './modules/token.module';
 import { AuthUsersRepository } from './repositories/auth-users.repository';
 import { AuthProviderRepository } from './repositories/auth-provider.repository';
 import { PermissionsChangelogRepository } from './repositories/permissions-changelog.repository';
+import { DevicesRepository } from './repositories/devices.repository';
 
 // Shared / infrastructure
 import { AuthUtilsService } from './services/shared/auth-utils.service';
@@ -25,6 +27,7 @@ import * as schema from '../../../core/database/schema';
 
 // Security
 import { PasswordService } from './services/security/password.service';
+import { PasswordBreachCheckService } from './services/security/password-breach-check.service';
 import { KeyRotationAlertService } from './services/security/key-rotation-alert.service';
 import { KeyRotationScheduler } from './services/security/key-rotation-scheduler';
 
@@ -37,13 +40,12 @@ import { AuthPolicyService } from './services/guard/auth-policy.service';
 
 // Session-layer services (live here because they need AuthUsersRepository)
 import { SessionBootstrapService } from './services/session/session-bootstrap.service';
-import { AuthCommandService } from './services/session/auth-command.service';
 import { AuthQueryService } from './services/session/auth-query.service';
 import { AuthContextService } from './services/session/auth-context.service';
 
 // Token services (live here because they need JWTConfigService / AuthUtilsService)
 import { TokenService } from './services/token/token.service';
-import { TokenPairGeneratorService } from './services/token/token-pair-generator.service';
+import { OfflineTokenService } from './services/token/offline-token.service';
 import { TokenLifecycleService } from './services/token/token-lifecycle.service';
 
 // OTP services (live here because they need AuthUsersRepository / AuthProviderRepository)
@@ -58,11 +60,9 @@ import { InitialRoleAssignmentService } from './services/flows/initial-role-assi
 import { OnboardingService } from './services/flows/onboarding.service';
 import { UserCreationService } from './services/flows/user-creation.service';
 
-// Use cases (Application layer — Controller → UseCase → Service)
-import { AuthFlowUseCase } from './use-cases/auth-flow.use-case';
-import { SessionManagementUseCase } from './use-cases/session-management.use-case';
-import { UserOnboardingUseCase } from './use-cases/user-onboarding.use-case';
-import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case';
+// Device registration
+import { DeviceRegistrationService } from './services/device/device-registration.service';
+import { DeviceRegistrationFlowService } from './services/device/device-registration-flow.service';
 
 /**
  * AuthModule — modular auth implementation with sub-modules for OTP, Session, Token.
@@ -74,26 +74,20 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
  *
  * AuditService is injected without an import because AuditModule is @Global().
  *
- * RoutesModule is intentionally NOT imported here — routes access is handled
- * independently in AppModule.
- *
  * Sub-modules:
  *   - OtpModule: OTP generation, delivery, rate limiting
  *   - SessionModule: Session CRUD, token rotation, revocation
- *   - TokenModule: Token pair generation, JTI blocklist
- *
- * Refactoring:
- *   - Providers: 44 → ~25 (sub-modules encapsulate 20+ services)
- *   - SessionsRepository (768 lines) → 4 focused repos in SessionModule
+ *   - TokenModule: Token theft detection
  */
 @Module({
-  imports: [OtpModule, SessionModule, TokenModule, RolesModule],
+  imports: [OtpModule, SessionModule, TokenModule, RolesModule, RateLimitingModule],
   controllers: [OtpController, AuthController],
   providers: [
     // Infrastructure & configuration
     AuthUsersRepository,
     AuthProviderRepository,
     PermissionsChangelogRepository,
+    DevicesRepository,
     AuthUtilsService,
     JWTConfigService,
     {
@@ -110,6 +104,7 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
 
     // Security
     PasswordService,
+    PasswordBreachCheckService,
     KeyRotationAlertService,
     KeyRotationScheduler,
 
@@ -122,13 +117,12 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
 
     // Session-layer services (need AuthUsersRepository — must live in AuthModule)
     SessionBootstrapService,
-    AuthCommandService,
     AuthQueryService,
     AuthContextService,
 
     // Token services (need JWTConfigService / AuthUtilsService — must live in AuthModule)
     TokenService,
-    TokenPairGeneratorService,
+    OfflineTokenService,
     TokenLifecycleService,
 
     // OTP services (need AuthUsersRepository / AuthProviderRepository — must live in AuthModule)
@@ -143,23 +137,16 @@ import { PermissionsQueryUseCase } from './use-cases/permissions-query.use-case'
     OnboardingService,
     UserCreationService,
 
-    // Use cases
-    AuthFlowUseCase,
-    SessionManagementUseCase,
-    UserOnboardingUseCase,
-    PermissionsQueryUseCase,
+    // Device registration
+    DeviceRegistrationService,
+    DeviceRegistrationFlowService,
   ],
   exports: [
-    // Only export what external modules explicitly inject.
     JWTConfigService,
-    // SessionModule exports these for external consumers.
     SessionModule,
-    // GuardsModule (common/guards) injects AuthGuard's dependencies.
     UserContextLoaderService,
     AuthPolicyService,
-    // Used by guards/interceptors (session-validator, session-rotation).
     AuthContextService,
-    AuthCommandService,
     AuthQueryService,
     // UsersModule injects this for admin user management queries.
     AuthUsersRepository,

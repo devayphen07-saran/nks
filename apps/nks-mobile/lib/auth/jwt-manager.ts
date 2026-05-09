@@ -165,18 +165,16 @@ export const JWTManager = {
    * Persists all three tokens to SecureStore and updates in-memory state.
    */
   async persistTokens(tokens: {
-    accessToken: string;
     offlineToken: string;
     refreshToken: string;
   }): Promise<void> {
     await Promise.all([
-      SecureStore.setItemAsync(STORAGE_KEYS.JWT_ACCESS_TOKEN, tokens.accessToken),
       SecureStore.setItemAsync(STORAGE_KEYS.JWT_OFFLINE_TOKEN, tokens.offlineToken),
       SecureStore.setItemAsync(STORAGE_KEYS.JWT_REFRESH_TOKEN, tokens.refreshToken),
     ]);
 
     _tokens = {
-      accessToken: tokens.accessToken,
+      accessToken: null,
       offlineToken: tokens.offlineToken,
       refreshToken: tokens.refreshToken,
     };

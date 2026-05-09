@@ -1,14 +1,31 @@
-import React from "react";
+import React, { useState } from "react";
 import styled from "styled-components/native";
 import { Column, Typography, LucideIcon, Header } from "@nks/mobile-ui-components";
 import { useMobileTheme } from "@nks/mobile-theme";
+import { SyncIndicator } from "../../../../components/sync";
+import { DebugDatabaseScreen } from "@/features/debug/DebugDatabaseScreen";
 
 export default function PosScreen() {
   const { theme } = useMobileTheme();
+  const [showDebug, setShowDebug] = useState(false);
 
   return (
     <Container>
-      <Header title="POS" />
+      <Header
+        title="POS"
+        rightElement={
+          <StatusGroup>
+            <SyncIndicator />
+            <DebugButton onPress={() => setShowDebug(true)}>
+              <LucideIcon
+                name="Database"
+                size={20}
+                color={theme.colorTextSecondary}
+              />
+            </DebugButton>
+          </StatusGroup>
+        }
+      />
       <Content>
         <PlaceholderCard gap="medium" align="center">
           <LucideIcon name="ScanBarcode" size={48} color={theme.colorTextSecondary} />
@@ -18,6 +35,11 @@ export default function PosScreen() {
           </Column>
         </PlaceholderCard>
       </Content>
+
+      <DebugDatabaseScreen
+        visible={showDebug}
+        onClose={() => setShowDebug(false)}
+      />
     </Container>
   );
 }
@@ -38,4 +60,14 @@ const PlaceholderCard = styled(Column)`
   padding: ${({ theme }) => theme.sizing.xxLarge}px;
   border-width: 1px;
   border-color: ${({ theme }) => theme.colorBorderSecondary};
+`;
+
+const StatusGroup = styled.View`
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+`;
+
+const DebugButton = styled.TouchableOpacity`
+  padding: 8px;
 `;

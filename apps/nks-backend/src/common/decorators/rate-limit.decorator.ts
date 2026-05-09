@@ -8,7 +8,7 @@ export const SKIP_RATE_LIMIT_KEY = 'skip_rate_limit';
  *
  * @param max Maximum requests allowed within the 15-minute window.
  *   Authenticated requests: counted per user.
- *   Anonymous requests: counted per IP + route template.
+ *   Anonymous requests: counted per IP + handler.
  *
  * @example
  * @RateLimit(10)   // login — 10 attempts per 15 min per IP

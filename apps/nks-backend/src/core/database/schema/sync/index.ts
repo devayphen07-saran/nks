@@ -1,3 +1,2 @@
-export * from './idempotency-log.table';
-export * from './idempotency-log.relations';
+export * from './processed-operations.table';
 export * from './sync-columns';

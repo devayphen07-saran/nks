@@ -109,3 +109,9 @@ export const PROFILE_COMPLETE: APIData = new APIData(
   "auth/profile-complete",
   APIMethod.POST
 );
+
+// 19. Switch the session's active store (and atomically register the device for it)
+export const SWITCH_STORE: APIData = new APIData(
+  "auth/switch-store",
+  APIMethod.POST
+);

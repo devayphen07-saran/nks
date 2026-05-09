@@ -5,8 +5,10 @@ import {
   SESSION_STALE_MS,
   migrateUserToSecureStore,
 } from "@nks/mobile-utils";
-import { jwtDecode } from "jwt-decode";
-import { offlineSession } from "../lib/auth/offline-session";
+import {
+  offlineSession,
+  createOfflineSessionFromAuth,
+} from "../lib/auth/offline-session";
 import { getServerAdjustedNow } from "../lib/utils/server-time";
 import { setCredentials, logout } from "./auth-slice";
 import { refreshSession } from "./refresh-session";
@@ -68,17 +70,17 @@ export const initializeAuth = createAsyncThunk<
     log.info("Session validation passed");
 
     // Check that the refresh token has not expired (7-day TTL).
-    // auth.expiresAt is the access-token TTL (15 min) and is overwritten on every
-    // refresh — using it here would log the user out on every cold start >15 min
-    // after the last proactive refresh. The session is only truly dead when the
-    // refresh token expires; at that point we cannot re-issue any new credentials.
-    const refreshExpiresAt = envelope.data.auth.refreshExpiresAt;
-    if (refreshExpiresAt) {
-      const expiryTime = new Date(refreshExpiresAt).getTime();
+    // auth.sessionExpiresAt is the bearer session TTL and is overwritten on every
+    // refresh — using it here would log the user out on every cold start after
+    // session expiry. The session is only truly dead when the refresh token expires;
+    // at that point we cannot re-issue any new credentials.
+    const refreshTokenExpiresAt = envelope.data.auth.refreshTokenExpiresAt;
+    if (refreshTokenExpiresAt) {
+      const expiryTime = new Date(refreshTokenExpiresAt).getTime();
       const now = await getServerAdjustedNow();
       if (expiryTime < now) {
         log.warn("Refresh token has expired — session cannot be renewed", {
-          refreshExpiresAt,
+          refreshTokenExpiresAt,
           now: new Date(now).toISOString(),
         });
         await clearAuthState(dispatch, logout);
@@ -87,14 +89,14 @@ export const initializeAuth = createAsyncThunk<
     }
 
     // Validate token format one more time
-    const sessionToken = envelope.data.auth.sessionToken;
-    if (!sessionToken || !sessionTokenReg.test(sessionToken)) {
-      log.error("Session token missing or format invalid, clearing session");
+    const bearerToken = envelope.data.auth.bearerToken;
+    if (!bearerToken || !sessionTokenReg.test(bearerToken)) {
+      log.error("Bearer token missing or format invalid, clearing session");
       await clearAuthState(dispatch, logout);
       return;
     }
 
-    tokenManager.set(sessionToken);
+    tokenManager.set(bearerToken, envelope.data.auth.sessionId);
     log.info("In-memory token restored");
 
     dispatch(setCredentials(envelope.data));
@@ -137,31 +139,12 @@ export const initializeAuth = createAsyncThunk<
           });
         }
       } else {
-        // Upgrade path: previous app versions never created an offline session at login.
-        // Attempt to rebuild from the stored auth response so offline POS works immediately
-        // without requiring the user to log out and back in.
-        const offlineToken = envelope.data.offline?.token;
-        const userGuuid = envelope.data.user?.guuid;
-        if (offlineToken && userGuuid) {
-          let roles: string[] = [];
-          try {
-            roles = jwtDecode<{ roles?: string[] }>(offlineToken).roles ?? [];
-          } catch {
-            /* empty roles accepted — will sync on next token refresh */
-          }
-
-          await offlineSession.create({
-            userGuuid,
-            storeGuuid: envelope.data.context?.defaultStoreGuuid ?? null,
-            storeName: "",
-            roles,
-            offlineToken,
-            signature: envelope.data.offline?.sessionSignature,
-            deviceId: envelope.data.sync?.deviceId ?? undefined,
-          });
-          log.info(
-            "OfflineSession rebuilt from stored auth response (upgrade path)",
-          );
+        // Upgrade path: previous app versions never created an offline session
+        // at login. Rebuild from the stored auth response so offline POS works
+        // immediately without forcing the user to log out and back in.
+        const rebuilt = await createOfflineSessionFromAuth(envelope.data);
+        if (rebuilt) {
+          log.info("OfflineSession rebuilt from stored auth response (upgrade path)");
         }
       }
     } catch (error) {

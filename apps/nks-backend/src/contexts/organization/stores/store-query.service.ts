@@ -1,6 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { StoresRepository } from './repositories/stores.repository';
-import { StoresMapper, type StoreDto } from './mapper/stores.mapper';
+import {
+  StoresMapper,
+  type StoreDto,
+  type BuildStoreDtoInput,
+} from './mapper/stores.mapper';
+import { EntityRegistryService } from '../../reference-data/entities';
+import { EntityNames } from '../../../common/constants/entity-names.constants';
 
 /**
  * StoreQueryService — read-only surface for stores.
@@ -10,13 +16,50 @@ import { StoresMapper, type StoreDto } from './mapper/stores.mapper';
  */
 @Injectable()
 export class StoreQueryService {
-  constructor(private readonly storesRepository: StoresRepository) {}
+  private readonly logger = new Logger(StoreQueryService.name);
 
-  async getMyStores(userId: number): Promise<{ myStores: StoreDto[]; invitedStores: StoreDto[] }> {
+  constructor(
+    private readonly storesRepository: StoresRepository,
+    private readonly entityRegistry: EntityRegistryService,
+  ) {}
+
+  async getMyStores(
+    userId: number,
+  ): Promise<{ myStores: StoreDto[]; invitedStores: StoreDto[] }> {
     const rows = await this.storesRepository.getStoresForUser(userId);
+    if (rows.length === 0) {
+      return { myStores: [], invitedStores: [] };
+    }
+
+    // Resolve `entity.id` for the polymorphic owner type once per call.
+    // The id is cached in EntityRegistryService — no DB hit on the hot path.
+    const storeEntityId = this.entityRegistry.getIdOrThrow(EntityNames.STORE);
+    const storeIds = rows.map((r) => r.id);
+
+    // Two batched queries — one for phone, one for address — across all stores.
+    // Avoids N+1 from looping per store.
+    const [phones, addresses] = await Promise.all([
+      this.storesRepository.getPrimaryPhonesForRecords(storeEntityId, storeIds),
+      this.storesRepository.getPrimaryAddressesForRecords(storeEntityId, storeIds),
+    ]);
+
+    const phoneByStoreId = new Map(
+      phones.map((p) => [p.recordId, p.phoneNumber]),
+    );
+    const addressByStoreId = new Map(addresses.map((a) => [a.recordId, a]));
+
+    const dtos = rows.map<StoreDto>((row) => {
+      const input: BuildStoreDtoInput = {
+        row,
+        address: addressByStoreId.get(row.id) ?? null,
+        phone:   phoneByStoreId.get(row.id) ?? null,
+      };
+      return StoresMapper.buildStoreDto(input);
+    });
+
     return {
-      myStores: rows.filter((r) => r.isOwner).map(StoresMapper.buildStoreDto),
-      invitedStores: rows.filter((r) => !r.isOwner).map(StoresMapper.buildStoreDto),
+      myStores:      dtos.filter((d) => d.isOwner),
+      invitedStores: dtos.filter((d) => !d.isOwner),
     };
   }
 
@@ -37,6 +80,52 @@ export class StoreQueryService {
    */
   isStoreOwner(userId: number, storeId: number): Promise<boolean> {
     return this.storesRepository.isOwner(userId, storeId);
+  }
+
+  /**
+   * Resolve a single store by guuid for a given user, batching the primary
+   * phone + address lookups. Returns null if the store doesn't exist or the
+   * user is not a member — callers MUST treat both cases identically (a
+   * 404 vs 403 leak would let a caller probe ids across tenants).
+   *
+   * Exposed so cross-context consumers (e.g. iam/roles StoreConfigService)
+   * can read store context without reaching into StoresRepository directly.
+   */
+  async getStoreContextForUser(
+    userId: number,
+    storeGuuid: string,
+  ): Promise<{
+    row: {
+      id: number;
+      guuid: string;
+      storeName: string;
+      timezone: string;
+      isDefault: boolean;
+    };
+    phone: string | null;
+    address: { line1: string | null; line2: string | null; cityName: string | null } | null;
+  } | null> {
+    const rows = await this.storesRepository.getStoresForUser(userId);
+    const row = rows.find((r) => r.guuid === storeGuuid);
+    if (!row) return null;
+
+    const storeEntityId = this.entityRegistry.getIdOrThrow(EntityNames.STORE);
+    const [phones, addresses] = await Promise.all([
+      this.storesRepository.getPrimaryPhonesForRecords(storeEntityId, [row.id]),
+      this.storesRepository.getPrimaryAddressesForRecords(storeEntityId, [row.id]),
+    ]);
+
+    return {
+      row: {
+        id:        row.id,
+        guuid:     row.guuid,
+        storeName: row.storeName,
+        timezone:  row.timezone,
+        isDefault: row.isDefault,
+      },
+      phone:   phones[0]?.phoneNumber ?? null,
+      address: addresses[0] ?? null,
+    };
   }
 
   /**

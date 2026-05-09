@@ -40,14 +40,15 @@ export * from './plans';
 // Audit
 export * from './audit-log';
 
-// Sync (idempotency log, offline sync support)
+// Sync (idempotency cache + reusable sync columns helper)
 export * from './sync';
+
+// Devices (per-user-per-store device registration for /sync/* auth)
+export * from './devices';
 
 // Standalone
 export * from './user-preferences';
 export * from './system-config';
 export * from './files';
 export * from './rate-limit-entries';
-export * from './jti-blocklist';
 export * from './permissions-changelog';
-export * from './revoked-devices';

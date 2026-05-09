@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { eq, and, isNotNull, isNull, gt, lt, or, sql, inArray, asc, desc, notInArray } from 'drizzle-orm';
+import { eq, and, isNull, gt, lt, or, sql, inArray, asc, desc, notInArray } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
 import { BaseRepository } from '../../../../core/database/base.repository';
@@ -23,16 +23,17 @@ export class SessionContextRepository extends BaseRepository {
   ) { super(db); }
 
   /**
-   * Single-query auth context: session + JTI check + user + roles in one round trip
+   * Single-query auth context: session + user + roles in one round trip.
    *
-   * Returns multiple rows (one per role assignment). Caller deduplicates:
-   *   - session + user + revokedJti  → first row
-   *   - roles                        → collect from all rows
+   * Revocation is detected by the WHERE clause (`refreshTokenRevokedAt IS NULL`):
+   * a revoked session simply isn't returned.
+   *
+   * Returns multiple rows (one per role assignment); caller deduplicates session +
+   * user from the first row and collects roles from all rows.
    */
   async findSessionAuthContext(token: string): Promise<{
     session: UserSession | null;
     user: typeof schema.users.$inferSelect | null;
-    revokedJti: string | null;
     roles: Array<{
       roleId: number;
       roleCode: string;
@@ -48,7 +49,6 @@ export class SessionContextRepository extends BaseRepository {
       .select({
         session: schema.userSession,
         user: schema.users,
-        revokedJti: schema.jtiBlocklist.jti,
         roleId: userRoleMapping.roleFk,
         roleCode: schema.roles.code,
         storeFk: userRoleMapping.storeFk,
@@ -59,14 +59,6 @@ export class SessionContextRepository extends BaseRepository {
         expiresAt: userRoleMapping.expiresAt,
       })
       .from(schema.userSession)
-      .leftJoin(
-        schema.jtiBlocklist,
-        and(
-          isNotNull(schema.userSession.jti),
-          eq(schema.jtiBlocklist.jti, schema.userSession.jti),
-          gt(schema.jtiBlocklist.expiresAt, new Date()),
-        ),
-      )
       .innerJoin(
         schema.users,
         and(
@@ -103,13 +95,12 @@ export class SessionContextRepository extends BaseRepository {
       );
 
     if (rows.length === 0) {
-      return { session: null, user: null, revokedJti: null, roles: [] };
+      return { session: null, user: null, roles: [] };
     }
 
     const first = rows[0];
     const session = first.session;
     const user = first.user;
-    const revokedJti = first.revokedJti ?? null;
 
     const roles = rows
       .filter((r) => r.roleId != null)
@@ -124,12 +115,17 @@ export class SessionContextRepository extends BaseRepository {
         expiresAt: r.expiresAt ?? null,
       }));
 
-    return { session, user, revokedJti, roles };
+    return { session, user, roles };
   }
 
   /**
-   * Atomic session limit enforcement + insert in a single transaction
-   * Eliminates TOCTOU race where two concurrent logins both see "N sessions"
+   * Insert a session and prune the user's row count back to `maxAllowed`.
+   *
+   * Lock-free: previous implementation used pg_advisory_xact_lock(userId) which
+   * serialised every login per-user — a bottleneck for a control whose brief
+   * overshoot is harmless. Concurrent inserts can transiently exceed the cap
+   * because READ COMMITTED hides uncommitted siblings; SessionCleanupService
+   * runs a sweep to converge any residue.
    */
   async createWithinLimit(
     userId: number,
@@ -137,57 +133,59 @@ export class SessionContextRepository extends BaseRepository {
     data: NewUserSession,
   ): Promise<UserSession | null> {
     return this.txService.run(async (tx) => {
-      // Serialize concurrent session creation for the same user
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(${userId})`);
-
-      // DELETE all sessions beyond the (maxAllowed - 1) most recent
-      const keepIds = tx
-        .select({ id: schema.userSession.id })
-        .from(schema.userSession)
-        .where(eq(schema.userSession.userId, userId))
-        .orderBy(desc(schema.userSession.createdAt))
-        .limit(maxAllowed - 1);
-
-      await tx
-        .delete(schema.userSession)
-        .where(
-          and(
-            eq(schema.userSession.userId, userId),
-            notInArray(schema.userSession.id, keepIds),
-          ),
-        );
-
       const [session] = await tx
         .insert(schema.userSession)
         .values(data)
         .returning();
 
+      await this.pruneToLimit(tx, userId, maxAllowed);
+
       return session ?? null;
     }, { name: 'SessionContextRepo.createWithinLimit' });
   }
 
+  /** Idempotent: deletes nothing if the user is already at or under the cap. */
+  private async pruneToLimit(
+    tx: Db | Parameters<Parameters<Db['transaction']>[0]>[0],
+    userId: number,
+    maxAllowed: number,
+  ): Promise<void> {
+    const keepIds = tx
+      .select({ id: schema.userSession.id })
+      .from(schema.userSession)
+      .where(eq(schema.userSession.userId, userId))
+      .orderBy(desc(schema.userSession.createdAt))
+      .limit(maxAllowed);
+
+    await tx
+      .delete(schema.userSession)
+      .where(
+        and(
+          eq(schema.userSession.userId, userId),
+          notInArray(schema.userSession.id, keepIds),
+        ),
+      );
+  }
+
   /**
-   * Delete expired sessions in batches
+   * Periodic safety sweep — prunes every user past `maxAllowed` in one pass.
+   * Idempotent. Catches residue left by interleaved commits in createWithinLimit
+   * or by code paths that insert without going through it.
    */
-  async deleteExpired(batchSize = 1000): Promise<number> {
-    let total = 0;
-    while (true) {
-      const ids = this.db
-        .select({ id: schema.userSession.id })
-        .from(schema.userSession)
-        .where(lt(schema.userSession.expiresAt, new Date()))
-        .orderBy(asc(schema.userSession.expiresAt))
-        .limit(batchSize);
-
-      const result = await this.db
-        .delete(schema.userSession)
-        .where(inArray(schema.userSession.id, ids));
-
-      const deleted = result.rowCount ?? 0;
-      total += deleted;
-      if (deleted < batchSize) break;
-    }
-    return total;
+  async enforceSessionLimitGlobally(maxAllowed: number): Promise<number> {
+    const result = await this.db.execute(sql`
+      DELETE FROM user_session
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY user_fk ORDER BY created_at DESC
+          ) AS rn
+          FROM user_session
+        ) ranked
+        WHERE rn > ${maxAllowed}
+      )
+    `);
+    return result.rowCount ?? 0;
   }
 
   /**

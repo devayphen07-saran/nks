@@ -55,7 +55,7 @@ let _deviceHeaders: {
   'X-App-Version': string;
 } | null = null;
 
-async function getDeviceHeaders() {
+export async function getDeviceHeaders() {
   if (_deviceHeaders) return _deviceHeaders;
   try {
     const identity = await getDeviceIdentity();
@@ -68,7 +68,7 @@ async function getDeviceHeaders() {
   } catch {
     // Don't cache on failure — retries next request.
     // X-Device-Type must always be sent; without it the backend treats the
-    // client as web and omits sessionToken from the response, breaking auth.
+    // client as web and omits bearerToken from the response, breaking auth.
     return {
       'X-Device-Type': Platform.OS === 'android' ? 'ANDROID' : 'IOS',
       'X-Device-Id': 'unknown',
@@ -139,7 +139,7 @@ export function setupAxiosInterceptors(
         config.headers.Authorization = `Bearer ${token}`;
       }
       // Device identification — required so backend identifies mobile clients
-      // and returns sessionToken in the body (not null as it does for web).
+      // and returns bearerToken in the body (not null as it does for web).
       const deviceHeaders = await getDeviceHeaders();
       if (deviceHeaders && config.headers) {
         config.headers['X-Device-Type'] = deviceHeaders['X-Device-Type'];

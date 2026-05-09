@@ -7,6 +7,8 @@ import { OtpRepository } from '../../repositories/otp.repository';
 import { MailService } from '../../../../../shared/mail/mail.service';
 import { OTP_EXPIRY_MS } from '../../auth.constants';
 import { OtpValidator } from '../../validators';
+import { InternalServerException } from '../../../../../common/exceptions';
+import { ErrorCode, errPayload } from '../../../../../common/constants/error-codes.constants';
 
 /**
  * OtpDeliveryService — Responsible for delivering OTPs via SMS or email.
@@ -72,7 +74,15 @@ export class OtpDeliveryService {
     OtpValidator.assertMsg91SendSuccess(response);
 
     const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
+    // MSG91 Widget API returns the reqId in `message`, not in a `reqId` field.
+    // e.g. { type: "success", message: "366564664259363734343235" }
     const reqId = response.reqId ?? response.message;
+    if (!reqId) {
+      this.logger.error(
+        `MSG91 sendOtp returned success without reqId/message — OTP would be unverifiable`,
+      );
+      throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
+    }
 
     // Store reqId in OTP record — required for verification to prevent replay
     await this.otpRepository.insertOtpRecord(
@@ -134,6 +144,12 @@ export class OtpDeliveryService {
     const record = await this.otpRepository.findByReqId(reqId);
     OtpValidator.assertOtpFound(record);
 
+    // Count resends against the same per-phone budget as sends. Without this,
+    // an attacker who knows a valid reqId can drive unlimited SMS through
+    // MSG91's resend endpoint (the controller-level @RateLimit is per-IP, not
+    // per-phone).
+    await this.rateLimitService.checkAndRecordRequest(record.identifier);
+
     const response = await this.msg91.resendOtp(reqId);
 
     if (response?.type === 'error') {
@@ -143,11 +159,15 @@ export class OtpDeliveryService {
     }
     OtpValidator.assertMsg91SendSuccess(response);
 
-    // Normalize: MSG91 may return reqId in "message" field
-    return {
-      reqId: response.reqId ?? response.message,
-      mobile: record.identifier,
-    };
+    // MSG91 Widget API puts the reqId in `message` on resend as well.
+    const resentReqId = response.reqId ?? response.message;
+    if (!resentReqId) {
+      this.logger.error(
+        `MSG91 resendOtp returned success without reqId/message for reqId ${reqId}`,
+      );
+      throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
+    }
+    return { reqId: resentReqId, mobile: record.identifier };
   }
 
   // ─── Private Helpers ───────────────────────────────────────────────────────

@@ -26,12 +26,8 @@ export const otpRequestLog = pgTable(
       withTimezone: true,
     }).notNull(),
 
-    // lastAttemptAt — timestamp of most recent OTP request (for exponential backoff)
+    // lastAttemptAt — timestamp of most recent OTP request
     lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
-
-    // consecutiveFailures — count of failed OTP verifications (for exponential backoff)
-    // Resets to 0 on successful verification or window expiry
-    consecutiveFailures: smallint('consecutive_failures').notNull().default(0),
 
     // expiresAt — row-level TTL for hard-delete cleanup (24h from last window reset)
     // Distinct from windowExpiresAt (which tracks the 1h rate-limit window).

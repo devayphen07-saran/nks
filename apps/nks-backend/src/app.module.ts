@@ -24,10 +24,11 @@ import { LookupsModule } from './contexts/reference-data/lookups/lookups.module'
 import { StatusModule } from './contexts/reference-data/status/status.module';
 import { EntityStatusModule } from './contexts/reference-data/entity-status/entity-status.module';
 import { AuditModule } from './contexts/compliance/audit/audit.module';
-import { SyncModule } from './contexts/sync/sync.module';
 import { PermissionsChangelogModule } from './shared/permissions-changelog/permissions-changelog.module';
 import { LoggerModule } from './core/logger/logger.module';
 import { HealthModule } from './core/health/health.module';
+import { ArchivalModule } from './common/archival';
+import { SyncModule } from './contexts/sync/sync.module';
 
 /**
  * Module dependency graph (acyclic — arrows show "imports"):
@@ -45,12 +46,10 @@ import { HealthModule } from './core/health/health.module';
  *     ├── RoutesModule          → DatabaseModule
  *     ├── UsersModule           → DatabaseModule
  *     ├── StoresModule          → DatabaseModule
- *     ├── SyncModule            → AuthModule (for guards)
  *     └── Reference-data modules (Location, Lookups, Codes, Status, EntityStatus)
  *           → DatabaseModule only
  *
  * CONSTRAINT: RolesModule, StoresModule must NEVER import AuthModule (circular).
- * CONSTRAINT: AuthModule must NEVER import SyncModule (circular).
  */
 @Module({
   imports: [
@@ -62,6 +61,14 @@ import { HealthModule } from './core/health/health.module';
     GuardsModule,
     RateLimitingModule,
     LoggerModule,
+    /**
+     * Archival opt-in. No targets registered by default — adding one is a
+     * deliberate decision (FK constraints, sync TTL, legal hold). See
+     * archival-target.ts for the checklist before you push a target here.
+     * Master switch: ARCHIVAL_ENABLED=true.
+     */
+    ArchivalModule.forRoot([]),
+    SyncModule.forRoot([]),
     AuditModule,
     PermissionsChangelogModule,
     AuthModule,
@@ -72,7 +79,6 @@ import { HealthModule } from './core/health/health.module';
     UsersModule,
     StatusModule,
     EntityStatusModule,
-    SyncModule,
     StoresModule,
   ],
   controllers: [],

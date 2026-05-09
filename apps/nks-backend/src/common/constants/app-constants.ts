@@ -2,6 +2,15 @@
 // AUTH & SESSION CONFIGURATION
 // ============================================================================
 
+import { getValidatedEnv } from '../../config/env.validation';
+
+// Resolved at module evaluation time, but routed through the validated zod
+// schema rather than reading process.env directly. validateEnv() runs first
+// in main.ts; in test contexts that import these constants without bootstrapping
+// the app, getValidatedEnv() falls back to a one-shot parse so the test still
+// gets a typed, defaulted value (CSRF_SAME_SITE → 'strict', NODE_ENV → 'development').
+const _env = getValidatedEnv();
+
 export const AUTH_CONSTANTS = {
   // Session Configuration
   // Note: JWT TTLs and algorithm live in auth.constants.ts (ACCESS_TOKEN_TTL_MS etc.)
@@ -11,12 +20,12 @@ export const AUTH_CONSTANTS = {
     EXPIRY_SECONDS: 60 * 60 * 24 * 30,
     UPDATE_AGE_SECONDS: 60 * 60 * 24, // BetterAuth compat: refresh if older than 1 day
     COOKIE_NAME: 'nks_session',
-    COOKIE_SECURE: process.env['NODE_ENV'] === 'production',
+    COOKIE_SECURE: _env.NODE_ENV === 'production',
     // SameSite strategy:
     //   'strict' — same-domain deployments (default, most secure)
     //   'lax'    — cross-site top-level navigations (OAuth callbacks, email links)
     //   'none'   — cross-domain API (forces Secure=true regardless of NODE_ENV)
-    COOKIE_SAME_SITE: (process.env['CSRF_SAME_SITE'] ?? 'strict') as 'strict' | 'lax' | 'none',
+    COOKIE_SAME_SITE: _env.CSRF_SAME_SITE,
     COOKIE_HTTP_ONLY: true,
     COOKIE_PATH: '/',
     MAX_PER_USER: 5,

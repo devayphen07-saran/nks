@@ -21,10 +21,6 @@ export class AccountSecurityPolicy {
     return lockedUntil !== null && lockedUntil > new Date();
   }
 
-  static isLockExpired(lockedUntil: Date | null): boolean {
-    return lockedUntil !== null && lockedUntil <= new Date();
-  }
-
   static lockoutExpiry(): Date {
     return new Date(Date.now() + AUTH_CONSTANTS.ACCOUNT_SECURITY.ACCOUNT_LOCKOUT_MS);
   }

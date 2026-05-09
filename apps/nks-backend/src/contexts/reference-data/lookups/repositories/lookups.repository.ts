@@ -1,10 +1,10 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { eq, and, isNull, count, asc, desc, sql } from 'drizzle-orm';
 import type { AnyColumn } from 'drizzle-orm/column';
 import { ilikeAny } from '../../../../core/database/query-helpers';
 import { InjectDb } from '../../../../core/database/inject-db.decorator';
-import { BaseRepository } from '../../../../core/database/base.repository';
+import { SyncBaseRepository } from '../../../../core/database/sync-base.repository';
 import * as schema from '../../../../core/database/schema';
 import { lookup } from '../../../../core/database/schema/lookups/lookup/lookup.table';
 import { lookupType } from '../../../../core/database/schema/lookups/lookup-type/lookup-type.table';
@@ -29,14 +29,14 @@ type StandardLookupTable =
   | typeof schema.addressType;
 
 const STANDARD_LOOKUP_TABLES: Partial<Record<string, StandardLookupTable>> = {
-  [LookupTypeCodes.BILLING_FREQUENCY]:    schema.billingFrequency,
-  [LookupTypeCodes.COMMUNICATION_TYPE]:   schema.communicationType,
-  [LookupTypeCodes.DESIGNATION_TYPE]:     schema.designationType,
-  [LookupTypeCodes.ENTITY_TYPE]:          schema.entityType,
-  [LookupTypeCodes.NOTIFICATION_STATUS]:  schema.notificationStatus,
-  [LookupTypeCodes.STAFF_INVITE_STATUS]:  schema.staffInviteStatus,
+  [LookupTypeCodes.BILLING_FREQUENCY]: schema.billingFrequency,
+  [LookupTypeCodes.COMMUNICATION_TYPE]: schema.communicationType,
+  [LookupTypeCodes.DESIGNATION_TYPE]: schema.designationType,
+  [LookupTypeCodes.ENTITY_TYPE]: schema.entityType,
+  [LookupTypeCodes.NOTIFICATION_STATUS]: schema.notificationStatus,
+  [LookupTypeCodes.STAFF_INVITE_STATUS]: schema.staffInviteStatus,
   [LookupTypeCodes.TAX_FILING_FREQUENCY]: schema.taxFilingFrequency,
-  [LookupTypeCodes.ADDRESS_TYPE]:         schema.addressType,
+  [LookupTypeCodes.ADDRESS_TYPE]: schema.addressType,
 };
 
 // ─── Row Types ──────────────────────────────────────────────────────────────
@@ -59,10 +59,21 @@ type CountryRow = typeof schema.country.$inferSelect;
 type CommunicationTypeRow = typeof schema.communicationType.$inferSelect;
 type CurrencyRow = typeof currency.$inferSelect;
 type VolumesRow = typeof schema.volumes.$inferSelect;
-type LookupTypeWithCount = { code: string; title: string; isSystem: boolean; sortOrder: number | null; valueCount: number };
+type LookupTypeWithCount = {
+  code: string;
+  title: string;
+  isSystem: boolean;
+  sortOrder: number | null;
+  valueCount: number;
+};
 
 /** Minimal lookup_type row used for routing decisions (has_table) and validation. */
-export type LookupTypeRef = { id: number; code: string; title: string; hasTable: boolean };
+export type LookupTypeRef = {
+  id: number;
+  code: string;
+  title: string;
+  hasTable: boolean;
+};
 
 type FindOpts = {
   page: number;
@@ -89,11 +100,16 @@ const lookupValueSelect = {
 };
 
 @Injectable()
-export class LookupsRepository extends BaseRepository {
-  constructor(@InjectDb() db: NodePgDatabase<typeof schema>) { super(db); }
+export class LookupsRepository extends SyncBaseRepository {
+  constructor(@InjectDb() db: NodePgDatabase<typeof schema>) {
+    super(db);
+  }
 
   /** Generic — fetch all active, visible global values for a lookup type code */
-  async getValuesByType(typeCode: string, limit = DEFAULT_LOOKUP_PAGE_SIZE): Promise<LookupValueRow[]> {
+  async getValuesByType(
+    typeCode: string,
+    limit = DEFAULT_LOOKUP_PAGE_SIZE,
+  ): Promise<LookupValueRow[]> {
     return this.db
       .select(lookupValueSelect)
       .from(lookup)
@@ -167,19 +183,59 @@ export class LookupsRepository extends BaseRepository {
       .orderBy(schema.volumes.sortOrder);
   }
 
-  async getAddressTypesFromTable(): Promise<{ id: number; guuid: string; code: string; label: string; description: string | null }[]> {
+  async getAddressTypesFromTable(): Promise<
+    {
+      id: number;
+      guuid: string;
+      code: string;
+      label: string;
+      description: string | null;
+    }[]
+  > {
     return this.db
-      .select({ id: schema.addressType.id, guuid: schema.addressType.guuid, code: schema.addressType.code, label: schema.addressType.label, description: schema.addressType.description })
+      .select({
+        id: schema.addressType.id,
+        guuid: schema.addressType.guuid,
+        code: schema.addressType.code,
+        label: schema.addressType.label,
+        description: schema.addressType.description,
+      })
       .from(schema.addressType)
-      .where(and(eq(schema.addressType.isActive, true), eq(schema.addressType.isHidden, false), isNull(schema.addressType.deletedAt)))
+      .where(
+        and(
+          eq(schema.addressType.isActive, true),
+          eq(schema.addressType.isHidden, false),
+          isNull(schema.addressType.deletedAt),
+        ),
+      )
       .orderBy(schema.addressType.sortOrder);
   }
 
-  async getDesignationTypesFromTable(): Promise<{ id: number; guuid: string; code: string; label: string; description: string | null }[]> {
+  async getDesignationTypesFromTable(): Promise<
+    {
+      id: number;
+      guuid: string;
+      code: string;
+      label: string;
+      description: string | null;
+    }[]
+  > {
     return this.db
-      .select({ id: schema.designationType.id, guuid: schema.designationType.guuid, code: schema.designationType.code, label: schema.designationType.label, description: schema.designationType.description })
+      .select({
+        id: schema.designationType.id,
+        guuid: schema.designationType.guuid,
+        code: schema.designationType.code,
+        label: schema.designationType.label,
+        description: schema.designationType.description,
+      })
       .from(schema.designationType)
-      .where(and(eq(schema.designationType.isActive, true), eq(schema.designationType.isHidden, false), isNull(schema.designationType.deletedAt)))
+      .where(
+        and(
+          eq(schema.designationType.isActive, true),
+          eq(schema.designationType.isHidden, false),
+          isNull(schema.designationType.deletedAt),
+        ),
+      )
       .orderBy(schema.designationType.sortOrder);
   }
 
@@ -205,9 +261,7 @@ export class LookupsRepository extends BaseRepository {
           isNull(lookup.deletedAt),
         ),
       )
-      .where(
-        and(eq(lookupType.isActive, true), isNull(lookupType.deletedAt)),
-      )
+      .where(and(eq(lookupType.isActive, true), isNull(lookupType.deletedAt)))
       .groupBy(lookupType.id)
       .orderBy(lookupType.sortOrder, lookupType.title);
   }
@@ -217,15 +271,25 @@ export class LookupsRepository extends BaseRepository {
     typeCode: string,
     opts: FindOpts,
   ): Promise<{ rows: LookupValueRow[]; total: number }> {
-    const { page, pageSize, search, sortBy = 'sortOrder', sortOrder = 'asc', isActive } = opts;
+    const {
+      page,
+      pageSize,
+      search,
+      sortBy = 'sortOrder',
+      sortOrder = 'asc',
+      isActive,
+    } = opts;
     const offset = LookupsRepository.toOffset(page, pageSize);
     const dir = sortOrder === 'desc' ? desc : asc;
 
     const orderCol =
-      sortBy === 'code'      ? lookup.code      :
-      sortBy === 'label'     ? lookup.label     :
-      sortBy === 'createdAt' ? lookup.createdAt :
-                               lookup.sortOrder;
+      sortBy === 'code'
+        ? lookup.code
+        : sortBy === 'label'
+          ? lookup.label
+          : sortBy === 'createdAt'
+            ? lookup.createdAt
+            : lookup.sortOrder;
 
     const where = and(
       eq(lookupType.code, typeCode),
@@ -236,18 +300,22 @@ export class LookupsRepository extends BaseRepository {
     );
 
     return this.paginate(
-      this.db.select(lookupValueSelect)
+      this.db
+        .select(lookupValueSelect)
         .from(lookup)
         .innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id))
         .where(where)
         .orderBy(dir(orderCol))
         .limit(pageSize)
         .offset(offset),
-      () => this.db.select({ total: count() })
-        .from(lookup)
-        .innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id))
-        .where(where),
-      page, pageSize,
+      () =>
+        this.db
+          .select({ total: count() })
+          .from(lookup)
+          .innerJoin(lookupType, eq(lookup.lookupTypeFk, lookupType.id))
+          .where(where),
+      page,
+      pageSize,
     );
   }
 
@@ -259,20 +327,55 @@ export class LookupsRepository extends BaseRepository {
   async findDedicatedLookupValues(
     typeCode: string,
     opts: FindOpts,
-  ): Promise<{ rows: LookupValueRow[]; total: number }> {
-    const { page, pageSize, search, sortBy = 'sortOrder', sortOrder = 'asc', isActive } = opts;
+  ): Promise<{ rows: LookupValueRow[]; total: number } | null> {
+    const {
+      page,
+      pageSize,
+      search,
+      sortBy = 'sortOrder',
+      sortOrder = 'asc',
+      isActive,
+    } = opts;
     const offset = LookupsRepository.toOffset(page, pageSize);
     const dir = sortOrder === 'desc' ? desc : asc;
 
     const standardTable = STANDARD_LOOKUP_TABLES[typeCode];
     if (standardTable) {
-      return this.queryStandardLookupTable(standardTable, page, pageSize, offset, dir, search, sortBy, isActive);
+      return this.queryStandardLookupTable(
+        standardTable,
+        page,
+        pageSize,
+        offset,
+        dir,
+        search,
+        sortBy,
+        isActive,
+      );
     }
 
     switch (typeCode) {
-      case LookupTypeCodes.CURRENCY: return this.queryCurrencyTable(page, pageSize, offset, dir, search, sortBy, isActive);
-      case LookupTypeCodes.VOLUMES:  return this.queryVolumesTable(page, pageSize, offset, dir, search, sortBy, isActive);
-      default: throw new BadRequestException(`Unknown lookup type: ${typeCode}`);
+      case LookupTypeCodes.CURRENCY:
+        return this.queryCurrencyTable(
+          page,
+          pageSize,
+          offset,
+          dir,
+          search,
+          sortBy,
+          isActive,
+        );
+      case LookupTypeCodes.VOLUMES:
+        return this.queryVolumesTable(
+          page,
+          pageSize,
+          offset,
+          dir,
+          search,
+          sortBy,
+          isActive,
+        );
+      default:
+        return null;
     }
   }
 
@@ -286,7 +389,13 @@ export class LookupsRepository extends BaseRepository {
         hasTable: lookupType.hasTable,
       })
       .from(lookupType)
-      .where(and(eq(lookupType.code, code), eq(lookupType.isActive, true), isNull(lookupType.deletedAt)))
+      .where(
+        and(
+          eq(lookupType.code, code),
+          eq(lookupType.isActive, true),
+          isNull(lookupType.deletedAt),
+        ),
+      )
       .limit(1);
     return row ?? null;
   }
@@ -295,7 +404,7 @@ export class LookupsRepository extends BaseRepository {
   async findLookupValueByGuuidAndType(
     guuid: string,
     typeCode: string,
-  ): Promise<LookupValueRow & { numericId: number } | null> {
+  ): Promise<(LookupValueRow & { numericId: number }) | null> {
     const [row] = await this.db
       .select({ ...lookupValueSelect, numericId: lookup.id })
       .from(lookup)
@@ -313,8 +422,12 @@ export class LookupsRepository extends BaseRepository {
   }
 
   /** Insert a new global lookup value under a type */
-  async createLookupValue(typeId: number, dto: CreateLookupValueDto, createdBy: number): Promise<typeof lookup.$inferSelect> {
-    return this.insertOneAudited(
+  async createLookupValue(
+    typeId: number,
+    dto: CreateLookupValueDto,
+    createdBy: number,
+  ): Promise<typeof lookup.$inferSelect> {
+    return this.insertOneSync(
       lookup,
       {
         lookupTypeFk: typeId,
@@ -330,25 +443,41 @@ export class LookupsRepository extends BaseRepository {
   }
 
   /** Update label / description / sortOrder on a lookup value (code is immutable after creation) */
-  async updateLookupValue(id: number, dto: UpdateLookupValueDto, modifiedBy: number): Promise<typeof lookup.$inferSelect | null> {
+  async updateLookupValue(
+    id: number,
+    dto: UpdateLookupValueDto,
+    modifiedBy: number,
+  ): Promise<typeof lookup.$inferSelect | null> {
     const set: Partial<typeof lookup.$inferInsert> = {};
     if (dto.label !== undefined) set.label = dto.label;
-    if (dto.description !== undefined) set.description = dto.description ?? null;
+    if (dto.description !== undefined)
+      set.description = dto.description ?? null;
     if (dto.sortOrder !== undefined) set.sortOrder = dto.sortOrder ?? null;
 
-    return this.updateOneAudited(
+    return this.updateOneSync(
       lookup,
       set,
-      and(eq(lookup.id, id), eq(lookup.isActive, true), isNull(lookup.deletedAt))!,
+      and(
+        eq(lookup.id, id),
+        eq(lookup.isActive, true),
+        isNull(lookup.deletedAt),
+      )!,
       modifiedBy,
     );
   }
 
   /** Soft-delete a lookup value */
-  async deleteLookupValue(id: number, deletedBy: number): Promise<typeof lookup.$inferSelect | null> {
-    return this.softDeleteAudited(
+  async deleteLookupValue(
+    id: number,
+    deletedBy: number,
+  ): Promise<typeof lookup.$inferSelect | null> {
+    return this.softDeleteSync(
       lookup,
-      and(eq(lookup.id, id), eq(lookup.isActive, true), isNull(lookup.deletedAt))!,
+      and(
+        eq(lookup.id, id),
+        eq(lookup.isActive, true),
+        isNull(lookup.deletedAt),
+      )!,
       deletedBy,
     );
   }
@@ -358,7 +487,15 @@ export class LookupsRepository extends BaseRepository {
    * No unsafe `as any` casting — full type information is preserved.
    */
   private async queryStandardLookupTable(
-    table: typeof schema.billingFrequency | typeof schema.communicationType | typeof schema.designationType | typeof schema.entityType | typeof schema.notificationStatus | typeof schema.staffInviteStatus | typeof schema.taxFilingFrequency | typeof schema.addressType,
+    table:
+      | typeof schema.billingFrequency
+      | typeof schema.communicationType
+      | typeof schema.designationType
+      | typeof schema.entityType
+      | typeof schema.notificationStatus
+      | typeof schema.staffInviteStatus
+      | typeof schema.taxFilingFrequency
+      | typeof schema.addressType,
     page: number,
     pageSize: number,
     offset: number,
@@ -369,10 +506,13 @@ export class LookupsRepository extends BaseRepository {
   ): Promise<{ rows: LookupValueRow[]; total: number }> {
     // Determine sort column — all these tables have: code, label, createdAt, sortOrder
     const orderCol =
-      sortBy === 'code' ? table.code :
-      sortBy === 'label' ? table.label :
-      sortBy === 'createdAt' ? table.createdAt :
-      table.sortOrder;
+      sortBy === 'code'
+        ? table.code
+        : sortBy === 'label'
+          ? table.label
+          : sortBy === 'createdAt'
+            ? table.createdAt
+            : table.sortOrder;
 
     const where = and(
       isNull(table.deletedAt),
@@ -421,10 +561,13 @@ export class LookupsRepository extends BaseRepository {
     const t = schema.currency;
 
     const orderCol =
-      sortBy === 'code' ? t.code :
-      sortBy === 'label' ? t.symbol :
-      sortBy === 'createdAt' ? t.createdAt :
-      t.sortOrder;
+      sortBy === 'code'
+        ? t.code
+        : sortBy === 'label'
+          ? t.symbol
+          : sortBy === 'createdAt'
+            ? t.createdAt
+            : t.sortOrder;
 
     const where = and(
       isNull(t.deletedAt),
@@ -473,10 +616,13 @@ export class LookupsRepository extends BaseRepository {
     const t = schema.volumes;
 
     const orderCol =
-      sortBy === 'code' ? t.volumeCode :
-      sortBy === 'label' ? t.volumeName :
-      sortBy === 'createdAt' ? t.createdAt :
-      t.sortOrder;
+      sortBy === 'code'
+        ? t.volumeCode
+        : sortBy === 'label'
+          ? t.volumeName
+          : sortBy === 'createdAt'
+            ? t.createdAt
+            : t.sortOrder;
 
     const where = and(
       isNull(t.deletedAt),

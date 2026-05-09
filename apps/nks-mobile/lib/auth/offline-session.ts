@@ -11,14 +11,18 @@
  */
 
 import * as ExpoCrypto from "expo-crypto";
+import { jwtDecode } from "jwt-decode";
 import {
   saveSecureItem,
   getSecureItem,
   deleteSecureItem,
 } from "@nks/mobile-utils";
+import type { AuthResponse } from "@nks/api-manager";
 import { ONE_DAY_MS, ONE_HOUR_MS } from "@nks/utils";
 import { STORAGE_KEYS } from "../utils/storage-keys";
 import { createLogger } from "../utils/logger";
+import { getServerAdjustedNowSync } from "../utils/server-time";
+import { getDeviceIdentity } from "../device/device-binding";
 
 const log = createLogger("OfflineSession");
 
@@ -85,6 +89,23 @@ export interface StatusMessage {
   message: string;
 }
 
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Extract exp from a JWT payload and return it as milliseconds.
+ * Returns null on any parse failure so callers can fall back gracefully.
+ */
+function _expFromJwt(token: string): number | null {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    const payload = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: unknown };
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 /**
@@ -108,7 +129,7 @@ export function isSessionValid(session: OfflineSession | null): boolean {
     const payload = JSON.parse(
       atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
     ) as { exp?: number };
-    return typeof payload.exp === 'number' && payload.exp * 1000 > Date.now();
+    return typeof payload.exp === 'number' && payload.exp * 1000 > getServerAdjustedNowSync();
   } catch {
     return false;
   }
@@ -232,13 +253,18 @@ export const offlineSession = {
     deviceId?: string;
   }): Promise<OfflineSession> {
     const now = Date.now();
+    // Derive offlineValidUntil from the JWT exp claim (server-computed, in seconds).
+    // Using the client clock (Date.now() + 3days) would differ from the server's value
+    // by any clock skew, invalidating the HMAC on every sync push because offlineValidUntil
+    // is part of the signed payload.
+    const offlineValidUntil = _expFromJwt(input.offlineToken) ?? now + OFFLINE_SESSION_DURATION_MS;
     const session: OfflineSession = {
       id: ExpoCrypto.randomUUID(),
       userGuuid: input.userGuuid,
       storeGuuid: input.storeGuuid,
       storeName: input.storeName,
       roles: input.roles,
-      offlineValidUntil: now + OFFLINE_SESSION_DURATION_MS,
+      offlineValidUntil,
       lastSyncedAt: now,
       lastRoleSyncAt: now,
       offlineToken: input.offlineToken,
@@ -318,10 +344,17 @@ export const offlineSession = {
     signature?: string,
   ): Promise<OfflineSession> {
     const now = Date.now();
+    // Derive offlineValidUntil from the new JWT exp (same as create()).
+    // This value is part of the server-side HMAC payload — computing it locally
+    // from Date.now() + 3d would diverge from the server's value and break
+    // signature verification on the next sync push.
+    const offlineValidUntil = offlineToken
+      ? (_expFromJwt(offlineToken) ?? session.offlineValidUntil)
+      : session.offlineValidUntil;
     const updated: OfflineSession = {
       ...session,
       roles,
-      offlineValidUntil: now + OFFLINE_SESSION_DURATION_MS,
+      offlineValidUntil,
       lastRoleSyncAt: now,
       ...(offlineToken ? { offlineToken } : {}),
       ...(signature ? { signature } : {}),
@@ -351,3 +384,54 @@ export const offlineSession = {
     return getStatusMessage(session);
   },
 };
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Decode the `roles` claim out of an offline JWT, defaulting to [] on any
+ * decode failure. The server is the source of truth for roles; an empty
+ * list here just means the next refresh will repopulate them. We never
+ * throw — a malformed token must not block the calling auth flow.
+ */
+export function decodeOfflineTokenRoles(offlineToken: string): string[] {
+  try {
+    const decoded = jwtDecode<{ roles?: string[] }>(offlineToken);
+    return decoded.roles ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Build an offline session from an AuthResponse and persist it.
+ *
+ * Used in three places that all repeat the same shape: login (persist-login),
+ * cold-start upgrade rebuild (initialize-auth), and refresh-time rebuild
+ * (refresh-token-attempt). Returns null without throwing if the response is
+ * missing the offline token or user — the caller's auth flow continues
+ * without an offline session, exactly as before.
+ */
+export async function createOfflineSessionFromAuth(
+  authResponse: AuthResponse,
+): Promise<OfflineSession | null> {
+  const offlineToken = authResponse.offline?.token;
+  const userGuuid = authResponse.user?.guuid;
+  if (!offlineToken || !userGuuid) return null;
+
+  let deviceId: string | undefined;
+  try {
+    deviceId = (await getDeviceIdentity()).deviceId;
+  } catch {
+    // Missing deviceId is fine; offline-session.create handles undefined.
+  }
+
+  return offlineSession.create({
+    userGuuid,
+    storeGuuid: authResponse.context?.defaultStoreGuuid ?? null,
+    storeName: "",
+    roles: decodeOfflineTokenRoles(offlineToken),
+    offlineToken,
+    signature: authResponse.offline?.sessionSignature,
+    deviceId,
+  });
+}

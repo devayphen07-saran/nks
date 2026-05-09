@@ -32,47 +32,51 @@ const AuthMinimalUserSchema = z.object({
 });
 
 // ─── Auth Token Schema ─────────────────────────────────────────────────────
+// Auth model: opaque session token + DB validation. No JWT in the request
+// pipeline — the bearer token is a 64-char hex string looked up in the DB on
+// every authenticated request. Short-lived JWTs are not used for API auth.
 
 const AuthTokenSchema = z.object({
   sessionId: z.string(),
   /**
-   * Opaque session credential.
-   * Mobile clients (X-Device-Type: ANDROID | IOS): populated with the token.
-   * Web clients: null — token is delivered via httpOnly cookie instead so it
-   * never appears in browser devtools, CDN / API-gateway logs, or JS scope.
+   * Opaque bearer credential (BetterAuth session token).
+   * Mobile: send as `Authorization: Bearer <bearerToken>` on every API request.
+   * Web: always null — delivered via httpOnly cookie; never appears in JS scope.
    */
-  sessionToken: z.string().nullable(),
-  /**
-   * Always 'Bearer' — included so clients can build the Authorization
-   * header without relying on a hard-coded convention.
-   */
-  tokenType: z.literal('Bearer'),
-  expiresAt: z.string(),
+  bearerToken: z.string().nullable(),
+  /** Bearer session expiry — use this to decide when to call POST /auth/refresh-token. */
+  sessionExpiresAt: z.string(),
   refreshToken: z.string(),
-  refreshExpiresAt: z.string(),
-  accessToken: z.string().optional(),
+  refreshTokenExpiresAt: z.string(),
 });
 
-// ─── Client Context Schema ────────────────────────────────────────────────
-// Tenant/store selection state — separated from auth credentials so the
-// two domains can evolve independently. defaultStoreGuuid is null for users
-// who have not yet set a default store or have no store role.
+// ─── Offline Schema (mobile-only) ─────────────────────────────────────────
+// Present only when X-Device-Type: ANDROID | IOS. Always null for web clients.
+// The offline token's expiry is embedded as `exp` in the JWT payload (3-day TTL)
+// — decode `offline.token` to read it. Validity is independent of session expiry.
+
+const AuthOfflineSchema = z.object({
+  /** RS256 JWT with 3-day TTL — used as authorization proof while offline. Expiry is in the JWT `exp` claim. */
+  token: z.string(),
+  /**
+   * HMAC-SHA256 signature over (userId, storeId, roles[], offlineValidUntil).
+   * Computed server-side with OFFLINE_SESSION_HMAC_SECRET.
+   * Mobile stores this as-is; cannot regenerate it. Full verification happens
+   * server-side on every sync push.
+   */
+  sessionSignature: z.string(),
+});
+
+// ─── Context Schema ────────────────────────────────────────────────────────
 
 const AuthContextSchema = z.object({
+  /** null if user has no store role or no default store set. */
   defaultStoreGuuid: z.string().nullable(),
-});
-
-// ─── Sync Metadata Schema ─────────────────────────────────────────────────
-// Seeds the mobile sync engine without an extra round-trip: mobile can call
-// GET /sync/changes immediately after login using `cursor` as the starting
-// point. `deviceId` echoes the X-Device-Id header so mobile can confirm its
-// binding. `lastSyncedAt` is null on fresh login — per-device sync state
-// tracking is not yet persisted server-side.
-
-const AuthSyncMetadataSchema = z.object({
-  cursor: z.string().describe('Initial sync cursor — "0:0" on fresh login'),
-  lastSyncedAt: z.string().nullable().describe('ISO timestamp of last known sync for this device, or null for full sync'),
-  deviceId: z.string().nullable().describe('Device identifier echoed from X-Device-Id header; null for web clients'),
+  /**
+   * Internal numeric id of the default store. Mobile uses this as the local
+   * SQLite primary key when initializing offline data. null when guuid is null.
+   */
+  defaultStoreId: z.number().nullable(),
 });
 
 // ─── Exported DTOs ────────────────────────────────────────────────────────
@@ -89,15 +93,8 @@ export class MeResponseDto extends createZodDto(AuthUserSchema) {}
 export interface AuthResponseEnvelope {
   user: z.infer<typeof AuthMinimalUserSchema>;
   auth: z.infer<typeof AuthTokenSchema>;
+  /** Store/tenant context for the active session. */
   context: z.infer<typeof AuthContextSchema>;
-  sync: z.infer<typeof AuthSyncMetadataSchema>;
-  /** Offline credentials. Populated for mobile clients; null for web.
-   *  Clients should check for null rather than conditional key presence. */
-  offline: {
-    /** RS256 JWT — 3-day TTL — for offline access verification on device. */
-    token: string;
-    /** HMAC-SHA256 of the offline session payload. Mobile stores this and
-     *  checks its presence on load; signing secret never leaves the server. */
-    sessionSignature?: string;
-  } | null;
+  /** Present for mobile clients; always null for web (no offline capability). */
+  offline: z.infer<typeof AuthOfflineSchema> | null;
 }

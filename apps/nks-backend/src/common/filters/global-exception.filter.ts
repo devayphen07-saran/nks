@@ -7,6 +7,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AppConfigService } from '../../config/app-config.service';
 import { Request, Response } from 'express';
 import { ZodValidationException } from 'nestjs-zod';
@@ -16,6 +17,7 @@ import { AppException } from '../exceptions/app.exception';
 import { ErrorCode } from '../constants/error-codes.constants';
 import { PG_UNIQUE_VIOLATION, PG_FOREIGN_KEY_VIOLATION, PG_NOT_NULL_VIOLATION } from '../constants/pg-error-codes';
 import { ApiResponse } from '../utils/api-response';
+import { AuditEvents } from '../events/audit.events';
 
 /**
  * Global exception filter — sole builder of error envelopes.
@@ -29,14 +31,71 @@ import { ApiResponse } from '../utils/api-response';
  *
  * All paths return ApiResponse<null> — identical wire shape to success responses.
  */
+/** Cap stack-trace bytes written to the structured logger. Prevents pathological
+ *  errors (deeply nested async stacks, recursive promise chains) from flooding
+ *  log storage. 50 frames covers any real-world debug case. */
+const MAX_STACK_BYTES = 8 * 1024;
+const MAX_STACK_LINES = 50;
+
+function truncateStack(stack: string | undefined): string | undefined {
+  if (!stack) return stack;
+  const lines = stack.split('\n');
+  let truncated = lines.length > MAX_STACK_LINES
+    ? lines.slice(0, MAX_STACK_LINES).join('\n') + `\n  … truncated ${lines.length - MAX_STACK_LINES} more frame(s)`
+    : stack;
+  if (truncated.length > MAX_STACK_BYTES) {
+    truncated = truncated.slice(0, MAX_STACK_BYTES) + ' … (truncated by byte cap)';
+  }
+  return truncated;
+}
+
 @Injectable()
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
   private readonly isDevelopment: boolean;
 
-  constructor(appConfig: AppConfigService) {
+  constructor(
+    appConfig: AppConfigService,
+    private readonly events: EventEmitter2,
+  ) {
     this.isDevelopment = appConfig.isDevelopment;
+  }
+
+  /**
+   * Best-effort audit of every 403 outcome (post-authentication permission denial).
+   * 401 events are skipped — most are anonymous probes that would flood the audit log;
+   * authentication failures inside business logic should be audited at the source.
+   * Never throws.
+   */
+  private auditAccessDenied(request: Request, statusCode: number, errorCode: string): void {
+    try {
+      const userId =
+        (request as Request & { user?: { userId?: number } }).user?.userId ?? 0;
+      const ip =
+        (request.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
+        request.socket.remoteAddress ??
+        undefined;
+      this.events.emit(AuditEvents.LOG, {
+        action: 'PERMISSION_REVOKED',
+        userId,
+        description: `Access denied: ${request.method} ${request.url} (${errorCode})`,
+        metadata: {
+          method: request.method,
+          path: request.url,
+          statusCode,
+          errorCode,
+          userAgent: request.headers['user-agent'],
+        },
+        ipAddress: ip,
+        userAgent: typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : undefined,
+        severity: 'warning',
+        resourceType: 'http_request',
+        resourceId: request.url,
+      });
+    } catch {
+      // Never let audit emission break error handling.
+    }
   }
 
   catch(exception: unknown, host: ArgumentsHost): void {
@@ -62,7 +121,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           requestId,
           errorCode: envelope.errorCode,
           err: exception instanceof Error
-            ? { message: exception.message, stack: exception.stack, name: exception.name }
+            ? { message: exception.message, stack: truncateStack(exception.stack), name: exception.name }
             : String(exception),
         },
         'Unhandled exception',
@@ -88,6 +147,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     if (envelope.statusCode === HttpStatus.TOO_MANY_REQUESTS) {
       const retryAfter = this.extractRetryAfter(exception);
       response.setHeader('Retry-After', String(retryAfter));
+    }
+
+    // Audit every authorization denial so compliance has a paper trail of
+    // denied attempts (not just the generic 403 returned to the client).
+    if (envelope.statusCode === HttpStatus.FORBIDDEN) {
+      this.auditAccessDenied(request, envelope.statusCode, envelope.errorCode ?? 'UNKNOWN');
     }
 
     response.status(envelope.statusCode).json(envelope);
@@ -167,9 +232,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     }
 
     // 4. PostgreSQL / Drizzle DB errors
-    if (this.isDbError(exception)) {
+    // Drizzle wraps PG errors: top-level is a DrizzleError, original PG error is in .cause
+    const dbErr = this.isDbError(exception)
+      ? exception
+      : this.isDbError((exception as Record<string, unknown>)?.['cause'])
+        ? (exception as Record<string, unknown>)['cause']
+        : null;
+    if (dbErr) {
       return this.handleDbError(
-        exception as { code: string; detail?: string; table?: string },
+        dbErr as { code: string; detail?: string; table?: string },
         requestId,
       );
     }

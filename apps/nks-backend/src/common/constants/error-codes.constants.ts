@@ -54,6 +54,7 @@ export const ErrorCode = {
   AUTH_PROVIDER_NOT_SUPPORTED: 'AUTH_PROVIDER_NOT_SUPPORTED',
   AUTH_OAUTH_STATE_MISMATCH: 'AUTH_OAUTH_STATE_MISMATCH',
   AUTH_PASSWORD_TOO_WEAK: 'AUTH_PASSWORD_TOO_WEAK',
+  AUTH_PASSWORD_BREACHED: 'AUTH_PASSWORD_BREACHED',
   AUTH_PASSWORD_REQUIRED: 'AUTH_PASSWORD_REQUIRED',
   AUTH_PASSWORD_ALREADY_SET: 'AUTH_PASSWORD_ALREADY_SET',
   AUTH_EMAIL_NOT_SET: 'AUTH_EMAIL_NOT_SET',
@@ -204,15 +205,6 @@ export const ErrorCode = {
 
   // ─── OTP (extended) ───────────────────────────────────────────────────
 
-  // ─── Sync ──────────────────────────────────────────────────────────────
-  SYNC_STORE_ACCESS_DENIED: 'SYNC_STORE_ACCESS_DENIED',
-  SYNC_SESSION_EXPIRED: 'SYNC_SESSION_EXPIRED',
-  SYNC_SESSION_INVALID_SIGNATURE: 'SYNC_SESSION_INVALID_SIGNATURE',
-  SYNC_DEVICE_REVOKED: 'SYNC_DEVICE_REVOKED',
-  SYNC_TOKEN_INVALID: 'SYNC_TOKEN_INVALID',
-  SYNC_TOKEN_ROLE_MISMATCH: 'SYNC_TOKEN_ROLE_MISMATCH',
-  SYNC_TOKEN_STORE_MISMATCH: 'SYNC_TOKEN_STORE_MISMATCH',
-
   // ─── Status (admin) ───────────────────────────────────────────────────
   STA_CODE_ALREADY_EXISTS: 'STA_CODE_ALREADY_EXISTS',
   STA_SYSTEM_IMMUTABLE: 'STA_SYSTEM_IMMUTABLE',
@@ -279,6 +271,7 @@ export const ErrorMessages: Record<string, string> = {
   [ErrorCode.AUTH_DEVICE_MISMATCH]: 'Refresh token device mismatch.',
   [ErrorCode.AUTH_INVALID_JWT_AUDIENCE]: 'Invalid JWT audience.',
   [ErrorCode.AUTH_PASSWORD_TOO_WEAK]: 'Password does not meet strength requirements. Must be at least 12 characters with uppercase, lowercase, number, and special character.',
+  [ErrorCode.AUTH_PASSWORD_BREACHED]: 'This password has appeared in a known data breach. Please choose a different password.',
   [ErrorCode.AUTH_PASSWORD_REQUIRED]: 'Password is required when adding an email address.',
   [ErrorCode.AUTH_PASSWORD_ALREADY_SET]: 'A password is already set on this account. Use the change-password flow instead.',
   [ErrorCode.AUTH_EMAIL_NOT_SET]: 'No email address on this account. Add an email via profile-complete first.',
@@ -347,15 +340,6 @@ export const ErrorMessages: Record<string, string> = {
   [ErrorCode.ROLE_PERMISSION_NON_DELEGATABLE]: 'This permission cannot be assigned to custom roles.',
   [ErrorCode.ROLE_PERMISSION_NO_ACCESS]: 'You do not have access to this entity and cannot assign its permissions.',
   [ErrorCode.ROLE_PERMISSION_CEILING_EXCEEDED]: 'You cannot grant a permission you do not hold.',
-
-  // Sync
-  [ErrorCode.SYNC_STORE_ACCESS_DENIED]: 'You do not have access to this store.',
-  [ErrorCode.SYNC_SESSION_EXPIRED]: 'Offline session has expired.',
-  [ErrorCode.SYNC_SESSION_INVALID_SIGNATURE]: 'Offline session signature is invalid.',
-  [ErrorCode.SYNC_DEVICE_REVOKED]: 'Device access has been revoked.',
-  [ErrorCode.SYNC_TOKEN_INVALID]: 'Offline token is invalid or expired.',
-  [ErrorCode.SYNC_TOKEN_ROLE_MISMATCH]: 'Offline token roles do not match session.',
-  [ErrorCode.SYNC_TOKEN_STORE_MISMATCH]: 'Offline token store does not match session.',
 
   // Status (admin extended)
   [ErrorCode.STA_CODE_ALREADY_EXISTS]: 'Status code already exists.',

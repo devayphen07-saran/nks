@@ -6,8 +6,11 @@
 
 import { API, type AuthResponse } from "@nks/api-manager";
 import { tokenManager } from "@nks/mobile-utils";
-import { jwtDecode } from "jwt-decode";
-import { offlineSession } from "./offline-session";
+import {
+  offlineSession,
+  decodeOfflineTokenRoles,
+  createOfflineSessionFromAuth,
+} from "./offline-session";
 import { syncServerTime } from "../utils/server-time";
 import { validateTokensBeforeRefresh } from "./token-expiry";
 import { sanitizeError } from "../utils/log-sanitizer";
@@ -61,7 +64,7 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
     });
 
     const result = response.data?.data;
-    const newSessionToken = result?.auth?.sessionToken;
+    const newSessionToken = result?.auth?.bearerToken;
 
     if (!newSessionToken || !envelope?.data) {
       log.warn("[RefreshAttempt] Malformed refresh response");
@@ -71,17 +74,16 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
       };
     }
 
-    tokenManager.set(newSessionToken);
+    tokenManager.set(newSessionToken, envelope.data.auth.sessionId);
 
     const updated: AuthResponse = {
       ...envelope.data,
       auth: {
         ...envelope.data.auth,
-        sessionToken: newSessionToken,
+        bearerToken: newSessionToken,
         ...(result?.auth?.refreshToken ? { refreshToken: result.auth.refreshToken } : {}),
-        ...(result?.auth?.expiresAt ? { expiresAt: result.auth.expiresAt } : {}),
-        ...(result?.auth?.refreshExpiresAt ? { refreshExpiresAt: result.auth.refreshExpiresAt } : {}),
-        ...(result?.auth?.accessToken ? { accessToken: result.auth.accessToken } : {}),
+        ...(result?.auth?.sessionExpiresAt ? { sessionExpiresAt: result.auth.sessionExpiresAt } : {}),
+        ...(result?.auth?.refreshTokenExpiresAt ? { refreshTokenExpiresAt: result.auth.refreshTokenExpiresAt } : {}),
       },
       context: result?.context ?? envelope.data.context,
       offline: result?.offline !== undefined ? result.offline : envelope.data.offline,
@@ -89,9 +91,8 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
 
     await tokenManager.persistSession(updated);
 
-    if (result?.auth?.accessToken && result?.offline?.token && result?.auth?.refreshToken) {
+    if (result?.offline?.token && result?.auth?.refreshToken) {
       await JWTManager.persistTokens({
-        accessToken: result.auth.accessToken,
         offlineToken: result.offline.token,
         refreshToken: result.auth.refreshToken,
       }).catch((err) => {
@@ -108,54 +109,41 @@ export async function refreshTokenAttempt(): Promise<RefreshAttemptResult> {
       );
     }
 
-    // When permissions changed, decode the new offline JWT (which the server
-    // already signed with the updated roles) and write those roles into the
-    // offline session — no extra round-trip to /auth/permissions-delta needed.
+    // When permissions changed, decode the new offline JWT (server-signed with
+    // the updated roles) and write those roles into the offline session — no
+    // round-trip to /auth/permissions-delta needed.
     try {
       const session = await offlineSession.load();
-      if (session) {
-        const newOfflineToken = result?.offline?.token ?? undefined;
+      const newOfflineToken = result?.offline?.token ?? undefined;
 
-        if (result?.permissionsChanged && newOfflineToken) {
-          try {
-            const decoded = jwtDecode<{ roles?: string[] }>(newOfflineToken);
-            const newRoles = decoded.roles ?? [];
-            await offlineSession.updateRolesAndExtend(session, newRoles, newOfflineToken);
-            log.info("[RefreshAttempt] Offline session roles updated from refreshed offline JWT");
-          } catch (decodeErr) {
-            log.warn("[RefreshAttempt] Failed to decode new offline JWT, marking roles stale:", sanitizeError(decodeErr));
-            await offlineSession.extendValidity({ ...session, lastRoleSyncAt: 0 });
-          }
+      if (session && result?.permissionsChanged && newOfflineToken) {
+        const newRoles = decodeOfflineTokenRoles(newOfflineToken);
+        if (newRoles.length === 0) {
+          // Decode failed (returned []) — mark roles stale so the next
+          // online cycle reconciles them, and keep the session usable.
+          log.warn("[RefreshAttempt] Decoded zero roles from offline JWT — marking roles stale");
+          await offlineSession.extendValidity({ ...session, lastRoleSyncAt: 0 });
         } else {
-          await offlineSession.extendValidity(session);
+          await offlineSession.updateRolesAndExtend(session, newRoles, newOfflineToken);
+          log.info("[RefreshAttempt] Offline session roles updated from refreshed offline JWT");
         }
+      } else if (session) {
+        await offlineSession.extendValidity(session);
         log.info("[RefreshAttempt] Offline session validity extended");
-      } else if (result?.offline?.token && envelope.data?.user?.guuid) {
-        // No offline session exists — create one from the fresh refresh response.
-        // This covers the upgrade path and any cold-start edge case where the
-        // session was deleted (e.g. SecureStore eviction on low-memory Android).
-        let roles: string[] = [];
-        try {
-          roles = jwtDecode<{ roles?: string[] }>(result.offline.token).roles ?? [];
-        } catch { /* empty roles accepted */ }
-
-        await offlineSession.create({
-          userGuuid: envelope.data.user.guuid,
-          storeGuuid: result?.context?.defaultStoreGuuid ?? envelope.data.context?.defaultStoreGuuid ?? null,
-          storeName: '',
-          roles,
-          offlineToken: result.offline.token,
-          signature: result.offline.sessionSignature,
-          deviceId: result?.sync?.deviceId ?? envelope.data.sync?.deviceId ?? undefined,
-        });
-        log.info("[RefreshAttempt] Offline session created from refresh response");
+      } else {
+        // No offline session exists — rebuild from the merged refresh response.
+        // Covers the upgrade path and cold-start edge cases where SecureStore
+        // evicted the session (low-memory Android).
+        const rebuilt = await createOfflineSessionFromAuth(updated);
+        if (rebuilt) {
+          log.info("[RefreshAttempt] Offline session created from refresh response");
+        }
       }
     } catch (error) {
-      log.debug(
-        "[RefreshAttempt] Offline session update failed:",
+      log.warn(
+        "[RefreshAttempt] Offline session update failed (non-critical):",
         sanitizeError(error),
       );
-      // Non-critical — continue anyway
     }
 
     log.info("[RefreshAttempt] Token refreshed successfully");

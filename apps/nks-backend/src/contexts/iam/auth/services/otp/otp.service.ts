@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { OtpValidator } from '../../validators';
 import { SendOtpDto, VerifyOtpDto } from '../../dto/otp.dto';
 import { VerifyEmailOtpDto } from '../../dto/email-verify.dto';
@@ -39,6 +39,8 @@ import { OtpRateLimitService } from './otp-rate-limit.service';
  */
 @Injectable()
 export class OtpService {
+  private readonly logger = new Logger(OtpService.name);
+
   constructor(
     private readonly otpRepository: OtpRepository,
     private readonly authProviderRepository: AuthProviderRepository,
@@ -91,12 +93,13 @@ export class OtpService {
     OtpValidator.assertOtpNotUsed(otpRecord.isUsed);
     OtpValidator.assertOtpNotExpired(otpRecord.expiresAt);
 
+    // 1b. Enforce minimum gap between consecutive verify attempts.
+    // Sleeps (not rejects) when the gap is short — automated attackers pay
+    // wall-clock time per attempt; humans typing the OTP never notice.
+    await this.rateLimitService.enforceMinVerifyGap(phone);
+
     // 2. Verify with MSG91
     const response = await this.msg91.verifyOtp(reqId, otp);
-    if (response?.type !== 'success') {
-      // Track failed verification attempt for exponential backoff
-      await this.rateLimitService.trackVerificationFailure(phone);
-    }
     OtpValidator.assertMsg91VerifySuccess(response);
 
     // 3. CAS mark-as-used — closes the race window between assertOtpNotUsed (in-memory)

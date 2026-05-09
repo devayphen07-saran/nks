@@ -1,0 +1,1 @@
+ALTER TABLE `failed_operations` ADD COLUMN `server_state` text;

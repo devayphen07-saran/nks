@@ -8,11 +8,8 @@ import { setCredentials } from "../../store/auth-slice";
 import { initializeAuth } from "../../store/initialize-auth";
 import { setupAxiosInterceptors } from "./axios-interceptors";
 import { handleReconnection } from "../../services/reconnection-handler";
-import {
-  setActiveStoreGuuid,
-  runPeriodicSync,
-  runSync,
-} from "../sync/sync-engine";
+import { syncManager } from "../sync/sync-manager";
+import { runPeriodicSync } from "../sync/sync-engine";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("AuthProvider");
@@ -73,41 +70,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // routine token refresh that happens to re-deliver the same store.
   const prevStoreGuuidRef = useRef<string | null>(null);
 
-  // Keep sync engine's active store in sync with Redux auth state.
-  // On a genuine store switch, fire runSync immediately instead of waiting
-  // for the next periodic tick (up to 5 min away).
+  // Keep sync manager's active store in sync with Redux auth state.
+  // On a genuine store switch, setup re-runs the stale check and forces a sync.
   useEffect(() => {
     const storeGuuid = authResponse?.context?.defaultStoreGuuid ?? null;
     if (!isAuthenticated || !storeGuuid) return;
-
-    setActiveStoreGuuid(storeGuuid);
 
     if (
       prevStoreGuuidRef.current !== null &&
       prevStoreGuuidRef.current !== storeGuuid
     ) {
-      log.info(
-        `[Auth] Store switched ${prevStoreGuuidRef.current} → ${storeGuuid}, triggering sync`,
-      );
-      runSync(storeGuuid).catch((err) => {
-        log.error("[Auth] Post-store-switch sync failed:", err);
-      });
+      log.info(`[Auth] Store switched ${prevStoreGuuidRef.current} → ${storeGuuid}`);
     }
+
+    syncManager.setup(storeGuuid).catch((err: unknown) => {
+      log.error("[Auth] SyncManager setup failed:", err);
+    });
 
     prevStoreGuuidRef.current = storeGuuid;
   }, [isAuthenticated, authResponse]);
 
-  // Trigger sync when store is selected via setActiveStore (from store slice).
-  // This handles the case where user selects a store from the UI.
+  // Trigger sync when store is selected from the store-picker UI.
   useEffect(() => {
     if (!isAuthenticated || !activeStoreGuuidFromSlice) return;
 
-    setActiveStoreGuuid(activeStoreGuuidFromSlice);
-    log.info(
-      `[Auth] Store selected from UI: ${activeStoreGuuidFromSlice}, triggering sync`,
-    );
-    runSync(activeStoreGuuidFromSlice).catch((err) => {
-      log.error("[Auth] Post-store-select sync failed:", err);
+    log.info(`[Auth] Store selected from UI: ${activeStoreGuuidFromSlice}, forcing sync`);
+    syncManager.setup(activeStoreGuuidFromSlice).catch((err: unknown) => {
+      log.error("[Auth] SyncManager setup (UI store select) failed:", err);
     });
   }, [isAuthenticated, activeStoreGuuidFromSlice]);
 

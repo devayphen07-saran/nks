@@ -51,18 +51,6 @@ export class SanitizerValidator {
   }
 
   /**
-   * Remove SQL injection characters (basic protection - parameterized queries are primary)
-   */
-  static sanitizeSqlInput(input: string): string {
-    if (!input) return input;
-    return input
-      .replace(/'/g, "''")
-      .replace(/--/g, '')
-      .replace(/\/\*/g, '')
-      .replace(/\*\//g, '');
-  }
-
-  /**
    * Trim and limit string length
    */
   static sanitizeString(text: string, maxLength?: number): string {

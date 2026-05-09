@@ -1,9 +1,7 @@
-import * as crypto from 'crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectAuth } from '../../decorators/inject-auth.decorator';
 import type { Auth } from '../../config/better-auth';
 import { RoleQueryService } from '../../../roles/role-query.service';
-import type { UserRoleEntry } from '../../mapper/auth-mapper';
 
 /**
  * BetterAuth does not expose $context in its public TypeScript API.
@@ -27,10 +25,11 @@ interface BetterAuthInternal {
  * Centralises:
  *   - Role ID lookup with per-request cache (getCachedSystemRoleId)
  *   - BetterAuth internal context access (getBetterAuthContext)
- *   - Role hash computation (hashRoles)
+ *   - Active-store resolution (resolveStoreIfMember)
  */
 @Injectable()
 export class AuthUtilsService {
+  private readonly logger = new Logger(AuthUtilsService.name);
   private readonly roleIdCache = new Map<string, number | null>();
 
   constructor(
@@ -50,11 +49,6 @@ export class AuthUtilsService {
     return id;
   }
 
-  /** Invalidate one or all cached role IDs (call after a role rename/delete). */
-  invalidateRoleCache(roleCode?: string): void {
-    roleCode ? this.roleIdCache.delete(roleCode) : this.roleIdCache.clear();
-  }
-
   /** Access BetterAuth's internal adapter for session creation during token rotation. */
   async getBetterAuthContext(): Promise<
     Awaited<BetterAuthInternal['$context']>
@@ -62,9 +56,16 @@ export class AuthUtilsService {
     return (this.auth as unknown as BetterAuthInternal).$context;
   }
 
-  /** Compute a deterministic hash of a role list for change detection. */
-  hashRoles(roles: UserRoleEntry[]): string {
-    const sorted = roles.map((r) => `${r.roleCode}:${r.storeId ?? 'null'}`).sort();
-    return crypto.createHash('sha256').update(JSON.stringify(sorted)).digest('hex');
+  /**
+   * Returns `storeId` only if the user still has a role in that store. Otherwise null.
+   * Use to validate `defaultStoreFk` / `activeStoreFk` before trusting them in
+   * a token or session — role assignments may have been revoked since last login.
+   */
+  static resolveStoreIfMember(
+    storeId: number | null | undefined,
+    roles: ReadonlyArray<{ storeId: number | null }>,
+  ): number | null {
+    if (storeId == null) return null;
+    return roles.some((r) => r.storeId === storeId) ? storeId : null;
   }
 }

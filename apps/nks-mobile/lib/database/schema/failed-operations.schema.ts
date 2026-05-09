@@ -16,6 +16,7 @@ export const failedOperations = sqliteTable(
     payload:          text('payload').notNull(),          // JSON string
     error_code:       integer('error_code'),
     error_msg:        text('error_msg'),
+    server_state:     text('server_state'),               // JSON string — server's view on conflict
     device_id:        text('device_id').notNull().default(''),
     created_at:       integer('created_at').notNull(),    // Unix ms — original enqueue time
     failed_at:        integer('failed_at').notNull(),     // Unix ms — when moved here

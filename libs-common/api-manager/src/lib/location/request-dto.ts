@@ -1,60 +1,79 @@
+// Mirrors the backend DTOs in
+// apps/nks-backend/src/contexts/reference-data/location/dto/location-response.dto.ts.
+// Wire identifiers are guuids, not numeric ids.
+
 // ─── States ────────────────────────────────────────────────────────────────
 
 export interface StateResponse {
-  id: number;
+  guuid: string;
   stateName: string;
   stateCode: string;
-  gstStateCode: string;
+  gstStateCode: string | null;
   isUnionTerritory: boolean;
-  description?: string;
-  sortOrder?: number;
+  description: string | null;
   isActive: boolean;
   isHidden: boolean;
   isSystem: boolean;
   createdAt: string;
-  updatedAt: string;
+  updatedAt: string | null;
 }
 
-export type StatesListResponse = StateResponse[];
+export interface StatesListResponse {
+  data: StateResponse[];
+  message: string;
+}
+
 export type StateSingleResponse = StateResponse;
 
 // ─── Districts ─────────────────────────────────────────────────────────────
 
 export interface DistrictResponse {
-  id: number;
+  guuid: string;
   districtName: string;
-  districtCode?: string;
-  lgdCode?: string;
-  stateFk: number;
-  description?: string;
-  sortOrder?: number;
+  districtCode: string | null;
+  lgdCode: string | null;
+  stateGuuid: string;
+  description: string | null;
   isActive: boolean;
   isHidden: boolean;
   isSystem: boolean;
   createdAt: string;
-  updatedAt: string;
+  updatedAt: string | null;
 }
 
-export type DistrictsListResponse = DistrictResponse[];
+export interface DistrictsListResponse {
+  data: DistrictResponse[];
+  message: string;
+}
+
 export type DistrictSingleResponse = DistrictResponse;
 
 // ─── Pincodes ──────────────────────────────────────────────────────────────
 
 export interface PincodeResponse {
-  id: number;
+  guuid: string;
   code: string;
   localityName: string;
-  areaName?: string;
-  districtFk: number;
-  stateFk: number;
-  latitude?: number;
-  longitude?: number;
+  areaName: string | null;
+  districtGuuid: string;
+  latitude: string | null;
+  longitude: string | null;
   isActive: boolean;
   isHidden: boolean;
   isSystem: boolean;
   createdAt: string;
-  updatedAt: string;
+  updatedAt: string | null;
 }
 
-export type PincodesListResponse = PincodeResponse[];
+export interface PincodesListResponse {
+  data: PincodeResponse[];
+  message: string;
+  meta?: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
 export type PincodeSingleResponse = PincodeResponse;
