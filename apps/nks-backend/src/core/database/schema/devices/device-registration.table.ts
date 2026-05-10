@@ -34,10 +34,10 @@ export const deviceRegistration = pgTable(
     deviceId: text('device_id').notNull(),
     userId: bigint('user_fk', { mode: 'number' })
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
     storeId: bigint('store_fk', { mode: 'number' })
       .notNull()
-      .references(() => store.id, { onDelete: 'cascade' }),
+      .references(() => store.id, { onDelete: 'restrict' }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

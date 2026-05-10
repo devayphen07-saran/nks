@@ -128,5 +128,12 @@
       "tag": "0017_backfill_updated_at",
       "breakpoints": true
     }
+    ,{
+      "idx": 18,
+      "version": "7",
+      "when": 1778284800000,
+      "tag": "0018_tenant_fk_restrict",
+      "breakpoints": true
+    }
   ]
 }

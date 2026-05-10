@@ -39,7 +39,7 @@ export const storeOperatingHours = pgTable(
     // Reference to store
     storeFk: bigint('store_fk', { mode: 'number' })
       .notNull()
-      .references(() => store.id, { onDelete: 'cascade' }),
+      .references(() => store.id, { onDelete: 'restrict' }),
 
     // Day of week: 0 = Monday, 1 = Tuesday, ..., 6 = Sunday
     dayOfWeek: smallint('day_of_week').notNull(),

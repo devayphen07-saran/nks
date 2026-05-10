@@ -40,7 +40,7 @@ export const userSession = pgTable(
     userAgent: text('user_agent'),
     userId: bigint('user_fk', { mode: 'number' })
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
 
     // Additional device context
     deviceId: varchar('device_id', { length: 100 }),

@@ -31,10 +31,10 @@ export const storeUserMapping = pgTable(
 
     storeFk: bigint('store_fk', { mode: 'number' })
       .notNull()
-      .references(() => store.id, { onDelete: 'cascade' }),
+      .references(() => store.id, { onDelete: 'restrict' }),
     userFk: bigint('user_fk', { mode: 'number' })
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
 
     // Designation from designation_type lookup (CEO, STORE_MGR, CASHIER, etc.)
     designationFk: bigint('designation_fk', { mode: 'number' }).references(

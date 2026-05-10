@@ -34,7 +34,7 @@ export const pushTokens = pgTable(
 
     userFk: bigint('user_fk', { mode: 'number' })
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
 
     // ExponentPushToken[xxxxxx] — the Expo push token string
     token: text('token').notNull(),

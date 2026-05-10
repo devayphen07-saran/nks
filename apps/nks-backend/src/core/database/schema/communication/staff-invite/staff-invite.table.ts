@@ -24,7 +24,7 @@ export const staffInvite = pgTable(
 
     storeFk: bigint('store_fk', { mode: 'number' })
       .notNull()
-      .references(() => store.id, { onDelete: 'cascade' }),
+      .references(() => store.id, { onDelete: 'restrict' }),
     invitedByFk: bigint('invited_by_fk', { mode: 'number' }).references(
       () => users.id,
       { onDelete: 'set null' },

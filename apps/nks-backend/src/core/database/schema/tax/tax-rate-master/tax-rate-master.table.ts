@@ -45,7 +45,7 @@ export const taxRateMaster = pgTable(
     // Store that this tax rate applies to
     storeFk: bigint('store_fk', { mode: 'number' })
       .notNull()
-      .references(() => store.id, { onDelete: 'cascade' }),
+      .references(() => store.id, { onDelete: 'restrict' }),
 
     // Commodity code this rate applies to (HSN for India, HS/CN for other countries, etc.)
     commodityCodeFk: bigint('commodity_code_fk', { mode: 'number' })

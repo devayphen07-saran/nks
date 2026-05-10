@@ -22,7 +22,7 @@ export const userAuthProvider = pgTable(
     providerId: text('provider_id').notNull(),
     userId: bigint('user_fk', { mode: 'number' })
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
 
     accessToken: text('access_token'),
     refreshToken: text('refresh_token'),

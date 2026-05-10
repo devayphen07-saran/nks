@@ -36,7 +36,7 @@ export const storeDocuments = pgTable(
     // Reference to store
     storeFk: bigint('store_fk', { mode: 'number' })
       .notNull()
-      .references(() => store.id, { onDelete: 'cascade' }),
+      .references(() => store.id, { onDelete: 'restrict' }),
 
     // Type of document
     documentType: storeDocumentTypeEnum('document_type').notNull(),

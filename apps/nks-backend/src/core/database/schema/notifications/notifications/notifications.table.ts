@@ -25,7 +25,7 @@ export const notifications = pgTable(
     // ── Recipient ────────────────────────────────────────────────────────────
     userFk: bigint('user_fk', { mode: 'number' })
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
 
     // storeFk — which store this notification originated from.
     // NULL for user-level notifications (account alerts, promos).

@@ -33,7 +33,7 @@ export const userRoleMapping = pgTable(
 
     userFk: bigint('user_fk', { mode: 'number' })
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
 
     roleFk: bigint('role_fk', { mode: 'number' })
       .notNull()
@@ -43,7 +43,7 @@ export const userRoleMapping = pgTable(
     // value → store-scoped role
     storeFk: bigint('store_fk', { mode: 'number' }).references(
       () => store.id,
-      { onDelete: 'cascade' },
+      { onDelete: 'restrict' },
     ),
 
     // Marks the role whose code is written into JWT.primaryRole.

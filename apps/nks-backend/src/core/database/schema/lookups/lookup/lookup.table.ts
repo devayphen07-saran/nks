@@ -35,7 +35,7 @@ export const lookup = pgTable(
     // NULL = global value; non-null = store-scoped custom value
     storeFk: bigint('store_fk', { mode: 'number' }).references(
       (): AnyPgColumn => store.id,
-      { onDelete: 'cascade' },
+      { onDelete: 'restrict' },
     ),
 
     ...auditFields(() => users.id),

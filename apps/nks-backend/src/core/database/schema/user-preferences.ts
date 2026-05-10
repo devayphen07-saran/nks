@@ -9,7 +9,7 @@ export const userPreferences = pgTable(
 
     userFk: bigint('user_fk', { mode: 'number' })
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
 
     // UI / display preferences
     theme: varchar('theme', { length: 20 }).default('light'),

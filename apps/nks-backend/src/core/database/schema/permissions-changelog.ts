@@ -19,7 +19,7 @@ export const permissionsChangelog = pgTable(
     id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
     userFk: bigint('user_fk', { mode: 'number' })
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => users.id, { onDelete: 'restrict' }),
     // Numeric version at which this change was recorded.
     // Matches parseInt(user.permissionsVersion.replace('v', ''), 10).
     versionNumber: integer('version_number').notNull(),
