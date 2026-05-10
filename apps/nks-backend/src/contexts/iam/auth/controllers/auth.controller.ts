@@ -20,6 +20,7 @@ import {
   ErrorCode,
   errPayload,
 } from '../../../../common/constants/error-codes.constants';
+import { ForbiddenException } from '../../../../common/exceptions';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthControllerHelpers } from '../../../../common/utils/auth-helpers';
 import { DeviceDetector, type DeviceInfo } from '../../../../common/utils/device-detector';
@@ -403,6 +404,17 @@ export class AuthController {
     @DeviceContextHeaders() device: DeviceContext,
   ): Promise<{ success: boolean; activeStoreId: number }> {
     const { storeId } = dto;
+
+    // Tenant isolation: refuse to point the session at a store the user is
+    // not a member of. Without this check, any authenticated user could
+    // switch into any store id (cross-tenant access).
+    //
+    // No SUPER_ADMIN bypass: even super-admins must hold a membership row
+    // (staff mapping or ownership) to bind a session to a store.
+    const allowedStoreIds = await this.permissions.findActiveStoreIds(user.userId);
+    if (!allowedStoreIds.includes(storeId)) {
+      throw new ForbiddenException(errPayload(ErrorCode.AUTH_FORBIDDEN_STORE_ACCESS));
+    }
 
     // Atomic: update session.activeStoreFk and upsert device_registration in
     // one transaction. Awaited so the response is only sent once both writes

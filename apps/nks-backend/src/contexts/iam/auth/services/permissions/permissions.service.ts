@@ -100,6 +100,14 @@ export class PermissionsService {
   }
 
   /**
+   * Active store IDs the user is a member of (staff mappings + owned stores).
+   * Used for tenant-membership checks before mutating session.activeStoreFk.
+   */
+  async findActiveStoreIds(userId: number): Promise<number[]> {
+    return this.authUsersRepository.findActiveStoreIds(userId);
+  }
+
+  /**
    * Get current permissions version for a user
    */
   async getPermissionsVersion(userId: number): Promise<number> {

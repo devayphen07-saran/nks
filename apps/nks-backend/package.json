@@ -90,6 +90,9 @@
     ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
+    "setupFiles": [
+      "../test/jest.setup.env.ts"
+    ],
     "transform": {
       "^.+\\.(t|j)s$": "@swc/jest"
     },
