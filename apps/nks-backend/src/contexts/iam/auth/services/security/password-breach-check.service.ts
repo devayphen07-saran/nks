@@ -1,7 +1,10 @@
 import * as crypto from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BadRequestException, InternalServerException } from '../../../../../common/exceptions';
+import {
+  BadRequestException,
+  ServiceUnavailableException,
+} from '../../../../../common/exceptions';
 import {
   ErrorCode,
   ErrorMessages,
@@ -13,6 +16,8 @@ const FETCH_TIMEOUT_MS = 1500;
 const CACHE_MAX_ENTRIES = 1000;
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
+export type BreachCheckResult = 'BREACHED' | 'NOT_BREACHED' | 'UNAVAILABLE';
+
 /**
  * Checks candidate passwords against HaveIBeenPwned's k-anonymity API.
  *
@@ -20,11 +25,14 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
  * hash is reconstructed locally from the response — HIBP never sees the
  * password or its full hash.
  *
- * Fail-open on network errors: registration must not be blocked by an external
- * outage. This is a defence-in-depth control on top of complexity validation,
- * not a critical-path dependency.
+ * Fail-CLOSED on network errors during password set/change: a silent fail-open
+ * lets a known-breached password slip through if HIBP is unreachable, defeating
+ * the control. Callers receive 503 AUTH_PASSWORD_BREACH_CHECK_UNAVAILABLE and
+ * can retry. Upstream failures are logged at error level and emit a structured
+ * `password_breach_check_unavailable` log event for metric scraping.
  *
- * Disable in dev/CI by setting `HIBP_BREACH_CHECK_ENABLED=false`.
+ * Disable in dev/CI by setting `HIBP_BREACH_CHECK_ENABLED=false` (returns
+ * NOT_BREACHED without contacting HIBP).
  */
 @Injectable()
 export class PasswordBreachCheckService {
@@ -38,23 +46,49 @@ export class PasswordBreachCheckService {
   }
 
   /**
-   * Throw `AUTH_PASSWORD_BREACHED` if the password is known to be in a public
-   * breach corpus. No-op when disabled or when HIBP is unreachable.
+   * Throw `AUTH_PASSWORD_BREACHED` (400) if known-breached.
+   * Throw `AUTH_PASSWORD_BREACH_CHECK_UNAVAILABLE` (503) if HIBP is unreachable.
+   * Resolve cleanly when not breached or when the check is disabled.
    */
   async assertNotBreached(password: string): Promise<void> {
-    if (!this.enabled) return;
-    const breached = await this.isBreached(password).catch((err) => {
-      // Fail-open: HIBP outage must not block registration.
-      this.logger.warn(
-        `HIBP breach check failed (fail-open): ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return false;
-    });
-    if (breached) {
+    const result = await this.checkBreach(password);
+
+    if (result === 'BREACHED') {
       throw new BadRequestException({
         errorCode: ErrorCode.AUTH_PASSWORD_BREACHED,
         message: ErrorMessages[ErrorCode.AUTH_PASSWORD_BREACHED],
       });
+    }
+
+    if (result === 'UNAVAILABLE') {
+      throw new ServiceUnavailableException(
+        errPayload(ErrorCode.AUTH_PASSWORD_BREACH_CHECK_UNAVAILABLE),
+      );
+    }
+  }
+
+  /**
+   * Three-state breach check. Use `assertNotBreached()` for the common
+   * throw-on-breach-or-unavailable path. Direct callers handle the tri-state
+   * themselves (e.g. background revalidation that should not 503 a request).
+   */
+  async checkBreach(password: string): Promise<BreachCheckResult> {
+    if (!this.enabled) return 'NOT_BREACHED';
+
+    try {
+      const breached = await this.isBreached(password);
+      return breached ? 'BREACHED' : 'NOT_BREACHED';
+    } catch (err) {
+      // Structured event for metric scraping. Keep `event` static so
+      // dashboards can count occurrences without parsing the message.
+      this.logger.error(
+        {
+          event: 'password_breach_check_unavailable',
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'HIBP breach check unavailable — failing closed',
+      );
+      return 'UNAVAILABLE';
     }
   }
 
@@ -78,7 +112,7 @@ export class PasswordBreachCheckService {
         signal: controller.signal,
       });
       if (!res.ok) {
-        throw new InternalServerException(errPayload(ErrorCode.INTERNAL_SERVER_ERROR));
+        throw new Error(`HIBP returned status ${res.status}`);
       }
       body = await res.text();
     } finally {

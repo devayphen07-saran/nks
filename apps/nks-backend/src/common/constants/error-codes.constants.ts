@@ -29,6 +29,8 @@ export const ErrorCode = {
   FORBIDDEN: 'FORBIDDEN',
   UNAUTHORIZED: 'UNAUTHORIZED',
   METHOD_NOT_ALLOWED: 'METHOD_NOT_ALLOWED',
+  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+  AUTH_PASSWORD_BREACH_CHECK_UNAVAILABLE: 'AUTH_PASSWORD_BREACH_CHECK_UNAVAILABLE',
 
   // ─── Auth ───────────────────────────────────────────────────────────────────
   AUTH_INVALID_CREDENTIALS: 'AUTH_INVALID_CREDENTIALS',
@@ -249,6 +251,8 @@ export const ErrorMessages: Record<string, string> = {
   [ErrorCode.TOO_MANY_REQUESTS]: 'Too many requests. Please try again later.',
   [ErrorCode.FORBIDDEN]: 'You do not have permission to access this resource.',
   [ErrorCode.UNAUTHORIZED]: 'You are not authorized to access this resource.',
+  [ErrorCode.SERVICE_UNAVAILABLE]: 'A required service is temporarily unavailable. Please try again shortly.',
+  [ErrorCode.AUTH_PASSWORD_BREACH_CHECK_UNAVAILABLE]: 'Password breach verification is temporarily unavailable. Please try again shortly.',
 
   // Auth
   [ErrorCode.AUTH_INVALID_CREDENTIALS]: 'Invalid credentials.',

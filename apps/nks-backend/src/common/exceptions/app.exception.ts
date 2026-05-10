@@ -103,6 +103,16 @@ export class TooManyRequestsException extends AppException {
   }
 }
 
+export class ServiceUnavailableException extends AppException {
+  constructor(input: string | Partial<AppExceptionPayload> = 'Service temporarily unavailable') {
+    const payload: AppExceptionPayload =
+      typeof input === 'string'
+        ? { errorCode: ErrorCode.SERVICE_UNAVAILABLE, message: input }
+        : { errorCode: ErrorCode.SERVICE_UNAVAILABLE, message: 'Service temporarily unavailable', ...input };
+    super(payload, HttpStatus.SERVICE_UNAVAILABLE);
+  }
+}
+
 export class InternalServerException extends AppException {
   constructor(input: string | Partial<AppExceptionPayload> = 'An unexpected error occurred') {
     const payload: AppExceptionPayload =
