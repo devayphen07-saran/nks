@@ -139,6 +139,29 @@ export abstract class BaseRepository {
     return rows[0] ?? null;
   }
 
+  /**
+   * Run the data query, then an explicit count(*) when needed, and return
+   * both together.
+   *
+   * Total computation:
+   *   - If `page === 1` AND `rows.length < pageSize`, the entire result set
+   *     fits in this page, so `total = rows.length` exactly. No count query.
+   *   - Otherwise, run the count factory and use its result.
+   *
+   * Why not infer `total = (page-1)*pageSize + rows.length` on a partial
+   * later page? Because that inference is only valid if no other connection
+   * inserted/deleted between the page-1 fetch and the page-2 fetch — i.e.
+   * never, under realistic concurrent load. The previous implementation
+   * made that assumption and reported wrong totals whenever rows were
+   * inserted or removed mid-pagination.
+   *
+   * Contract:
+   *   - Callers MUST apply a stable ORDER BY in `dataPromise` (see file
+   *     header). Without it, paginated results are non-deterministic.
+   *   - `page` is 1-indexed; `pageSize` is clamped at the DTO layer.
+   *   - The count factory should select count(*) over the same WHERE clause
+   *     as the data query, with no LIMIT / OFFSET / ORDER BY.
+   */
   protected async paginate<T>(
     dataPromise: Promise<T[]>,
     countFactory: () => Promise<{ total: number }[]>,
@@ -146,10 +169,11 @@ export abstract class BaseRepository {
     pageSize: number,
   ): Promise<{ rows: T[]; total: number }> {
     const rows = await dataPromise;
-    const offset = BaseRepository.toOffset(page, pageSize);
 
-    if (rows.length < pageSize) {
-      return { rows, total: offset + rows.length };
+    // Fast path: page 1 returned fewer rows than the page size, so the full
+    // result set fits in this page. Total is known exactly without a count.
+    if (page === 1 && rows.length < pageSize) {
+      return { rows, total: rows.length };
     }
 
     const countRows = await countFactory();
